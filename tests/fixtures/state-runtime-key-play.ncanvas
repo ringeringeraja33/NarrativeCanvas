@@ -1,0 +1,201 @@
+{
+  "version": 1,
+  "savedAt": "2026-06-11T00:00:00.000Z",
+  "project": {
+    "title": "State Runtime Key Play",
+    "notes": "Checks flat underscore variables across requirements, option effects, body templates, and custom field templates.",
+    "variables": {
+      "traveler": "Mara",
+      "inventory_coins": 3,
+      "guard_suspicion": 1,
+      "flag_watch_missing": true,
+      "flag_boarding_denied": false,
+      "ticket_phrase": "red && blue",
+      "flag_tokens": [
+        "boarding",
+        "watch"
+      ],
+      "nested_inventory": {
+        "coins": 3
+      },
+      "showcase_inventory_object": {
+        "coins": 3
+      }
+    },
+    "script": {
+      "playRules": {
+        "startNode": {
+          "enabled": true,
+          "value": "Start"
+        },
+        "visitTracking": {
+          "enabled": true,
+          "value": true
+        },
+        "debugMode": {
+          "enabled": true,
+          "value": true
+        }
+      },
+      "actions": [
+        {
+          "id": "gate_lock_keep_when_suspicious",
+          "trigger": "gate",
+          "target": "Bribe check",
+          "op": "lockChoice",
+          "category": "Variable",
+          "key": "opt_keep",
+          "value": "guard_suspicion >= 1"
+        }
+      ]
+    },
+    "nodeTypes": [
+      {
+        "type": "Entry",
+        "label": "Entry",
+        "badge": "E",
+        "color": "#cdd6f4",
+        "width": 160,
+        "custom": false,
+        "badgeCustom": false,
+        "kind": "node",
+        "fields": [],
+        "hidden": false,
+        "eventSheetHidden": false,
+        "system": true,
+        "legacy": false
+      },
+      {
+        "type": "Choice",
+        "label": "Choice",
+        "badge": "C",
+        "color": "#d19a66",
+        "width": 200,
+        "custom": false,
+        "badgeCustom": false,
+        "kind": "node",
+        "fields": [
+          {
+            "key": "readout",
+            "label": "Readout"
+          }
+        ],
+        "hidden": false,
+        "eventSheetHidden": false,
+        "system": false,
+        "legacy": false
+      },
+      {
+        "type": "Content",
+        "label": "Content",
+        "badge": "C",
+        "color": "#61afef",
+        "width": 200,
+        "custom": false,
+        "badgeCustom": false,
+        "kind": "node",
+        "fields": [
+          {
+            "key": "readout",
+            "label": "Readout"
+          }
+        ],
+        "hidden": false,
+        "eventSheetHidden": false,
+        "system": false,
+        "legacy": false
+      }
+    ],
+    "nodes": [
+      {
+        "id": "n0",
+        "type": "Entry",
+        "title": "Start",
+        "body": "Coins before: {inventory_coins}. Nested coins: {nested_inventory.coins}.",
+        "x": 80,
+        "y": 80
+      },
+      {
+        "id": "n1",
+        "type": "Choice",
+        "title": "Bribe check",
+        "body": "Coins before choice: {inventory_coins}. Suspicion: {guard_suspicion}.",
+        "choices": [
+          "Slip two coins to the Brakeman",
+          "Keep moving"
+        ],
+        "choiceOptions": [
+          {
+            "id": "opt_bribe",
+            "label": "Slip two coins to the Brakeman",
+            "requires": "(guard_suspicion >= 1 && (inventory_coins >= 2 || ticket_phrase === \"red && blue\")) && flag_watch_missing && flag_tokens.includes(\"boarding\") && nested_inventory.coins >= 3 && !flag_boarding_denied",
+            "effects": [
+              {
+                "trigger": "onChoose",
+                "op": "subtract",
+                "key": "inventory_coins",
+                "value": "2"
+              },
+              {
+                "trigger": "onChoose",
+                "op": "subtract",
+                "key": "guard_suspicion",
+                "value": "1"
+              }
+            ]
+          },
+          {
+            "id": "opt_keep",
+            "label": "Keep moving",
+            "requires": "",
+            "effects": []
+          }
+        ],
+        "customFields": {
+          "readout": "Custom field coins: {inventory_coins}"
+        },
+        "x": 330,
+        "y": 80,
+        "ports": {
+          "input": {
+            "side": "left",
+            "t": 0.3
+          },
+          "output": {
+            "side": "right",
+            "t": 0.7
+          }
+        }
+      },
+      {
+        "id": "n2",
+        "type": "Content",
+        "title": "Bribe accepted",
+        "body": "Coins after: {inventory_coins}. Suspicion after: {guard_suspicion}.",
+        "customFields": {
+          "readout": "Custom field after: {inventory_coins}"
+        },
+        "x": 600,
+        "y": 80
+      }
+    ],
+    "links": [
+      {
+        "id": "l0",
+        "from": "n0",
+        "to": "n1"
+      },
+      {
+        "id": "l1",
+        "from": "n1",
+        "to": "n2",
+        "label": "Slip two coins to the Brakeman",
+        "choiceIndex": 0,
+        "choiceOptionId": "opt_bribe"
+      }
+    ]
+  },
+  "ui": {
+    "activeFileId": "adventure"
+  }
+}

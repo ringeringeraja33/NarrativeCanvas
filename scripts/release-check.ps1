@@ -94,6 +94,105 @@ function Assert-BundledHtmlMatchesSource {
   }
 }
 
+function Replace-JsFunctionBlock([string]$Source, [string]$SignaturePattern, [string]$Replacement) {
+  $match = [regex]::Match($Source, $SignaturePattern)
+  if (-not $match.Success) {
+    throw "Could not find JavaScript function matching $SignaturePattern"
+  }
+  $start = $match.Index
+  $openIndex = $Source.IndexOf("{", $start)
+  if ($openIndex -lt 0) {
+    throw "Could not find JavaScript function body for $SignaturePattern"
+  }
+
+  $depth = 0
+  $inString = ""
+  $escaped = $false
+  $inLineComment = $false
+  $inBlockComment = $false
+
+  for ($index = $openIndex; $index -lt $Source.Length; $index++) {
+    $char = $Source[$index]
+    $next = if ($index + 1 -lt $Source.Length) { $Source[$index + 1] } else { [char]0 }
+
+    if ($inLineComment) {
+      if ($char -eq "`n") { $inLineComment = $false }
+      continue
+    }
+    if ($inBlockComment) {
+      if ($char -eq "*" -and $next -eq "/") {
+        $inBlockComment = $false
+        $index++
+      }
+      continue
+    }
+    if ($inString) {
+      if ($escaped) {
+        $escaped = $false
+      } elseif ($char -eq "\") {
+        $escaped = $true
+      } elseif ($char -eq $inString) {
+        $inString = ""
+      }
+      continue
+    }
+    if ($char -eq "/" -and $next -eq "/") {
+      $inLineComment = $true
+      $index++
+      continue
+    }
+    if ($char -eq "/" -and $next -eq "*") {
+      $inBlockComment = $true
+      $index++
+      continue
+    }
+    if ($char -eq '"' -or $char -eq "'" -or $char -eq '`') {
+      $inString = [string]$char
+      continue
+    }
+    if ($char -eq "{") { $depth++ }
+    if ($char -eq "}") {
+      $depth--
+      if ($depth -eq 0) {
+        return $Source.Substring(0, $start) + $Replacement + $Source.Substring($index + 1)
+      }
+    }
+  }
+
+  throw "Could not find JavaScript function end for $SignaturePattern"
+}
+
+function Get-PluginBundledAppSource([string]$SourceRaw) {
+  $source = [regex]::Replace($SourceRaw, '(?m)^const WEB_STORAGE_KEY = .*\r?\n', "")
+  $rewrites = @(
+    @{
+      Pattern = 'function loadWebState\(\) \{'
+      Replacement = "function loadWebState() {`n  return null;`n}"
+    },
+    @{
+      Pattern = 'function saveWebState\(savedState\) \{'
+      Replacement = "function saveWebState(_savedState) {`n  return;`n}"
+    },
+    @{
+      Pattern = 'function getWebProjectStorage\(\) \{'
+      Replacement = "function getWebProjectStorage() {`n  // Obsidian-plugin bundle: persistence runs through NarrativeCanvasHost, no browser storage.`n  return null;`n}"
+    },
+    @{
+      Pattern = 'async function clearBrowserStorageFromUi\(\) \{'
+      Replacement = "async function clearBrowserStorageFromUi() {`n  return;`n}"
+    },
+    @{
+      Pattern = 'async function clearBrowserStorageConfirmed\(\) \{'
+      Replacement = "async function clearBrowserStorageConfirmed() {`n  return;`n}"
+    }
+  )
+
+  foreach ($rewrite in $rewrites) {
+    $source = Replace-JsFunctionBlock $source $rewrite.Pattern $rewrite.Replacement
+  }
+  return $source.TrimEnd()
+}
+
 function Assert-BundledAppMatchesSource {
   try {
     $mainJs = Read-Utf8Strict (Resolve-ProjectPath "main.js")
@@ -106,7 +205,8 @@ function Assert-BundledAppMatchesSource {
       if ($_.StartsWith("  ")) { $_.Substring(2) } else { $_ }
     }
     $bundled = [string]::Join("`n", $body).TrimEnd()
-    $source = (Read-Utf8Strict (Resolve-ProjectPath "app.js")).Replace("`r`n", "`n").TrimEnd()
+    $sourceRaw = (Read-Utf8Strict (Resolve-ProjectPath "app.js")).Replace("`r`n", "`n").TrimEnd()
+    $source = Get-PluginBundledAppSource $sourceRaw
     if ($bundled -eq $source) {
       Write-CheckOk "bundled app.js matches source app.js"
     } else {

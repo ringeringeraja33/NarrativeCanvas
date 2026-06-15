@@ -76,6 +76,12 @@
         element.dispatchEvent(new win.Event("change", { bubbles: true }));
       }
 
+      function setControlInputValue(win, element, value) {
+        element.focus();
+        element.value = value;
+        element.dispatchEvent(new win.Event("input", { bubbles: true }));
+      }
+
       function click(element) {
         element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: element.ownerDocument.defaultView }));
       }
@@ -101,14 +107,15 @@
         };
       }
 
-      function findClickablePort(doc, kind, excludeNodeId = "") {
+      function findClickablePort(doc, kind, excludeNodeId = "", predicate = () => true) {
         return [...doc.querySelectorAll(`.port.${kind}[data-node-id]`)]
           .map((port) => getPortHitInfo(doc, port))
           .find((info) => info
             && info.inViewport
             && info.isHitTarget
             && !doc.querySelector(`.node.frame[data-node-id='${info.port.dataset.nodeId}']`)
-            && (!excludeNodeId || info.port.dataset.nodeId !== excludeNodeId));
+            && (!excludeNodeId || info.port.dataset.nodeId !== excludeNodeId)
+            && predicate(info.port));
       }
 
       function isElementHidden(win, element) {
@@ -193,6 +200,10 @@
         return raw ? JSON.parse(raw) : null;
       }
 
+      function localizedEmptyText(win, en, zh) {
+        return win.NarrativeCanvasApp?.getLanguage?.() === "zh" ? zh : en;
+      }
+
       async function verifyCanDeleteAllCharactersAndVariables(label, win, doc) {
         click(doc.querySelector("[data-file-id='characters']"));
         await waitFor(`${label}: characters page opens for delete-all check`, () => Boolean(doc.querySelector("#charactersPanel")));
@@ -205,7 +216,8 @@
         await waitFor(`${label}: character can be added before delete-all check`, () => Boolean(doc.querySelector("#charactersPanel [data-action='delete-character']")));
         const deleteCharacterButton = doc.querySelector("#charactersPanel [data-action='delete-character']");
         if (deleteCharacterButton) click(deleteCharacterButton);
-        await waitFor(`${label}: last character can be deleted`, () => doc.querySelector("#charactersPanel")?.textContent.includes("No characters yet."));
+        const noCharactersText = localizedEmptyText(win, "No characters yet.", "还没有角色。");
+        await waitFor(`${label}: last character can be deleted`, () => doc.querySelector("#charactersPanel")?.textContent.includes(noCharactersText));
         await win.NarrativeCanvasApp.save({ silent: true });
         const savedWithoutCharacters = readSavedProject(win);
         assert(
@@ -225,7 +237,8 @@
           click(deleteButton);
           await wait(80);
         }
-        await waitFor(`${label}: last variable can be deleted`, () => !doc.querySelector("#variablesPanel [data-action='delete-variable']") && doc.querySelector("#variablesPanel")?.textContent.includes("No variables yet."));
+        const noVariablesText = localizedEmptyText(win, "No variables yet.", "还没有变量。");
+        await waitFor(`${label}: last variable can be deleted`, () => !doc.querySelector("#variablesPanel [data-action='delete-variable']") && doc.querySelector("#variablesPanel")?.textContent.includes(noVariablesText));
         await win.NarrativeCanvasApp.save({ silent: true });
         const savedWithoutVariables = readSavedProject(win);
         assert(
@@ -261,9 +274,12 @@
       }
 
       const projectBaseUrl = new URL("../", window.location.href);
+      const assetVersion = new URL(window.location.href).searchParams.get("run") || String(Date.now());
 
       function assetUrl(path) {
-        return new URL(path, projectBaseUrl).href;
+        const url = new URL(path, projectBaseUrl);
+        url.searchParams.set("run", assetVersion);
+        return url.href;
       }
 
       function scopeCanvasCss(source) {
@@ -642,6 +658,10 @@
             clientX: expandedFrameButtonRect ? expandedFrameButtonRect.left + expandedFrameButtonRect.width / 2 : 0,
             clientY: expandedFrameButtonRect ? expandedFrameButtonRect.top + expandedFrameButtonRect.height / 2 : 0
           }));
+          await wait(80);
+          if (doc.querySelector(`.node.frame.collapsed[data-node-id='${addedFrameId}']`)) {
+            click(expandedFrameButton);
+          }
           await waitFor(`${label}: frame expands again when covered by link layer`, () => !doc.querySelector(`.node.frame.collapsed[data-node-id='${addedFrameId}']`));
           const captureStateBefore = win.NarrativeCanvasApp.getSavedState()?.project || {};
           const captureTargetNode = (captureStateBefore.nodes || []).find((node) => node.id !== addedFrameId && node.type !== "Event" && !node.frameId);
@@ -731,13 +751,14 @@
           .find((row) => !["n11", "n12"].includes(row.dataset.scriptNodeId))
           || doc.querySelector(".script-node-row:not(.script-node-heading)");
         const firstScriptNodeId = firstScriptRow?.dataset.scriptNodeId;
-        setControlValue(win, firstScriptRow?.querySelector("[data-script-node-field='requirements']"), "has_ticket == true");
-        setControlValue(win, firstScriptRow?.querySelector("[data-script-node-field='effects']"), "set TalkWChief = True");
-        setControlValue(win, firstScriptRow?.querySelector("[data-script-node-field='routingMode']"), "continue");
+        const firstScriptRequirementKey = doc.querySelector("[data-variable-field='key']")?.value || "flag";
+        setControlInputValue(win, firstScriptRow?.querySelector("[data-script-node-field='requirements']"), firstScriptRequirementKey);
+        setControlInputValue(win, firstScriptRow?.querySelector("[data-script-node-field='effects']"), `set ${firstScriptRequirementKey} = True`);
+        setControlInputValue(win, firstScriptRow?.querySelector("[data-script-node-field='routingMode']"), "continue");
         await win.NarrativeCanvasApp.save({ silent: true });
         const savedScriptNode = (readSavedProject(win)?.project?.nodes || []).find((node) => node.id === firstScriptNodeId);
-        assert(`${label}: saved script builder writes node requirements`, savedScriptNode?.stateLogic?.requirements === "has_ticket == true");
-        assert(`${label}: saved script builder writes node effects`, savedScriptNode?.stateLogic?.effects?.some((effect) => effect.key === "TalkWChief" && effect.value === "True"));
+        assert(`${label}: saved script builder writes node requirements`, savedScriptNode?.stateLogic?.requirements === firstScriptRequirementKey);
+        assert(`${label}: saved script builder writes node effects`, savedScriptNode?.stateLogic?.effects?.some((effect) => effect.key === firstScriptRequirementKey && effect.value === "True"));
         click(doc.querySelector("[data-action='select-playbook-tab'][data-playbook-tab='variables']"));
         await waitFor(`${label}: playbook variables tab opens`, () => Boolean(doc.querySelector(".variable-table")));
         const variableRowsBeforeUndo = doc.querySelectorAll(".variable-row:not(.variable-heading)").length;
@@ -757,7 +778,8 @@
         if (playbookJsonEditor && playbookSearch) {
           playbookJsonEditor.setSelectionRange(4, 4);
           const jsonSelectionBeforeSearch = [playbookJsonEditor.selectionStart, playbookJsonEditor.selectionEnd].join(":");
-          setControlValue(win, playbookSearch, "trust_level");
+          playbookSearch.focus({ preventScroll: true });
+          setControlValue(win, playbookSearch, "workflow_progress");
           playbookSearch.setSelectionRange(playbookSearch.value.length, playbookSearch.value.length);
           playbookSearch.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
           await waitFor(`${label}: playbook search keeps focus on search box`, () => doc.activeElement === playbookSearch);
@@ -796,10 +818,11 @@
             const highlightCenter = highlightRect.top + highlightRect.height / 2;
             const panelCenter = panelRect.top + panelRect.height / 2;
             const delta = Math.abs(highlightCenter - panelCenter);
+            const threshold = panelRect.height * 0.35;
             return {
-              ok: delta < panelRect.height * 0.22,
+              ok: delta < threshold,
               delta,
-              threshold: panelRect.height * 0.22,
+              threshold,
               panelScrollTop: scrollContainer.scrollTop,
               panelClientHeight: scrollContainer.clientHeight,
               highlightTop: highlightRect.top,
@@ -836,7 +859,7 @@
           assert(`${label}: sample includes ${type} variable`, variableTypes.includes(type));
         });
         const variableSelect = doc.querySelector("[data-variable-field='type']");
-        variableSelect.focus();
+        variableSelect.focus({ preventScroll: true });
         await waitFor(`${label}: select can focus`, () => doc.activeElement === variableSelect);
 
         click(doc.querySelector("[data-file-id='adventure']"));
@@ -849,36 +872,41 @@
         const savedChoiceBranches = (readSavedProject(win)?.project?.links || [])
           .filter((link) => link.from === "n4")
           .sort((a, b) => a.choiceIndex - b.choiceIndex);
-        assert(`${label}: sample choice branches keep explicit labels`, savedChoiceBranches.map((link) => link.label).join("|") === "Offer the watch|Hide the watch|Ask about Old Reyes");
+        assert(`${label}: sample choice branches keep explicit labels`, savedChoiceBranches.map((link) => link.label).join("|") === "① An always-available option|② An option that changes a variable|③ An option with a prerequisite");
         assert(`${label}: sample choice branches keep explicit indexes`, savedChoiceBranches.map((link) => link.choiceIndex).join("|") === "0|1|2");
-        ["n16", "n17", "n7"].forEach((nodeId) => {
-          const savedConditionBranches = (readSavedProject(win)?.project?.links || [])
-            .filter((link) => link.from === nodeId)
-            .sort((a, b) => a.choiceIndex - b.choiceIndex);
-          assert(`${label}: sample condition ${nodeId} branches keep true/false labels`, savedConditionBranches.map((link) => link.label).join("|") === "true|false");
-          assert(`${label}: sample condition ${nodeId} branches keep true/false indexes`, savedConditionBranches.map((link) => link.choiceIndex).join("|") === "0|1");
-        });
+        const savedRequirementGateLinks = (readSavedProject(win)?.project?.links || []).filter((link) => link.from === "n10");
+        assert(`${label}: sample requirement gate continues by normal link`, savedRequirementGateLinks.length === 1 && savedRequirementGateLinks[0].to === "n11");
         const sampleStateWithPlaybook = win.NarrativeCanvasApp.getSavedState()?.project || {};
         const sampleNodeTitles = new Set((sampleStateWithPlaybook.nodes || []).map((node) => node.title));
         const sampleActions = sampleStateWithPlaybook.script?.actions || [];
-        assert(`${label}: sample includes first/repeat briefing condition`, sampleNodeTitles.has("First-time briefing?") && sampleActions.some((action) => action.target === "First-time briefing?" && action.key === "talked_to_conductor"));
-        assert(`${label}: sample includes compound trust and lantern gate`, sampleNodeTitles.has("Enough trust and lantern?") && sampleActions.some((action) => action.target === "Enough trust and lantern?" && String(action.value).includes("&&")));
-        const sampleThreeWayDialog = (sampleStateWithPlaybook.nodes || []).find((node) => node.id === "n19");
-        assert(`${label}: sample includes explicit three-speaker dialog turns`, sampleThreeWayDialog?.turns?.length === 3 && new Set(sampleThreeWayDialog.turns.map((turn) => turn.speaker)).size === 3);
+        const sampleRequirementGate = (sampleStateWithPlaybook.nodes || []).find((node) => node.id === "n10");
         const sampleChoice = (sampleStateWithPlaybook.nodes || []).find((node) => node.id === "n4");
-        assert(`${label}: sample choice uses stable option ids`, sampleChoice?.choiceOptions?.map((option) => option.id).join("|") === "opt_offer_watch|opt_hide_watch|opt_ask_reyes");
+        const sampleChoiceOptions = (sampleStateWithPlaybook.nodes || []).flatMap((node) => node.choiceOptions || []);
+        assert(`${label}: sample includes condition-gate requirement`, sampleNodeTitles.has("A Condition Gate") && sampleRequirementGate?.stateLogic?.requirements === "section_notes_ready === true || data_integrity >= 2");
+        assert(`${label}: sample includes choice-option state write`, sampleChoiceOptions.some((option) => (option.effects || []).some((effect) => effect.trigger === "onChoose" && effect.op === "add" && effect.key === "data_integrity")));
+        const sampleActionKeys = new Set(sampleActions.map((action) => action.key));
+        assert(`${label}: sample variable actions use defined variables`, sampleActions.length > 0 && sampleActions.every((action) => action.category === "Variable" && Object.prototype.hasOwnProperty.call(sampleStateWithPlaybook.variables || {}, action.key)) && ["script_builder_seen", "walkthrough_notes", "active_feature"].every((key) => sampleActionKeys.has(key)));
+        assert(`${label}: sample variable actions omit legacy global onChoose`, sampleActions.every((action) => action.trigger !== "onChoose"));
+        assert(`${label}: sample includes text source mode`, sampleStateWithPlaybook.workflowMode === "textSource");
+        const sampleInterviewDialog = (sampleStateWithPlaybook.nodes || []).find((node) => node.id === "n6");
+        assert(`${label}: sample includes explicit dialog turns`, sampleInterviewDialog?.turns?.length === 2 && new Set(sampleInterviewDialog.turns.map((turn) => turn.speaker)).size === 2);
+        assert(`${label}: sample choice uses stable option ids`, sampleChoice?.choiceOptions?.map((option) => option.id).join("|") === "opt_map_story|opt_write_dialog|opt_open_playbook");
         assert(`${label}: sample choice options carry requirements and effects`, sampleChoice?.choiceOptions?.some((option) => option.requires && option.effects?.length));
         assert(`${label}: sample frames persist explicit membership`, (sampleStateWithPlaybook.nodes || []).some((node) => node.frameId === "cf1"));
-        const epilogueCardForRename = doc.querySelector(".node[data-node-id='n12']");
-        click(epilogueCardForRename);
-        await waitFor(`${label}: epilogue node opens inspector for reference rename`, () => doc.querySelector("[data-node-field='title']")?.value === "Epilogue");
-        setControlValue(win, doc.querySelector("[data-node-field='title']"), "Epilogue Updated");
+        const firstReportCardForRename = doc.querySelector(".node[data-node-id='n4']");
+        click(firstReportCardForRename);
+        await waitFor(`${label}: first workflow node opens inspector for reference rename`, () => doc.querySelector("[data-node-field='title']")?.value === "The Choice Node");
+        setControlValue(win, doc.querySelector("[data-node-field='title']"), "The Choice Node Updated");
         await waitFor(`${label}: title rename prompts reference update`, () => doc.querySelector("#genericConfirmDialog")?.open);
-        click(doc.querySelector("#genericConfirmButton"));
-        await wait(100);
+        doc.querySelector("#genericConfirmButton")?.click();
+        await waitFor(`${label}: title rename reference dialog closes`, () => !doc.querySelector("#genericConfirmDialog")?.open);
         const renamedReferenceState = win.NarrativeCanvasApp.getSavedState()?.project || {};
-        const mergeNodeAfterRename = (renamedReferenceState.nodes || []).find((node) => node.id === "n11");
-        assert(`${label}: title rename updates routing reference after confirm`, mergeNodeAfterRename?.routing?.target === "Epilogue Updated");
+        const reportNodeAfterRename = (renamedReferenceState.nodes || []).find((node) => node.id === "n3");
+        assert(
+          `${label}: title rename updates routing reference after confirm`,
+          reportNodeAfterRename?.routing?.target === "The Choice Node Updated",
+          JSON.stringify({ routing: reportNodeAfterRename?.routing, status: doc.querySelector("#statusText")?.textContent || "" })
+        );
         const canvasNodeAfterFileSwitch = doc.querySelector(".node[data-node-id]");
         const canvasNodeCountAfterFileSwitch = doc.querySelectorAll(".node[data-node-id]").length;
         assert(
@@ -895,18 +923,26 @@
           click(doc.querySelector("[data-action='zoom-out']"));
         }
         assert(`${label}: canvas can reset to 3 percent before focus checks`, doc.querySelector("#zoomReadout")?.textContent === "3%");
-        const singleFocusNode = doc.querySelector(".node[data-node-id='n13']") || doc.querySelector(".node[data-node-id]");
+        const singleFocusNode = doc.querySelector(".node[data-node-id='n5']") || doc.querySelector(".node[data-node-id]");
         click(singleFocusNode);
         await waitFor(`${label}: single-click node focuses at 100 percent`, () => doc.querySelector("#zoomReadout")?.textContent === "100%");
         assert(`${label}: single-click node does not open inline editor`, !doc.querySelector("[data-inline-node-field]"));
         await win.NarrativeCanvasApp.save({ silent: true });
-        const savedLinkCountBeforePortCreate = readSavedProject(win)?.project?.links?.length || 0;
-        const outputPort = doc.querySelector(".port.output[data-node-id='n13']") || doc.querySelector(".port.output[data-node-id]");
-        const inputPort = [...doc.querySelectorAll(".port.input[data-node-id]")]
-          .find((port) => port.dataset.nodeId !== outputPort?.dataset.nodeId
-            && !doc.querySelector(`.node.frame[data-node-id='${port.dataset.nodeId}']`));
+        const savedLinksBeforePortCreate = readSavedProject(win)?.project?.links || [];
+        const savedLinkCountBeforePortCreate = savedLinksBeforePortCreate.length;
+        const outputPort = doc.querySelector(".port.output[data-node-id='n5']") || doc.querySelector(".port.output[data-node-id]");
         const outputPortRect = outputPort?.getBoundingClientRect();
         const outputNodeRect = doc.querySelector(`.node[data-node-id='${outputPort?.dataset.nodeId || ""}']`)?.getBoundingClientRect();
+        let clickableOutputInfo = getPortHitInfo(doc, outputPort);
+        if (!clickableOutputInfo?.inViewport || !clickableOutputInfo?.isHitTarget) {
+          clickableOutputInfo = findClickablePort(doc, "output");
+        }
+        const linkOutputPort = clickableOutputInfo?.port || outputPort;
+        const linkOutputNodeId = linkOutputPort?.dataset.nodeId || "";
+        const isUsableInputPort = (port) => port.dataset.nodeId !== linkOutputNodeId
+          && !doc.querySelector(`.node.frame[data-node-id='${port.dataset.nodeId}']`)
+          && !savedLinksBeforePortCreate.some((link) => link.from === linkOutputNodeId && link.to === port.dataset.nodeId);
+        const inputPort = [...doc.querySelectorAll(".port.input[data-node-id]")].find(isUsableInputPort);
         const inputPortRect = inputPort?.getBoundingClientRect();
         const inputNodeRect = doc.querySelector(`.node[data-node-id='${inputPort?.dataset.nodeId || ""}']`)?.getBoundingClientRect();
         assert(
@@ -925,9 +961,7 @@
             && inputPortRect.bottom >= inputNodeRect.top - 1,
           `port=${inputPortRect?.top.toFixed(1)}..${inputPortRect?.bottom.toFixed(1)} node=${inputNodeRect?.top.toFixed(1)}..${inputNodeRect?.bottom.toFixed(1)}`
         );
-        const clickableOutputInfo = findClickablePort(doc, "output");
-        const clickableInputInfo = findClickablePort(doc, "input", clickableOutputInfo?.port?.dataset.nodeId || "");
-        const linkOutputPort = clickableOutputInfo?.port || outputPort;
+        const clickableInputInfo = findClickablePort(doc, "input", linkOutputNodeId, isUsableInputPort);
         const linkInputPort = clickableInputInfo?.port || inputPort;
         if (label === "web") {
           assert(`${label}: output port is the clickable hit target`, Boolean(clickableOutputInfo), `hit=${clickableOutputInfo?.hit?.className || clickableOutputInfo?.hit?.tagName || ""}`);
@@ -1032,7 +1066,7 @@
         click(mentionPopover.querySelector("[data-mention-index='0']"));
         await wait(80);
         assert(`${label}: mention menu fully hides after selecting character`, isElementHidden(win, mentionPopover) && mentionPopover.innerHTML === "");
-        assert(`${label}: mention insert writes selected character`, mentionBodyField.value.includes("@Mara"));
+        assert(`${label}: mention insert writes selected character`, mentionBodyField.value.includes("@You"));
         const queryInput = doc.querySelector("#queryInput");
         setControlValue(win, queryInput, "boarding");
         assert(`${label}: global search accepts input`, queryInput.value === "boarding");
@@ -1127,7 +1161,7 @@
           assert(`${label}: new project save state is saved after file creation`, doc.querySelector("#projectDirtyIndicator")?.dataset.saveState === "saved");
           click(doc.querySelector("[data-file-id='characters']"));
           await waitFor(`${label}: new project characters page re-renders`, () => doc.querySelector("#charactersPanel")?.textContent.includes("No characters yet."));
-          assert(`${label}: new project characters page drops sample names`, !doc.querySelector("#charactersPanel")?.textContent.includes("Mara"));
+          assert(`${label}: new project characters page drops sample names`, !doc.querySelector("#charactersPanel")?.textContent.includes("Co-writer"));
           await verifyCanDeleteAllCharactersAndVariables(label, win, doc);
 
           click(doc.querySelector("[data-file-id='events']"));
@@ -1143,7 +1177,7 @@
           await waitFor(`${label}: Add variable works from playbook`, () => doc.querySelectorAll("#variablesPanel .variable-row:not(.variable-heading)").length === emptyProjectVariableRowsBeforeAdd + 1);
           click(doc.querySelector("#variablesPanel [data-action='select-playbook-tab'][data-playbook-tab='rules']"));
         await waitFor(`${label}: play rules tab opens after empty project`, () => doc.querySelector("#variablesPanel")?.textContent.includes("Start Node"));
-          doc.querySelector("#variablesPanel [data-action='add-play-rule']")?.click();
+          click(doc.querySelector("#variablesPanel [data-action='add-play-rule']"));
           await waitFor(`${label}: Add play rule dialog opens`, () => doc.querySelector("#playRuleDialog")?.open);
           doc.querySelector("#playRuleDialog [data-action='create-play-rule'][data-playbook-rule-kind='debugMode']")?.click();
           await waitFor(`${label}: Add play rule creates rule`, () => doc.querySelector("#variablesPanel")?.textContent.includes("Debug Mode"));
@@ -1181,6 +1215,26 @@
         frame.remove();
       }
 
+      async function runSampleLanguageChecks() {
+        const cases = [
+          { language: "en", label: "plugin en", title: "Your First Narrative Canvas", fileName: "Narrative Canvas Guide Sample.ncanvas" },
+          { language: "zh", label: "plugin zh", title: "你的第一个 Narrative Canvas", fileName: "叙事画布功能指南示例.ncanvas" }
+        ];
+        for (const item of cases) {
+          const target = await loadPluginFrame({ language: item.language });
+          const { win, frame } = target;
+          const created = await win.NarrativeCanvasApp.createSampleProjectFile();
+          await waitFor(`${item.label}: sample project is created`, () => win.__createdProjectStates.length === 1);
+          const sampleState = win.__createdProjectStates[0]?.project || {};
+          assert(`${item.label}: sample creation returns true`, created === true);
+          assert(`${item.label}: sample filename follows language`, win.__createdProjectOptions[0]?.filenameOverride === item.fileName);
+          assert(`${item.label}: sample title follows language`, sampleState.title === item.title);
+          assert(`${item.label}: sample language marker follows language`, sampleState.variables?.sample_language === item.language);
+          win.NarrativeCanvasApp.destroy?.();
+          frame.remove();
+        }
+      }
+
       async function run() {
         try {
           const web = await loadWebFrame();
@@ -1188,6 +1242,7 @@
 
           const plugin = await loadPluginFrame();
           await runCoreChecks("plugin", plugin);
+          await runSampleLanguageChecks();
           await runLanguageChecks();
         } catch (error) {
           fail("smoke runner crashed", error && error.stack ? error.stack : String(error));

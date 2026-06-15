@@ -1,0 +1,23 @@
+{
+  "format": "narrative-canvas-route-cases",
+  "version": 1,
+  "cases": [
+    {
+      "name": "bribe-branch",
+      "choiceLabels": ["Slip two coins to the Brakeman"],
+      "minVisits": 3,
+      "expectNode": ["Bribe accepted"],
+      "expectText": ["Coins after: 1. Suspicion after: 0."],
+      "expectState": [
+        {
+          "key": "inventory_coins",
+          "value": 1
+        },
+        {
+          "key": "guard_suspicion",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

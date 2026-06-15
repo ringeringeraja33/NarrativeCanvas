@@ -113,7 +113,7 @@
             y: 120 + row * spacingY,
             ...(type === "Choice" ? { choices: ["Continue", "Turn back"] } : {}),
             ...(type === "Set" ? { variable: "flag", value: "true" } : {}),
-            ...(type === "Condition" ? { condition: "flag == true" } : {})
+            ...(type === "Condition" ? { condition: "flag === true" } : {})
           });
           // Bound the longest directed path to ~O(sqrt(n)) so a branching graph is
           // exercised without a single deep chain (which would overflow the recursive

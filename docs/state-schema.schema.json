@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/narrative-canvas/state-schema.schema.json",
+  "title": "Narrative Canvas State Schema",
+  "type": "object",
+  "required": ["format", "version", "exportedAt", "source", "summary", "variables", "invalidExpressions", "exportBlocks"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "narrative-canvas-state-schema"
+    },
+    "version": {
+      "const": 1
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": ["title", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "variableCount",
+        "issueCount",
+        "readCount",
+        "writeCount",
+        "interpolationCount",
+        "exportBlockCount",
+        "invalidExpressionCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "variableCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issueCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "readCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "writeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "interpolationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exportBlockCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalidExpressionCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/variable"
+      }
+    },
+    "invalidExpressions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reference"
+      }
+    },
+    "exportBlocks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/exportBlock"
+      }
+    }
+  },
+  "$defs": {
+    "variable": {
+      "type": "object",
+      "required": ["key", "exportKey", "type", "hasInitial", "statuses", "primaryStatus", "readBy", "writtenBy", "interpolatedBy"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exportKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": ["string", "number", "boolean", "json", "implicit"]
+        },
+        "hasInitial": {
+          "type": "boolean"
+        },
+        "initialValue": true,
+        "statuses": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/status"
+          }
+        },
+        "primaryStatus": {
+          "$ref": "#/$defs/status"
+        },
+        "readBy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        },
+        "writtenBy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        },
+        "interpolatedBy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": ["label"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "jsonToken": {
+          "type": "string"
+        }
+      }
+    },
+    "exportBlock": {
+      "type": "object",
+      "required": ["code", "message", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "jsonToken": {
+          "type": "string"
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "invalid-expression",
+        "template-mismatch",
+        "unknown-key",
+        "object-unreadable",
+        "export-blocked",
+        "read-only",
+        "written-only",
+        "ok"
+      ]
+    }
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/narrative-canvas/story-layout.schema.json",
+  "title": "Narrative Canvas Story Layout",
+  "type": "object",
+  "required": ["format", "version", "exportedAt", "source", "nodes", "links", "view"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "narrative-canvas-story-layout"
+    },
+    "version": {
+      "const": 1
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": ["title", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/link"
+      }
+    },
+    "view": {
+      "$ref": "#/$defs/view"
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "title", "type", "typeLabel", "frame", "x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "typeLabel": {
+          "type": "string"
+        },
+        "frame": {
+          "type": "boolean"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        },
+        "frameId": {
+          "type": "string"
+        },
+        "portPositions": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "collapsed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": ["id", "from", "to", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "choiceIndex": {
+          "type": "integer"
+        },
+        "choiceOptionId": {
+          "type": "string"
+        },
+        "requirements": {
+          "type": "string"
+        }
+      }
+    },
+    "view": {
+      "type": "object",
+      "required": ["x", "y", "scale"],
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "scale": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

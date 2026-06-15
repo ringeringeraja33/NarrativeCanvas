@@ -20,28 +20,65 @@ const NODE_TYPE_ICON_MAX_UNITS = 3;
 const SAVED_STATE_VERSION = 1;
 const WEB_STORAGE_KEY = "narrative-canvas-state-v1";
 const WEB_LANGUAGE_STORAGE_KEY = "narrative-canvas-language-v1";
+const FRAME_CONTAINMENT_INDEX_CELL_SIZE = 1024;
 const PLAYBOOK_FILE_NAME = "Playbook.json";
+const WORKFLOW_MODE_CANVAS = "canvas";
+const WORKFLOW_MODE_TEXT_SOURCE = "textSource";
+const WORKFLOW_MODES = new Set([WORKFLOW_MODE_CANVAS, WORKFLOW_MODE_TEXT_SOURCE]);
+const TWEE_SUGARCUBE_FORMAT_VERSION = "2.30.0";
 const PLAYBOOK_ACTION_OPERATIONS = [
   { value: "set", label: "Set" },
   { value: "add", label: "Add" },
   { value: "subtract", label: "Subtract" },
   { value: "append", label: "Append" },
   { value: "remove", label: "Remove" },
-  { value: "toggle", label: "Toggle" },
-  { value: "clear", label: "Clear" },
-  { value: "if", label: "If" },
-  { value: "goTo", label: "Go to" },
-  { value: "show", label: "Show" },
-  { value: "hide", label: "Hide" },
-  { value: "lockChoice", label: "Lock choice" },
-  { value: "unlockChoice", label: "Unlock choice" }
+  { value: "toggle", label: "Invert" },
+  { value: "clear", label: "Clear" }
 ];
+const LEGACY_PLAYBOOK_ACTION_OPERATION_VALUES = new Set(["if", "goTo", "show", "hide", "lockChoice", "unlockChoice"]);
+const PLAYBOOK_ACTION_OPERATION_VALUES = new Set([...PLAYBOOK_ACTION_OPERATIONS.map((option) => option.value), ...LEGACY_PLAYBOOK_ACTION_OPERATION_VALUES]);
 const PLAYBOOK_ACTION_TRIGGERS = [
   { value: "onVisit", label: "On visit" },
   { value: "onChoose", label: "On choose" },
-  { value: "gate", label: "Gate" },
   { value: "manual", label: "Manual" }
 ];
+const PLAYBOOK_VARIABLE_ACTION_TRIGGERS = PLAYBOOK_ACTION_TRIGGERS.filter((option) => option.value !== "onChoose");
+const PLAYBOOK_ACTION_TRIGGER_VALUES = new Set([...PLAYBOOK_ACTION_TRIGGERS.map((option) => option.value), "gate"]);
+const CONDITION_OPERATORS = [
+  { value: "===", label: "Equals" },
+  { value: "!==", label: "Not equals" },
+  { value: "truthy", label: "Is true" },
+  { value: "falsy", label: "Is false" },
+  { value: ">=", label: "At least" },
+  { value: "<=", label: "At most" },
+  { value: ">", label: "Greater than" },
+  { value: "<", label: "Less than" },
+  { value: "contains", label: "Contains" }
+];
+const CONDITION_OPERATOR_VALUES = new Set(CONDITION_OPERATORS.map((option) => option.value));
+// Operators that make sense for each variable type. Comparisons (>=, <=, >, <) only
+// apply to numbers; contains only applies to strings and arrays; equality covers scalars;
+// truthy/falsy is a presence check valid for every type. Unknown/custom keys allow all.
+const CONDITION_OPERATORS_BY_TYPE = {
+  boolean: ["===", "!==", "truthy", "falsy"],
+  number: ["===", "!==", ">=", "<=", ">", "<", "truthy", "falsy"],
+  string: ["===", "!==", "contains", "truthy", "falsy"],
+  array: ["contains", "truthy", "falsy"],
+  object: ["truthy", "falsy"]
+};
+const CONDITION_CONNECTORS = [
+  { value: "&&", label: "And" },
+  { value: "||", label: "Or" }
+];
+const CONDITION_CONNECTOR_VALUES = new Set(CONDITION_CONNECTORS.map((option) => option.value));
+const CONDITION_GROUP_MODES = [
+  { value: "all", label: "All conditions" },
+  { value: "any", label: "Any condition" }
+];
+const CONDITION_GROUP_MODE_VALUES = new Set(CONDITION_GROUP_MODES.map((option) => option.value));
+const JS_CONDITION_LITERAL_WORDS = new Set(["true", "false", "null", "undefined"]);
+const JS_CONDITION_LEGACY_FUNCTIONS = new Set(["has", "contains"]);
+const JS_CONDITION_METHODS = new Set(["includes"]);
 const PLAYBOOK_STATE_CATEGORIES = [
   "Quest",
   "Quest Entry",
@@ -55,6 +92,16 @@ const PLAYBOOK_STATE_CATEGORIES = [
   "Custom",
   "Manual Enter"
 ];
+const STATE_REPORT_STATUS_LABELS = {
+  ok: "OK",
+  "written-only": "Written-only",
+  "read-only": "Read-only",
+  "unknown-key": "Unknown key",
+  "object-unreadable": "Object unreadable",
+  "template-mismatch": "Template mismatch",
+  "export-blocked": "Export risk",
+  "invalid-expression": "Invalid expression"
+};
 const PLAYBOOK_CHOICE_DISPLAY_OPTIONS = [
   { value: "hideUnavailable", label: "Hide unavailable choices" },
   { value: "disableUnavailable", label: "Show unavailable choices disabled" },
@@ -70,7 +117,10 @@ const CHOICE_REVEAL_MODES = [
   { value: "disabled", label: "Show unavailable choices disabled" }
 ];
 const CONDITION_BRANCH_LABELS = Object.freeze(["true", "false"]);
-const SAMPLE_PROJECT_FILENAME = "Sample.ncanvas";
+const SAMPLE_PROJECT_FILENAMES = {
+  en: "Narrative Canvas Guide Sample.ncanvas",
+  zh: "叙事画布功能指南示例.ncanvas"
+};
 const FALLBACK_AUTO_SAVE_INTERVAL_MS = 2000;
 const MIN_AUTO_SAVE_INTERVAL_MS = 1000;
 const MAX_AUTO_SAVE_INTERVAL_MS = 60 * 60 * 1000;
@@ -147,14 +197,142 @@ const nodeTypes = {
   Event: { badge: "E", color: DEFAULT_EVENT_FRAME_COLOR, width: 420 }
 };
 
+const SPECIAL_EDITOR_NODE_TYPES = ["Choice", "Dialog"];
+
+const defaultAdvancedNodeTypes = [
+  {
+    type: "StorySequence",
+    label: "Story Sequence",
+    badge: "SS",
+    color: DEFAULT_EVENT_FRAME_COLOR,
+    width: 540,
+    kind: "frame",
+    badgeCustom: true,
+    fields: [
+      { key: "location", label: "Location" },
+      { key: "timeWeather", label: "Time / Weather" },
+      { key: "questEpisode", label: "Quest Ep." },
+      { key: "status", label: "Status" }
+    ],
+    hidden: false,
+    eventSheetHidden: false
+  },
+  {
+    type: "Clue",
+    label: "Clue",
+    badge: "CL",
+    color: "#d99a3d",
+    width: 230,
+    kind: "node",
+    badgeCustom: true,
+    fields: [
+      { key: "evidence", label: "Evidence" },
+      { key: "owner", label: "Owner" },
+      { key: "outcome", label: "Outcome" }
+    ],
+    hidden: false
+  },
+  {
+    type: "InterviewNote",
+    label: "Interview Note",
+    badge: "IN",
+    color: "#56b6c2",
+    width: 240,
+    kind: "node",
+    badgeCustom: true,
+    fields: [
+      { key: "recorder", label: "Recorder" },
+      { key: "reliability", label: "Reliability" }
+    ],
+    hidden: false
+  },
+  {
+    type: "LocationFrame",
+    label: "Location Frame",
+    badge: "LF",
+    color: "#6f8fcf",
+    width: 560,
+    kind: "frame",
+    badgeCustom: true,
+    fields: [
+      { key: "region", label: "Region" },
+      { key: "mood", label: "Mood" }
+    ],
+    hidden: false,
+    eventSheetHidden: true
+  },
+  {
+    type: "ConversationFrame",
+    label: "Conversation Frame",
+    badge: "CF",
+    color: "#3aa99f",
+    width: 540,
+    kind: "frame",
+    badgeCustom: true,
+    fields: [
+      { key: "participants", label: "Participants" },
+      { key: "summary", label: "Summary" }
+    ],
+    hidden: false
+  },
+  {
+    type: "InvestigationEvent",
+    label: "Investigation Event",
+    badge: "IE",
+    color: "#c678dd",
+    width: 540,
+    kind: "frame",
+    badgeCustom: true,
+    fields: [
+      { key: "clueStatus", label: "Clue Status" },
+      { key: "risk", label: "Risk" },
+      { key: "evidenceOwner", label: "Evidence Owner" }
+    ],
+    hidden: false,
+    eventSheetHidden: false
+  },
+  {
+    type: "ArchiveNote",
+    label: "Archive Note",
+    badge: "AR",
+    color: "#8a8f98",
+    width: 220,
+    kind: "node",
+    badgeCustom: true,
+    fields: [
+      { key: "reason", label: "Reason" }
+    ],
+    hidden: true
+  },
+  {
+    type: "DraftFrame",
+    label: "Draft Frame",
+    badge: "DF",
+    color: "#7f848e",
+    width: 520,
+    kind: "frame",
+    badgeCustom: true,
+    fields: [
+      { key: "reason", label: "Reason" }
+    ],
+    hidden: true,
+    eventSheetHidden: true
+  }
+];
+
 const eventSheetColumns = [
   { key: "act", label: "ACT", width: "110px" },
   { key: "chapter", label: "Chap.", width: "110px" },
-  { key: "beatList", label: "Beat", width: "180px" },
   { key: "eventType", label: "Event Type", width: "170px" },
+  { key: "beatList", label: "Beat", width: "180px" },
   { key: "eventDescription", label: "Description", width: "360px" },
   { key: "characterEncountered", label: "Characters", width: "320px" }
 ];
+
+// Canonical order of the built-in event columns. Each event-frame type carries
+// this core set plus its own custom fields; per-type deletions are tracked on the
+// type definition, so removing a column from one frame type never touches another.
+const CORE_EVENT_COLUMN_KEYS = eventSheetColumns.map((column) => column.key);
 
 const legacyEventSheetColumns = [
   { key: "act", label: "ACT" },
@@ -168,101 +346,374 @@ const legacyEventSheetColumns = [
   { key: "eventType", label: "Type of Event(s)" }
 ];
 
-const sampleProject = createSampleProject();
+const sampleProject = createSampleProject("en");
 
-function createSampleProject() {
+function getSampleProject(language = state?.language || "en") {
+  return createSampleProject(language);
+}
+
+function getSampleProjectFilename(language = state?.language || "en") {
+  const normalized = normalizeUiLanguage(language);
+  return SAMPLE_PROJECT_FILENAMES[normalized] || SAMPLE_PROJECT_FILENAMES.en;
+}
+
+function getSampleProjectFilenameForProject(project = state.project) {
+  return getSampleProjectFilename(project?.variables?.sample_language || state.language);
+}
+
+function createSampleProject(language = "en") {
+  const lang = normalizeUiLanguage(language);
+  const zh = lang === "zh";
+  const text = zh ? {
+    title: "你的第一个 Narrative Canvas",
+    notes: "内置上手示例。点击 Play 后从入口节点开始，依次检查节点、连线、选项、条件、效果、对话、角色、事件表和 Playbook。示例面向第一次使用编辑工具的文字工作者，重点说明正文、分支和备注的组织方式。",
+    protagonist: "你",
+    route: "overview",
+    projectFile: "你的第一个画布",
+    activeFeature: "还没开始",
+    featureTags: ["节点", "分支", "正文"],
+    metadata: {
+      purpose: "第一次上手导览",
+      audience: "第一次使用 Narrative Canvas 的文字工作者",
+      source: "内置上手导览"
+    },
+    playbookStart: "从这里开始",
+    playbookEnd: "route === \"content_review\" || route === \"play_preview\" || route === \"notes_review\" || route === \"finish\"",
+    nodeTypes: {
+      Content: { title: "{title}", body: "{body}\n\n变量：当前路线 {route}；进度 {workflow_progress}；资料完整度 {data_integrity}。" },
+      Dialog: { title: "对话节点 · {title}", body: "{body}" },
+      Choice: { title: "选择节点 · {title}", body: "{body}\n\n（这些变量可用于选项条件：正文重点 {draft_focus} / 资料完整度 {data_integrity} / 复核完成 {revision_ready}。）" },
+      Clue: { title: "自定义节点 · {title}", body: "{body}\n说明对象: {owner}\n处理结果: {outcome}", set: { key: "active_feature", value: "{title}" } },
+      InterviewNote: { title: "记录节点 · {title}", body: "{body}\n记录者: {recorder}" },
+      ConversationFrame: { title: "对话框 · {title}", body: "{body}" },
+      StorySequence: { title: "章节框 · {title}", body: "{body}" },
+      InvestigationEvent: { title: "复核章节 · {title}", body: "{body}" },
+      LocationFrame: { title: "场景框 · {title}", body: "{body}" }
+    },
+    actions: [
+      { id: "a13", trigger: "onVisit", target: "Choice", op: "add", category: "Variable", key: "type_choice_visits", value: "1" },
+      { id: "a14", trigger: "onVisit", target: "Clue", op: "add", category: "Variable", key: "type_feature_card_visits", value: "1" },
+      { id: "a15", trigger: "onVisit", target: "Dialog", op: "set", category: "Variable", key: "type_dialog_seen", value: "true" },
+      { id: "a16", trigger: "onVisit", target: "Content", op: "add", category: "Variable", key: "type_content_visits", value: "1" },
+      { id: "a1", trigger: "onVisit", target: "Playbook 是什么", op: "set", category: "Variable", key: "script_builder_seen", value: "true" },
+      { id: "a2", trigger: "onVisit", target: "自定义节点和变量", op: "append", category: "Variable", key: "walkthrough_notes", value: "已读: {title}" },
+      { id: "a3", trigger: "onVisit", target: "效果改变了变量", op: "set", category: "Variable", key: "active_feature", value: "{title}" },
+      { id: "a6", trigger: "onVisit", target: "Play 预览", op: "set", category: "Variable", key: "preview_checked", value: "true" },
+      { id: "a7", trigger: "onVisit", target: "你的工作区", op: "set", category: "Variable", key: "current_workspace", value: "{title}" },
+      { id: "a9", trigger: "onVisit", target: "整理前的复核", op: "set", category: "Variable", key: "revision_hint", value: "先检查变量引用" },
+      { id: "a10", trigger: "onVisit", target: "操作便签", op: "append", category: "Variable", key: "walkthrough_notes", value: "便签提醒: {title}" },
+      { id: "a11", trigger: "onVisit", target: "完成练习", op: "set", category: "Variable", key: "sample_complete", value: "true" },
+      { id: "a12", trigger: "manual", target: "Playbook 是什么", op: "toggle", category: "Variable", key: "playbook_seen", value: "" }
+    ],
+    sheetLabels: {
+      act: "幕",
+      chapter: "章",
+      beatList: "节拍",
+      eventType: "事件类型",
+      eventDescription: "事件说明",
+      characters: "角色",
+      location: "地点",
+      timeWeather: "时间 / 天气",
+      questEpisode: "任务段",
+      status: "状态",
+      risk: "风险"
+    },
+    customTypeLabels: {
+      StorySequence: "段落框",
+      Clue: "功能卡片",
+      InterviewNote: "功能记录",
+      LocationFrame: "工作区框",
+      ConversationFrame: "对话框",
+      InvestigationEvent: "内容复核",
+      ArchiveNote: "档案批注",
+      DraftFrame: "草稿框"
+    },
+    fields: {
+      location: "地点",
+      timeWeather: "时间 / 天气",
+      questEpisode: "任务段",
+      status: "状态",
+      evidence: "功能点",
+      owner: "说明对象",
+      outcome: "处理结果",
+      recorder: "记录者",
+      reliability: "校验备注",
+      region: "片区",
+      mood: "编辑状态",
+      participants: "参与者",
+      summary: "摘要",
+      clueStatus: "检查状态",
+      risk: "风险",
+      evidenceOwner: "说明对象",
+      reason: "原因"
+    },
+    characters: [
+      { id: "c0", name: "你", role: "第一次使用者", voice: "按节点顺序阅读说明。", notes: "正文里的 {protagonist} 显示为这个角色名；角色页按出场顺序列出相关节点。" },
+      { id: "c1", name: "向导", role: "解说", voice: "在对话节点里说明下一步操作。", notes: "演示对话节点的发言者，以及 Speaker / Present 角色关系。" },
+      { id: "c2", name: "角色甲", role: "示例角色", voice: "用于演示角色反链。", notes: "演示角色名与对话发言者的对应关系。" },
+      { id: "c3", name: "角色乙", role: "示例角色", voice: "用于演示被提及关系。", notes: "演示 Mentioned 角色关系。" },
+      { id: "c4", name: "校对标记", role: "复核提示", voice: "提示变量和条件的读写位置。", notes: "对应校验、Play 预览和状态复核。" },
+      { id: "c5", name: "读者", role: "未来的读者", voice: "最终会读到这个故事的人。", notes: "演示“被提及”这一角色关系。" }
+    ],
+    nodes: {
+      n0: { title: "从这里开始", body: "你第一次打开 Narrative Canvas。这是入口节点。点击 Play 后，演示从这里开始。画布上的每个方块都是节点；连线决定阅读顺序。按连线阅读，每个节点会说明用途和操作。", cast: [{ characterId: "c0", role: "POV" }] },
+      lf1: { title: "你的工作区", body: "这是场景框（位置框）。可用于圈定相关节点，整理画布。场景框不会进入事件表，只用于画布分区。", customFields: { region: "画布分区", mood: "先搭结构，正文随后" } },
+      e1: { title: "第一章：节点和连线", body: "这是会进入事件表的章节框。把同一段内容的节点放入框内，事件表会按幕、章、节拍、地点、状态等字段列出它们。", beatList: "入口 / 自定义节点 / 第一个选择", eventType: "上手导览", eventDescription: "认识内容节点、自定义节点类型和选择分支。", location: "画布工作区", timeWeather: "上手阶段", questEpisode: "导览-01", status: "可浏览" },
+      n1: { title: "内容节点", body: "这是常用内容节点。可用于正文、场景说明或设计笔记。连线决定默认阅读顺序；节点标题用于搜索和跳转。", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
+      n2: { title: "自定义节点和变量", body: "这是自定义节点类型。可在左侧节点库新建类型并添加字段；这些字段会出现在事件表中。正文中的花括号会显示变量值，例如项目名「{project_file}」、当前功能「{active_feature}」。", customFields: { evidence: "变量 / 模板 / 自定义字段", owner: "Playbook", outcome: "花括号在正文里读取变量" }, cast: [{ characterId: "c4", role: "Owner" }] },
+      n3: { title: "Playbook 是什么", body: "Playbook 是本项目的控制台：变量定义、节点逻辑、变量动作和演示规则都在这里。脚本构建可批量编辑每个节点的条件、效果和路线，和右侧节点检查器显示的是同一份数据。", customFields: { recorder: "脚本构建", reliability: "与节点检查器同步" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
+      n4: { title: "选择节点", body: "这是选择节点。可添加多个选项；为选项设置可用条件；为选项设置选择后效果。条件成立时选项可用；点击选项后，效果会修改变量。下面三个选项分别演示这些功能。", choices: ["① 一个始终可用的选项", "② 一个会改变变量的选项", "③ 一个有前置条件的选项"], choiceOptions: [
+        { id: "opt_map_story", label: "① 一个始终可用的选项", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "map_story" }] },
+        { id: "opt_write_dialog", label: "② 一个会改变变量的选项", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
+        { id: "opt_open_playbook", label: "③ 一个有前置条件的选项", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
+      ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
+      n5: { title: "效果改变了变量", body: "所选选项已执行效果，workflow_progress 变为第 {workflow_progress} 步。后续节点和选项可以读取该变量，决定是否出现。", variable: "workflow_progress", value: "1", cast: [{ characterId: "c0", role: "POV" }] },
+      n6: { title: "对话节点", body: "这是对话节点。可记录多轮发言，每轮包含说话者和台词。说话者与角色同名时，角色页会把该场景归入对应角色。", turns: [{ speaker: "向导", line: "在对话节点里，每一行就是一次发言。" }, { speaker: "角色甲", line: "说话者使用角色名，角色页会统计每个角色出现的场景。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+      e2: { title: "第二章：条件和效果", body: "这一段说明条件和效果的配合方式：选项用「选择后效果」改变变量，节点用「条件要求」决定能否通过。", beatList: "选项效果 / 节点效果 / 变量动作", eventType: "状态逻辑", eventDescription: "选项、节点和变量动作都能写状态；校验页汇总每个变量的写入位置和读取位置。", location: "Playbook", timeWeather: "梳理逻辑", questEpisode: "导览-02", status: "进行中" },
+      cf1: { title: "对话框", body: "这是对话框（会话框）。可用于圈定一组对话或状态说明节点；折叠后仍保留为画布结构。", customFields: { participants: "向导 / 角色甲 / 校对标记", summary: "变量确定后，检查每条路线在预览中是否可达。" }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
+      n7: { title: "状态写在哪里", body: "状态可写在三个位置：① 选项的「选择后效果」，只在选择该选项时触发；② 节点的「效果」，进入节点时触发；③ Playbook 的「变量动作」，用于跨节点、手动或全局写入。", choices: ["① 写在选项效果里", "② 写在节点效果里", "③ 写在变量动作里"], choiceOptions: [
+        { id: "opt_choice_effects", label: "① 写在选项效果里", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+        { id: "opt_node_effects", label: "② 写在节点效果里", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
+        { id: "opt_action_rules", label: "③ 写在变量动作里", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
+      ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
+      n8: { title: "变量命名", body: "状态键建议使用小写英文下划线，例如 data_integrity。命名保持一致后，条件、效果、文本模板和校验页会更容易对应。", customFields: { evidence: "状态键命名", owner: "状态逻辑", outcome: "统一条件和效果里的变量名" }, cast: [{ characterId: "c4", role: "Owner" }] },
+      n9: { title: "角色和反链", body: "记录节点可保存来源、备注和相关角色。角色页按出场顺序列出每个角色的反链，便于定位角色出现位置。", turns: [{ speaker: "校对标记", line: "请确认每个变量的写入位置和读取位置。" }, { speaker: "角色乙", line: "角色名一致时，角色页会归并相关节点。" }], customFields: { recorder: "校对标记", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Speaker" }, { characterId: "c3", role: "Speaker" }, { characterId: "c0", role: "POV" }] },
+      n10: { title: "条件门（节点要求）", body: "section_notes_ready === true || data_integrity >= 2", condition: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
+      e3: { title: "第三章：整理和复核", body: "这一段用于复核章节内容。先确认变量、条件和文本模板，再整理事件表字段；字段记录状态、风险和说明对象。", beatList: "状态索引 / 校验 / Play 预览", eventType: "内容复核", eventDescription: "确认变量、条件、文本模板和节点备注是否一致。", location: "复核面板", timeWeather: "整理阶段", questEpisode: "导览-03", status: "待检查", clueStatus: "进行中", risk: "中", evidenceOwner: "校对标记" },
+      n11: { title: "状态索引", body: "状态索引列出变量初始值、引用位置和当前状态，便于确认哪些节点读取或写入同一变量。", customFields: { evidence: "变量引用", owner: "校验页", outcome: "确认状态读写位置" }, cast: [{ characterId: "c4", role: "Mentioned" }] },
+      n12: { title: "整理前的复核", body: "继续前可以：① 检查状态引用；② 补充节点备注；③ 标记复核完成。", choices: ["① 检查状态引用", "② 补充节点备注", "③ 标记复核完成"], choiceOptions: [
+        { id: "opt_run_validation", label: "① 检查状态引用", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+        { id: "opt_document_notes", label: "② 补充节点备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
+        { id: "opt_mark_review_ready", label: "③ 标记复核完成", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
+      ], cast: [{ characterId: "c5", role: "Present" }, { characterId: "c2", role: "Mentioned" }] },
+      n13: { title: "Play 预览", body: "Play 预览用于检查条件、选项显示、访问记录和调试状态。它只验证当前画布内的阅读路线和变量变化。", customFields: { evidence: "预览记录", owner: "Play", outcome: "确认路线与状态变化" }, cast: [{ characterId: "c4", role: "Owner" }, { characterId: "c5", role: "Mentioned" }] },
+      e4: { title: "第四章：完成一次练习", body: "最后一段把前面内容收束为一次练习。每个选项有不同前置条件，用于演示选项条件、选择后效果、指定跳转和结束路线。", beatList: "正文 / Play / 备注 / 完成", eventType: "练习分支", eventDescription: "同一结构支持返回正文、继续预览、整理备注或结束练习。", location: "练习面板", timeWeather: "收束阶段", questEpisode: "导览-04", status: "待定" },
+      n14: { title: "下一步练习", body: "最后一步，选择接下来的练习目标。四个选项各有不同前置条件；条件不满足时，选项会按本节点的「不可用选项」设置显示或隐藏。当前项目「{project_file}」，当前功能「{active_feature}」，资料完整度 {data_integrity}。", choices: ["回到正文节点", "继续 Play 预览", "整理备注", "完成练习"], choiceOptions: [
+        { id: "opt_return_content", label: "回到正文节点（需进度和资料完整度达标）", requires: "workflow_progress >= 2 && data_integrity >= 3", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "content_review" }] },
+        { id: "opt_play_preview", label: "继续 Play 预览（需复核完成且已校验）", requires: "revision_ready === true && validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
+        { id: "opt_organize_notes", label: "整理备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "notes_review" }, { trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }] },
+        { id: "opt_finish_practice", label: "完成练习（需完成复核和 Play 预览）", requires: "revision_ready === true && preview_checked === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
+      ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }, { characterId: "c5", role: "Mentioned" }] },
+      n15: { title: "回到正文节点", body: "重新进入内容节点，补充正文、场景说明或设计笔记。这是一条结束路线。", routing: { mode: "end" } },
+      n16: { title: "继续 Play 预览", body: "继续使用 Play 预览检查条件、选项显示、访问记录和调试状态。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c5", role: "Speaker" }] },
+      n17: { title: "整理备注", body: "把暂存想法放入草稿框，把已确定的信息写入正文节点或事件表字段。这是一条结束路线。", routing: { mode: "end" } },
+      n18: { title: "完成练习", body: "本示例到此结束。你已经完成节点、连线、选项、条件、效果、对话、角色和事件表的基础练习。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
+      n19: { title: "操作便签", body: "这是标记节点（Marker），用于记录操作提示，不进入玩家路线。首次演示建议顺序：选择第一个选项；选择「写在选项效果里」；选择「检查状态引用」；选择「完成练习」。", routing: { mode: "goTo", target: "下一步练习" } },
+      df1: { title: "你的草稿区", body: "这是草稿框，默认在节点菜单中隐藏。可将未确定的设定放在这里；它不进入玩家路线，也不会写入事件表。", customFields: { reason: "保留草稿内容，避免把内部备注当作最终正文。" } }
+    },
+    labels: {
+      true: "成立",
+      false: "不成立"
+    }
+  } : {
+    title: "Your First Narrative Canvas",
+    notes: "Built-in onboarding sample. Press Play from the entry node to inspect nodes, links, choices, conditions, effects, dialog, characters, the Events Sheet, and Playbook. It is written for a text worker using an editor for the first time, with emphasis on organizing prose, branches, and notes.",
+    protagonist: "You",
+    route: "overview",
+    projectFile: "Your first canvas",
+    activeFeature: "Not started",
+    featureTags: ["nodes", "branches", "prose"],
+    metadata: {
+      purpose: "First-use walkthrough",
+      audience: "A text worker using Narrative Canvas for the first time",
+      source: "Built-in onboarding sample"
+    },
+    playbookStart: "Start Here",
+    playbookEnd: "route === \"content_review\" || route === \"play_preview\" || route === \"notes_review\" || route === \"finish\"",
+    nodeTypes: {
+      Content: { title: "{title}", body: "{body}\n\nState: route {route}; progress {workflow_progress}; data integrity {data_integrity}." },
+      Dialog: { title: "Dialog Node · {title}", body: "{body}" },
+      Choice: { title: "Choice Node · {title}", body: "{body}\n\n(Variables a choice condition can read: draft focus {draft_focus} / data integrity {data_integrity} / revision ready {revision_ready}.)" },
+      Clue: { title: "Custom Node · {title}", body: "{body}\nSubject: {owner}\nOutcome: {outcome}", set: { key: "active_feature", value: "{title}" } },
+      InterviewNote: { title: "Note Node · {title}", body: "{body}\nRecorder: {recorder}" },
+      ConversationFrame: { title: "Dialog Frame · {title}", body: "{body}" },
+      StorySequence: { title: "Chapter Frame · {title}", body: "{body}" },
+      InvestigationEvent: { title: "Review Chapter · {title}", body: "{body}" },
+      LocationFrame: { title: "Scene Frame · {title}", body: "{body}" }
+    },
+    actions: [
+      { id: "a13", trigger: "onVisit", target: "Choice", op: "add", category: "Variable", key: "type_choice_visits", value: "1" },
+      { id: "a14", trigger: "onVisit", target: "Clue", op: "add", category: "Variable", key: "type_feature_card_visits", value: "1" },
+      { id: "a15", trigger: "onVisit", target: "Dialog", op: "set", category: "Variable", key: "type_dialog_seen", value: "true" },
+      { id: "a16", trigger: "onVisit", target: "Content", op: "add", category: "Variable", key: "type_content_visits", value: "1" },
+      { id: "a1", trigger: "onVisit", target: "What Playbook Is", op: "set", category: "Variable", key: "script_builder_seen", value: "true" },
+      { id: "a2", trigger: "onVisit", target: "Custom Nodes and Variables", op: "append", category: "Variable", key: "walkthrough_notes", value: "Read: {title}" },
+      { id: "a3", trigger: "onVisit", target: "An Effect Changed a Variable", op: "set", category: "Variable", key: "active_feature", value: "{title}" },
+      { id: "a6", trigger: "onVisit", target: "Play Preview", op: "set", category: "Variable", key: "preview_checked", value: "true" },
+      { id: "a7", trigger: "onVisit", target: "Your Workspace", op: "set", category: "Variable", key: "current_workspace", value: "{title}" },
+      { id: "a9", trigger: "onVisit", target: "Review Before Continuing", op: "set", category: "Variable", key: "revision_hint", value: "Check variable references first" },
+      { id: "a10", trigger: "onVisit", target: "Operation Note", op: "append", category: "Variable", key: "walkthrough_notes", value: "Note: {title}" },
+      { id: "a11", trigger: "onVisit", target: "Complete the Practice", op: "set", category: "Variable", key: "sample_complete", value: "true" },
+      { id: "a12", trigger: "manual", target: "What Playbook Is", op: "toggle", category: "Variable", key: "playbook_seen", value: "" }
+    ],
+    sheetLabels: {
+      act: "ACT",
+      chapter: "Chap.",
+      beatList: "Beat",
+      eventType: "Event Type",
+      eventDescription: "Description",
+      characters: "Characters",
+      location: "Location",
+      timeWeather: "Time / Weather",
+      questEpisode: "Quest Ep.",
+      status: "Status",
+      risk: "Risk"
+    },
+    customTypeLabels: {
+      StorySequence: "Story Sequence",
+      Clue: "Feature Card",
+      InterviewNote: "Note Node",
+      LocationFrame: "Location Frame",
+      ConversationFrame: "Dialog Frame",
+      InvestigationEvent: "Content Review",
+      ArchiveNote: "Archive Note",
+      DraftFrame: "Draft Frame"
+    },
+    fields: {
+      location: "Location",
+      timeWeather: "Time / Weather",
+      questEpisode: "Quest Ep.",
+      status: "Status",
+      evidence: "Feature",
+      owner: "Subject",
+      outcome: "Outcome",
+      recorder: "Recorder",
+      reliability: "Reliability",
+      region: "Region",
+      mood: "Mood",
+      participants: "Participants",
+      summary: "Summary",
+      clueStatus: "Clue Status",
+      risk: "Risk",
+      evidenceOwner: "Subject",
+      reason: "Reason"
+    },
+    characters: [
+      { id: "c0", name: "You", role: "First-time user", voice: "Read each node in order.", notes: "Body text renders {protagonist} as this character name; the Characters page lists related nodes in story order." },
+      { id: "c1", name: "Guide", role: "Narrator", voice: "Explains the next operation in dialog nodes.", notes: "Demonstrates a Dialog speaker and the Speaker / Present roles." },
+      { id: "c2", name: "Character A", role: "Sample character", voice: "Demonstrates character backlinks.", notes: "Demonstrates the link between character names and dialog speakers." },
+      { id: "c3", name: "Character B", role: "Sample character", voice: "Demonstrates mentioned characters.", notes: "Demonstrates the Mentioned role." },
+      { id: "c4", name: "Revision Note", role: "Review marker", voice: "Points to where variables and conditions are read or written.", notes: "Connects to Validation, Play preview, and state review." },
+      { id: "c5", name: "Reader", role: "Future reader", voice: "Whoever eventually reads the prose.", notes: "Demonstrates the mentioned role." }
+    ],
+    nodes: {
+      n0: { title: "Start Here", body: "You are opening Narrative Canvas for the first time. This is the entry node. Play starts here. Each box on the canvas is a node; links define reading order. Follow the links and read each node's purpose and operation.", cast: [{ characterId: "c0", role: "POV" }] },
+      lf1: { title: "Your Workspace", body: "This is a Scene Frame (location frame). Use it to group related nodes and organize the canvas. This frame type stays out of the Events Sheet; it is only a canvas region.", customFields: { region: "Canvas region", mood: "Structure first, prose later" } },
+      e1: { title: "Chapter 1: Nodes and Links", body: "This chapter frame appears in the Events Sheet. Place one section's nodes inside it; the sheet lists them by act, chapter, beat, location, and status.", beatList: "Entry / custom node / first choice", eventType: "Walkthrough", eventDescription: "Meet the Content node, custom node types, and choice branches.", location: "Canvas workspace", timeWeather: "Getting started", questEpisode: "Tour-01", status: "Browsable" },
+      n1: { title: "The Content Node", body: "This is the standard Content node. Use it for prose, scene notes, or design notes. Links set default reading order; node titles support search and routing.", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
+      n2: { title: "Custom Nodes and Variables", body: "This is a custom node type. Add types and fields in the Node Library on the left; those fields appear in the Events Sheet. Braces render variable values in body text, such as project {project_file} and active feature {active_feature}.", customFields: { evidence: "Variables / templates / custom fields", owner: "Playbook", outcome: "Braces read variables in body text" }, cast: [{ characterId: "c4", role: "Owner" }] },
+      n3: { title: "What Playbook Is", body: "Playbook is this project's control panel: variable definitions, node logic, variable actions, and preview rules all live here. Script Builder batch-edits each node's conditions, effects, and routing; it writes the same data shown in the node inspector on the right.", customFields: { recorder: "Script Builder", reliability: "Synced with the node inspector" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
+      n4: { title: "The Choice Node", body: "This is a Choice node. Add options, set availability conditions, and set on-choose effects. A condition controls whether an option is available; an effect changes variables after selection. The three options below demonstrate these functions.", choices: ["① An always-available option", "② An option that changes a variable", "③ An option with a prerequisite"], choiceOptions: [
+        { id: "opt_map_story", label: "① An always-available option", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "outline_branch" }] },
+        { id: "opt_write_dialog", label: "② An option that changes a variable", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
+        { id: "opt_open_playbook", label: "③ An option with a prerequisite", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
+      ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
+      n5: { title: "An Effect Changed a Variable", body: "The selected option ran an effect and set workflow_progress to step {workflow_progress}. Later nodes and options can read this variable to decide whether to appear.", variable: "workflow_progress", value: "1", cast: [{ characterId: "c0", role: "POV" }] },
+      n6: { title: "The Dialog Node", body: "This is a Dialog node. Record turns; each turn has a speaker and a line. When the speaker matches a character name, the Characters page assigns the scene to that character.", turns: [{ speaker: "Guide", line: "In a dialog node, each line is one turn." }, { speaker: "Character A", line: "Use character names as speakers, and the character page tracks who appears in which scenes." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+      e2: { title: "Chapter 2: Conditions and Effects", body: "This chapter shows how conditions and effects work together: options change variables with on-choose effects, and node requirements decide whether the route can continue.", beatList: "Choice effects / node effects / variable actions", eventType: "State Logic", eventDescription: "Options, nodes, and variable actions all write state; Validation shows where each variable is written and read.", location: "Playbook", timeWeather: "Working out the logic", questEpisode: "Tour-02", status: "In progress" },
+      cf1: { title: "The Dialog Frame", body: "This is a Dialog Frame. Use it to group dialog or state explanation nodes; when collapsed, it remains a canvas structure.", customFields: { participants: "Guide / Character A / Revision Note", summary: "Once variables are set, check that each route is reachable in preview." }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
+      n7: { title: "Where State Is Written", body: "State can be written in three places: ① a choice option's on-choose effects, triggered only by that option; ② a node's effects, triggered on entry; ③ Playbook variable actions, used for cross-node, manual, or global writes.", choices: ["① On a choice option's effects", "② On a node's effects", "③ In a variable action"], choiceOptions: [
+        { id: "opt_choice_effects", label: "① On a choice option's effects", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+        { id: "opt_node_effects", label: "② On a node's effects", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
+        { id: "opt_action_rules", label: "③ In a variable action", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
+      ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
+      n8: { title: "Naming Variables", body: "Use lower-case snake_case state keys, such as data_integrity. Consistent names make conditions, effects, text templates, and Validation easier to match.", customFields: { evidence: "State-key naming", owner: "State logic", outcome: "Use one variable name across conditions and effects" }, cast: [{ characterId: "c4", role: "Owner" }] },
+      n9: { title: "Characters and Backlinks", body: "A note node can store source, remarks, and related characters. The Characters page lists each character's backlinks in story order, making character appearances easy to locate.", turns: [{ speaker: "Revision Note", line: "Confirm where each variable is written and read." }, { speaker: "Character B", line: "Matching character names let the character page group related nodes." }], customFields: { recorder: "Revision Note", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Speaker" }, { characterId: "c3", role: "Speaker" }, { characterId: "c0", role: "POV" }] },
+      n10: { title: "A Condition Gate", body: "section_notes_ready === true || data_integrity >= 2", condition: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
+      e3: { title: "Chapter 3: Organize and Review", body: "This chapter reviews the content before the final practice step. Confirm variables, conditions, and text templates, then organize the Events Sheet fields; the fields track status, risk, and subject.", beatList: "State index / Validation / Play preview", eventType: "Content Review", eventDescription: "Confirm that variables, conditions, text templates, and node notes match.", location: "Review panel", timeWeather: "Organizing", questEpisode: "Tour-03", status: "Needs check", clueStatus: "Open", risk: "Medium", evidenceOwner: "Revision Note" },
+      n11: { title: "State Index", body: "The state index lists initial values, reference locations, and current status for variables, so you can confirm which nodes read or write the same variable.", customFields: { evidence: "Variable references", owner: "Validation", outcome: "Confirm state reads and writes" }, cast: [{ characterId: "c4", role: "Mentioned" }] },
+      n12: { title: "Review Before Continuing", body: "Before continuing: ① check state references; ② add node notes; ③ mark the review complete.", choices: ["① Check state references", "② Add node notes", "③ Mark review complete"], choiceOptions: [
+        { id: "opt_run_validation", label: "① Check state references", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+        { id: "opt_document_notes", label: "② Add node notes", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
+        { id: "opt_mark_review_ready", label: "③ Mark review complete", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
+      ], cast: [{ characterId: "c5", role: "Present" }, { characterId: "c2", role: "Mentioned" }] },
+      n13: { title: "Play Preview", body: "Play preview checks conditions, option display, visit records, and debug state. It verifies reading routes and variable changes inside the current canvas.", customFields: { evidence: "Preview record", owner: "Play", outcome: "Confirm routes and state changes" }, cast: [{ characterId: "c4", role: "Owner" }, { characterId: "c5", role: "Mentioned" }] },
+      e4: { title: "Chapter 4: Complete One Practice Run", body: "The final chapter turns the previous material into one practice run. Each option has a prerequisite and demonstrates choice conditions, on-choose effects, goTo routing, and end routes.", beatList: "Prose / Play / notes / finish", eventType: "Practice Split", eventDescription: "The same structure can return to prose, continue preview, organize notes, or end the practice.", location: "Practice panel", timeWeather: "Wrap-up", questEpisode: "Tour-04", status: "Pending" },
+      n14: { title: "Next Practice Step", body: "Choose the next practice target. Each option has prerequisites; unmet options are hidden or disabled according to this node's Unavailable choices setting. Project: {project_file}. Active feature: {active_feature}. Data integrity: {data_integrity}.", choices: ["Return to a content node", "Continue Play preview", "Organize notes", "Complete the practice"], choiceOptions: [
+        { id: "opt_return_content", label: "Return to a content node (needs progress and data integrity)", requires: "workflow_progress >= 2 && data_integrity >= 3", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "content_review" }] },
+        { id: "opt_play_preview", label: "Continue Play preview (needs review and validation)", requires: "revision_ready === true && validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
+        { id: "opt_organize_notes", label: "Organize notes", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "notes_review" }, { trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }] },
+        { id: "opt_finish_practice", label: "Complete the practice (needs review and Play preview)", requires: "revision_ready === true && preview_checked === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
+      ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }, { characterId: "c5", role: "Mentioned" }] },
+      n15: { title: "Return to a Content Node", body: "Re-enter a content node and add prose, scene notes, or design notes. This is an end route.", routing: { mode: "end" } },
+      n16: { title: "Continue Play Preview", body: "Continue using Play preview to check conditions, option display, visit records, and debug state. This is an end route.", routing: { mode: "end" }, cast: [{ characterId: "c5", role: "Speaker" }] },
+      n17: { title: "Organize Notes", body: "Place unsettled ideas in the Draft Frame, and put confirmed information in content nodes or Events Sheet fields. This is an end route.", routing: { mode: "end" } },
+      n18: { title: "Complete the Practice", body: "This sample ends here. You have completed a basic practice run for nodes, links, choices, conditions, effects, dialog, characters, and the Events Sheet. This is an end route.", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
+      n19: { title: "Operation Note", body: "This Marker node records operation notes and stays out of the player route. Suggested first run: choose the first option; choose On a choice option's effects; choose Check state references; choose Complete the practice.", routing: { mode: "goTo", target: "Next Practice Step" } },
+      df1: { title: "Your Draft Area", body: "This Draft Frame is hidden in the node menu by default. Put unsettled ideas here; it stays out of the player route and the Events Sheet.", customFields: { reason: "Keep draft material separate from final prose." } }
+    },
+    labels: {
+      true: "true",
+      false: "false"
+    }
+  };
+  const workflowBranchBody = zh
+    ? "所选选项已执行效果，workflow_progress 已增加。该状态写入位于上一选择节点的「选择后效果」。下一节点继续说明对话节点和状态写入位置。"
+    : "The selected option ran an effect and increased workflow_progress. That state write lives in the previous Choice option's On choose effects. The next node continues with dialog and state-write locations.";
+  const conditionGateRequirement = "section_notes_ready === true || data_integrity >= 2";
+  const conditionGateBody = zh
+    ? "这是条件门：section_notes_ready 为 true，或 data_integrity 至少为 2 时可以继续。条件写在本节点的「状态逻辑 / 条件要求」中。"
+    : "This is a condition gate: continue when section_notes_ready is true, or data_integrity is at least 2. The condition lives in this node's State Logic / Requirements.";
+  const exportChainRequirement = conditionGateRequirement;
+  const exportChainBody = conditionGateBody;
+
   return {
-    title: "Midnight Line Demo",
-    notes: "A fuller sample that touches every default node type, all variable value types, Characters cast roles, Events Sheet groups, custom frame presets, custom node types, a frame hidden from Events Sheet, hidden library entries, and Playbook rule cards.",
+    title: text.title,
+    workflowMode: WORKFLOW_MODE_TEXT_SOURCE,
+    notes: text.notes,
     variables: {
-      traveler: "Mara",
-      route: "northbound",
-      trust_level: 1,
-      lantern_lit: false,
-      has_ticket: true,
-      talked_to_conductor: false,
-      knows_old_reyes: true,
-      reyes_watch_offered: false,
-      guard_suspicion: 0,
-      inventory: {
-        watch: "Reyes pocketwatch",
-        coins: 3,
-        clues: ["glass key", "ash ticket"]
-      },
-      active_flags: ["boarding", "watch_missing"]
+      sample_id: "narrative_canvas_feature_guide",
+      sample_language: lang,
+      protagonist: text.protagonist,
+      route: text.route,
+      workflow_progress: 0,
+      scope_pressure: 0,
+      draft_focus: "overview",
+      revision_ready: false,
+      review_pressure: 0,
+      data_integrity: 1,
+      type_choice_visits: 0,
+      type_feature_card_visits: 0,
+      type_dialog_seen: false,
+      type_content_visits: 0,
+      script_builder_seen: false,
+      playbook_seen: false,
+      section_notes_ready: false,
+      state_index_ready: false,
+      validation_reviewed: false,
+      preview_checked: false,
+      project_file: text.projectFile,
+      active_feature: text.activeFeature,
+      current_workspace: "",
+      revision_hint: "",
+      sample_complete: false,
+      walkthrough_notes: [],
+      feature_tags: text.featureTags,
+      sample_metadata: text.metadata
     },
     script: {
-      nodeTypes: {
-        Content: {
-          title: "{title}",
-          body: "{body}\n\nRoute: {route}"
-        },
-        Dialog: {
-          title: "{title}",
-          body: "{title}: {body}"
-        },
-        Choice: {
-          title: "Decision - {title}",
-          body: "{body}\nTrust level: {trust_level}",
-          choices: ["Offer the watch", "Hide the watch", "Ask about Old Reyes"]
-        },
-        Set: {
-          body: "Set {variable} = {value}. The Line records the change.",
-          set: { key: "last_update", value: "{variable}:{value}" }
-        },
-        Condition: {
-          body: "Check: {condition}",
-          condition: "trust_level >= 2"
-        },
-        Clue: {
-          title: "Clue - {title}",
-          body: "{body}",
-          set: { key: "active_clue", value: "{title}" }
-        },
-        ConversationFrame: {
-          title: "Conversation - {title}",
-          body: "{body}"
-        },
-        StorySequence: {
-          title: "Story Sequence - {title}",
-          body: "{body}"
-        },
-        InvestigationEvent: {
-          title: "Investigation - {title}",
-          body: "{body}"
-        }
-      },
-      actions: [
-        { id: "a0", trigger: "gate", target: "First-time briefing?", op: "if", category: "Variable", key: "talked_to_conductor", value: "== false" },
-        { id: "a1", trigger: "gate", target: "Reyes clue available?", op: "if", category: "Variable", key: "knows_old_reyes", value: "== true" },
-        { id: "a2", trigger: "onVisit", target: "Share Reyes warning", op: "add", category: "Variable", key: "trust_level", value: "1" },
-        { id: "a3", trigger: "onVisit", target: "Share Reyes warning", op: "set", category: "Variable", key: "knows_old_reyes", value: "false" },
-        { id: "a4", trigger: "onVisit", target: "Offer the watch", op: "set", category: "Variable", key: "reyes_watch_offered", value: "true" },
-        { id: "a5", trigger: "gate", target: "Enough trust and lantern?", op: "if", category: "Variable", key: "trust_level", value: ">= 2 && lantern_lit == true" },
-        { id: "a6", trigger: "onVisit", target: "Glass Key", op: "append", category: "Quest", key: "Main.clues", value: "{title}", append: true },
-        { id: "a7", trigger: "onChoose", target: "The Conductor", op: "add", category: "Actor", key: "Mara.trust", value: "1" },
-        { id: "a8", trigger: "manual", target: "", op: "toggle", category: "Sim Status", key: "lantern_lit", value: "" }
-      ],
+      nodeTypes: text.nodeTypes,
+      actions: text.actions,
       playRules: {
-        startNode: { enabled: true, value: "All Aboard" },
-        choiceDisplay: { enabled: true, value: "hideUnavailable" },
-        endCondition: { enabled: true, value: "route == terminus" },
+        startNode: { enabled: true, value: text.playbookStart },
+        endCondition: { enabled: true, value: text.playbookEnd },
         visitTracking: { enabled: true, value: true },
-        debugMode: { enabled: false, value: false }
+        debugMode: { enabled: true, value: true }
       }
     },
     eventSheet: {
       columns: [
-        { key: "act", label: "ACT", width: "90px" },
-        { key: "chapter", label: "Chap.", width: "90px" },
-        { key: "beatList", label: "Beat", width: "190px" },
-        { key: "eventType", label: "Event Type", width: "150px" },
-        { key: "eventDescription", label: "Description", width: "360px" },
-        { key: "characterEncountered", label: "Characters", width: "300px" },
-        { key: "location", label: "Location", width: "150px", custom: true },
-        { key: "timeWeather", label: "Time / Weather", width: "170px", custom: true },
-        { key: "questEpisode", label: "Quest Ep.", width: "130px", custom: true },
-        { key: "status", label: "Status", width: "150px", custom: true }
+        { key: "act", label: text.sheetLabels.act, width: "90px" },
+        { key: "chapter", label: text.sheetLabels.chapter, width: "90px" },
+        { key: "beatList", label: text.sheetLabels.beatList, width: "190px" },
+        { key: "eventType", label: text.sheetLabels.eventType, width: "160px" },
+        { key: "eventDescription", label: text.sheetLabels.eventDescription, width: "380px" },
+        { key: "characterEncountered", label: text.sheetLabels.characters, width: "300px" },
+        { key: "location", label: text.sheetLabels.location, width: "170px", custom: true },
+        { key: "timeWeather", label: text.sheetLabels.timeWeather, width: "190px", custom: true },
+        { key: "questEpisode", label: text.sheetLabels.questEpisode, width: "130px", custom: true },
+        { key: "status", label: text.sheetLabels.status, width: "150px", custom: true },
+        { key: "risk", label: text.sheetLabels.risk, width: "120px", custom: true }
       ],
       hiddenColumns: ["status"]
     },
@@ -274,189 +725,181 @@ function createSampleProject() {
       ...defaultNodeTypeList(),
       {
         type: "StorySequence",
-        label: "Story Sequence",
+        label: text.customTypeLabels.StorySequence,
         badge: "SS",
         color: DEFAULT_EVENT_FRAME_COLOR,
-        width: 520,
-        custom: true,
-        badgeCustom: true,
-        kind: "frame",
-        eventSheetHidden: true,
-        fields: [
-          { key: "location", label: "Location" },
-          { key: "timeWeather", label: "Time / Weather" },
-          { key: "questEpisode", label: "Quest Ep." },
-          { key: "status", label: "Status" }
-        ],
-        hidden: false
-      },
-      {
-        type: "Clue",
-        label: "Clue",
-        badge: "Cl",
-        color: "#d99a3d",
-        width: 220,
-        custom: true,
-        badgeCustom: true,
-        kind: "node",
-        fields: [
-          { key: "evidence", label: "Evidence" },
-          { key: "owner", label: "Owner" },
-          { key: "outcome", label: "Outcome" }
-        ],
-        hidden: false
-      },
-      {
-        type: "LocationFrame",
-        label: "Location Frame",
-        badge: "LF",
-        color: "#6f8fcf",
         width: 540,
         custom: true,
         badgeCustom: true,
         kind: "frame",
         fields: [
-          { key: "region", label: "Region" },
-          { key: "mood", label: "Mood" }
+          { key: "location", label: text.fields.location },
+          { key: "timeWeather", label: text.fields.timeWeather },
+          { key: "questEpisode", label: text.fields.questEpisode },
+          { key: "status", label: text.fields.status }
+        ],
+        hidden: false
+      },
+      {
+        type: "Clue",
+        label: text.customTypeLabels.Clue,
+        badge: "Cl",
+        color: "#d99a3d",
+        width: 230,
+        custom: true,
+        badgeCustom: true,
+        kind: "node",
+        fields: [
+          { key: "evidence", label: text.fields.evidence },
+          { key: "owner", label: text.fields.owner },
+          { key: "outcome", label: text.fields.outcome }
+        ],
+        hidden: false
+      },
+      {
+        type: "InterviewNote",
+        label: text.customTypeLabels.InterviewNote,
+        badge: "IN",
+        color: "#56b6c2",
+        width: 240,
+        custom: true,
+        badgeCustom: true,
+        kind: "node",
+        fields: [
+          { key: "recorder", label: text.fields.recorder },
+          { key: "reliability", label: text.fields.reliability }
+        ],
+        hidden: false
+      },
+      {
+        type: "LocationFrame",
+        label: text.customTypeLabels.LocationFrame,
+        badge: "LF",
+        color: "#6f8fcf",
+        width: 560,
+        custom: true,
+        badgeCustom: true,
+        kind: "frame",
+        eventSheetHidden: true,
+        fields: [
+          { key: "region", label: text.fields.region },
+          { key: "mood", label: text.fields.mood }
         ],
         hidden: false
       },
       {
         type: "ConversationFrame",
-        label: "Conversation Frame",
+        label: text.customTypeLabels.ConversationFrame,
         badge: "CF",
-        color: "#56b6c2",
-        width: 520,
+        color: "#3aa99f",
+        width: 540,
         custom: true,
         badgeCustom: true,
         kind: "frame",
         fields: [
-          { key: "participants", label: "Participants" },
-          { key: "summary", label: "Summary" }
+          { key: "participants", label: text.fields.participants },
+          { key: "summary", label: text.fields.summary }
         ],
         hidden: false
       },
       {
         type: "InvestigationEvent",
-        label: "Investigation Event",
+        label: text.customTypeLabels.InvestigationEvent,
         badge: "IE",
         color: "#c678dd",
-        width: 520,
+        width: 540,
         custom: true,
         badgeCustom: true,
         kind: "frame",
         fields: [
-          { key: "clueStatus", label: "Clue Status" },
-          { key: "risk", label: "Risk" },
-          { key: "evidenceOwner", label: "Evidence Owner" }
+          { key: "clueStatus", label: text.fields.clueStatus },
+          { key: "risk", label: text.fields.risk },
+          { key: "evidenceOwner", label: text.fields.evidenceOwner }
         ],
         hidden: false
       },
       {
-        type: "ArchivedBeat",
-        label: "Archived Beat",
-        badge: "AB",
+        type: "ArchiveNote",
+        label: text.customTypeLabels.ArchiveNote,
+        badge: "AR",
         color: "#8a8f98",
-        width: 200,
+        width: 220,
         custom: true,
         badgeCustom: true,
         kind: "node",
-        fields: [{ key: "reason", label: "Reason" }],
+        fields: [{ key: "reason", label: text.fields.reason }],
+        hidden: true
+      },
+      {
+        type: "DraftFrame",
+        label: text.customTypeLabels.DraftFrame,
+        badge: "DF",
+        color: "#7f848e",
+        width: 520,
+        custom: true,
+        badgeCustom: true,
+        kind: "frame",
+        eventSheetHidden: true,
+        fields: [{ key: "reason", label: text.fields.reason }],
         hidden: true
       }
     ],
-    characters: [
-      {
-        id: "c0",
-        name: "Mara",
-        role: "Traveler / POV",
-        voice: "Wry, watchful, slow to trust",
-        notes: "Player-facing lead. Used as POV, target of conditions, and the main variable token {traveler}."
-      },
-      {
-        id: "c1",
-        name: "The Conductor",
-        role: "Guide of the Midnight Line",
-        voice: "Formal, warm, knows too much",
-        notes: "Speaker in Dialog nodes. He offers the bargain and reacts to trust changes."
-      },
-      {
-        id: "c2",
-        name: "Old Reyes",
-        role: "Missing watchmaker",
-        voice: "Absent, remembered through clues",
-        notes: "Mentioned by @Old Reyes and tagged as Owner of the pocketwatch and the glass key."
-      },
-      {
-        id: "c3",
-        name: "The Brakeman",
-        role: "Enforcer",
-        voice: "Gruff, impatient",
-        notes: "Present in the train car and Target of the evasion branch."
-      },
-      {
-        id: "c4",
-        name: "Vesper",
-        role: "Remote dispatcher",
-        voice: "Dry, clipped, practical",
-        notes: "Mentioned through radio text and Present in the investigation event."
-      }
-    ],
+    characters: text.characters,
     nodes: [
-      { id: "n0", type: "Entry", title: "All Aboard", body: "The Midnight Line waits at the far platform. {traveler} has a ticket, a lantern, and a watch no one should recognize.", x: 80, y: 700, cast: [{ characterId: "c0", role: "POV" }] },
-      { id: "lf1", type: "LocationFrame", title: "Far Platform", body: "A frame for the station-side beats. Frames appear in Events Sheet unless that frame type is hidden there.", x: 220, y: 220, width: 1040, height: 900, customFields: { region: "North terminal", mood: "Fog, brass, late departures" } },
-      { id: "e1", type: "StorySequence", title: "Boarding the Line", body: "Custom Story Sequence frame. All frame presets share the same frame behavior and can appear in Events Sheet.", x: 270, y: 340, width: 920, height: 700, act: "I", chapter: "1", beatList: "Boarding / ticket check", eventType: "Opening Scene", eventDescription: "Mara boards the Midnight Line, meets the Conductor, and lights the lantern.", location: "Far Platform", timeWeather: "00:03 / fog", questEpisode: "Q01", customFields: { status: "Drafted" } },
-      { id: "n1", type: "Content", title: "Platform 9, Midnight", body: "Fog swallows the rails. The watch once owned by @Old Reyes is heavier than it looks in {traveler}'s coat.", x: 320, y: 520, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c2", role: "Mentioned" }] },
-      { id: "n16", type: "Condition", title: "First-time briefing?", body: "talked_to_conductor == false", condition: "talked_to_conductor == false", x: 600, y: 520, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
-      { id: "n2", type: "Dialog", title: "The Conductor", body: "Tickets, please. {traveler}, is it? The Line has been waiting for that watch.", x: 880, y: 500, cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c0", role: "Present" }] },
-      { id: "n18", type: "Dialog", title: "The Conductor", body: "You know the terms now: the watch, the key, or the cold compartment. Do not make the Line repeat itself.", x: 880, y: 760, cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c0", role: "Present" }] },
-      { id: "n3", type: "Set", title: "Light the lantern", body: "lantern_lit = true", variable: "lantern_lit", value: "true", x: 600, y: 785, cast: [{ characterId: "c0", role: "POV" }] },
-      { id: "n13", type: "Marker", title: "Designer note", body: "Playbook actions now mirror dialogue-graph rules: talked_to_conductor picks first briefing or repeat line, knows_old_reyes unlocks an extra branch, and trust_level plus lantern_lit gates the map door.", x: 950, y: 930 },
-      { id: "e2", type: "StorySequence", title: "The Bargain", body: "Choice, Set, and conditional branch outcome nodes inside the custom Story Sequence frame preset.", x: 1240, y: 340, width: 1160, height: 860, act: "II", chapter: "2", beatList: "Watch bargain", eventType: "Choice", eventDescription: "The Conductor asks for Reyes's pocketwatch; Mara can spend prior knowledge to improve trust before the bargain resolves.", location: "Car 3", timeWeather: "00:17 / rain on glass", questEpisode: "Q02", customFields: { status: "Branching" } },
-      { id: "cf1", type: "ConversationFrame", title: "Three-way bargain", body: "A nested conversation frame for Mara, the Conductor, and Vesper. Collapse it to see the exchange as one conversation beat while keeping the choice and variable logic inside.", x: 1510, y: 430, width: 850, height: 390, customFields: { participants: "Mara / The Conductor / Vesper", summary: "Prior knowledge and radio advice reshape the watch bargain." }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }, { characterId: "c4", role: "Present" }] },
-      { id: "n17", type: "Condition", title: "Reyes clue available?", body: "knows_old_reyes == true", condition: "knows_old_reyes == true", x: 1290, y: 500, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c2", role: "Mentioned" }] },
-      { id: "n19", type: "Dialog", title: "Three-way warning", body: "Mara: I met Old Reyes before boarding. He said the watch only opens for someone willing to lose it.\nThe Conductor: Reyes always did mistake sacrifice for proof.\nVesper: Radio says the Brakeman heard that. Keep the lantern lit and choose fast.", turns: [{ speaker: "Mara", line: "I met Old Reyes before boarding. He said the watch only opens for someone willing to lose it." }, { speaker: "The Conductor", line: "Reyes always did mistake sacrifice for proof." }, { speaker: "Vesper", line: "Radio says the Brakeman heard that. Keep the lantern lit and choose fast." }], x: 1580, y: 500, cast: [{ characterId: "c0", role: "Speaker" }, { characterId: "c1", role: "Speaker" }, { characterId: "c4", role: "Speaker" }, { characterId: "c2", role: "Mentioned" }] },
-      { id: "n20", type: "Set", title: "Share Reyes warning", body: "knows_old_reyes = false; trust_level += 1", variable: "knows_old_reyes", value: "false", x: 1580, y: 735, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
-      { id: "n21", type: "Set", title: "Briefing complete", body: "talked_to_conductor = true", variable: "talked_to_conductor", value: "true", x: 1880, y: 735, cast: [{ characterId: "c1", role: "Speaker" }] },
-      { id: "n4", type: "Choice", title: "The Conductor", body: "A gloved hand opens between you and the aisle. Prior knowledge, trust, and the lantern now decide which branch can survive the next gate.", choiceRevealMode: "disabled", choices: ["Offer the watch", "Hide the watch", "Ask about Old Reyes"], choiceOptions: [{ id: "opt_offer_watch", label: "Offer the watch", requires: "trust_level >= 1", effects: [{ trigger: "onChoose", op: "set", key: "reyes_watch_offered", value: "true" }, { trigger: "onChoose", op: "add", key: "trust_level", value: "1" }] }, { id: "opt_hide_watch", label: "Hide the watch", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "guard_suspicion", value: "1" }] }, { id: "opt_ask_reyes", label: "Ask about Old Reyes", requires: "knows_old_reyes == true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "radio" }] }], x: 1900, y: 500, stateLogic: { effects: [{ trigger: "onChoose", op: "set", key: "bargain_started", value: "true" }] }, cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c0", role: "Present" }] },
-      { id: "n5", type: "Set", title: "Offer the watch", body: "trust_level = 2", variable: "trust_level", value: "2", x: 1290, y: 800, stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "route", value: "watch" }, { trigger: "onVisit", op: "set", key: "reyes_watch_offered", value: "true" }] }, cast: [{ characterId: "c2", role: "Owner" }, { characterId: "c1", role: "Present" }] },
-      { id: "n6", type: "Content", title: "Hide it from the Brakeman", body: "{traveler} slips the watch deeper into her coat. The Brakeman notices the movement.", x: 1570, y: 800, stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "route", value: "hide" }, { trigger: "onVisit", op: "add", key: "guard_suspicion", value: "1" }] }, cast: [{ characterId: "c3", role: "Target" }, { characterId: "c0", role: "POV" }] },
-      { id: "n14", type: "Dialog", title: "Vesper radio check", body: "Vesper: Radio check. If the lantern is lit, follow the blue carriage marks.", turns: [{ speaker: "Vesper", line: "Radio check. If the lantern is lit, follow the blue carriage marks." }], x: 1850, y: 520, stateLogic: { requirements: "lantern_lit == true", effects: [{ trigger: "onVisit", op: "set", key: "route", value: "radio" }] }, cast: [{ characterId: "c4", role: "Speaker" }, { characterId: "c0", role: "Present" }] },
-      { id: "e3", type: "InvestigationEvent", title: "Glass Key Investigation", body: "Custom frame preset. Its fields appear as extra Events Sheet columns for this group.", x: 2320, y: 340, width: 1060, height: 760, act: "II", chapter: "3", beatList: "Find the glass key", eventType: "Investigation", eventDescription: "Mara checks the luggage rack, identifies the key, and decides whether she has enough trust to use it.", location: "Luggage car", timeWeather: "00:31 / sparks outside", questEpisode: "Q03", customFields: { status: "Needs clue art", clueStatus: "Found", risk: "Medium", evidenceOwner: "Old Reyes" }, cast: [{ characterId: "c4", role: "Present" }] },
-      { id: "n7", type: "Condition", title: "Enough trust and lantern?", body: "trust_level >= 2 && lantern_lit == true", condition: "trust_level >= 2 && lantern_lit == true", x: 2370, y: 520, cast: [{ characterId: "c0", role: "POV" }] },
-      { id: "n8", type: "Clue", title: "Glass Key", body: "A brittle key catches lantern light. It is stamped with Reyes's maker mark.", x: 2660, y: 520, customFields: { evidence: "Maker mark R-17", owner: "Old Reyes", outcome: "Unlocks the map door" }, cast: [{ characterId: "c2", role: "Owner" }, { characterId: "c4", role: "Present" }] },
-      { id: "n9", type: "Content", title: "Map door opens", body: "The Conductor nods. A door unlocks that was never printed on the map.", x: 3000, y: 520, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
-      { id: "n10", type: "Content", title: "Cold compartment", body: "The Brakeman blocks the aisle. {traveler} has to bluff with a ticket and a dark lantern.", x: 2660, y: 795, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c3", role: "Target" }] },
-      { id: "e4", type: "StorySequence", title: "Terminus", body: "Routing and epilogue beats gathered into the final Story Sequence frame.", x: 980, y: 1220, width: 1060, height: 620, act: "III", chapter: "4", beatList: "Terminus arrival", eventType: "Resolution", eventDescription: "Branches merge at the northern terminus; the watch points to the next mystery.", location: "Northern Terminus", timeWeather: "05:40 / pale dawn", questEpisode: "Q04", customFields: { status: "Outline" } },
-      { id: "n11", type: "Content", title: "Merge at Terminus", body: "Routing example: this node jumps to the Epilogue by title after branch convergence.", x: 1030, y: 1400, routing: { mode: "goTo", target: "Epilogue" } },
-      { id: "n12", type: "Content", title: "Epilogue", body: "Dawn. {traveler} steps down at the edge of the northern dark, the watch warm in her hand.", x: 1320, y: 1400, stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "route", value: "terminus" }] }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c2", role: "Mentioned" }] },
-      { id: "n15", type: "Marker", title: "Next pass", body: "Try filtering Characters for Mara, filtering Events for boarding, exporting Characters.json, and opening Advanced JSON.", x: 1660, y: 1645 }
+      { id: "n0", type: "Entry", x: 80, y: 680, ...text.nodes.n0 },
+      { id: "lf1", type: "LocationFrame", x: 210, y: 220, width: 1140, height: 940, ...text.nodes.lf1 },
+      { id: "e1", type: "StorySequence", x: 270, y: 340, width: 980, height: 760, act: "I", chapter: "1", frameId: "lf1", customFields: { status: text.nodes.e1.status }, ...text.nodes.e1 },
+      { id: "n1", type: "Content", x: 320, y: 520, frameId: "e1", ...text.nodes.n1 },
+      { id: "n2", type: "Clue", x: 620, y: 520, frameId: "e1", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "playbook_seen", value: "true" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n2.title }] }, ...text.nodes.n2 },
+      { id: "n3", type: "InterviewNote", x: 920, y: 520, frameId: "e1", routing: { mode: "goTo", target: text.nodes.n4.title }, stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "script_builder_seen", value: "true" }, { trigger: "onVisit", op: "append", key: "walkthrough_notes", value: "playbook_manual" }] }, ...text.nodes.n3 },
+      { id: "n4", type: "Choice", x: 620, y: 820, frameId: "e1", choiceRevealMode: "disabled", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n2.title }] }, ...text.nodes.n4 },
+      { id: "n5", type: "Content", x: 1280, y: 540, ...text.nodes.n5, body: workflowBranchBody, variable: "", value: "" },
+      { id: "n6", type: "Dialog", x: 1280, y: 820, ...text.nodes.n6 },
+      { id: "e2", type: "StorySequence", x: 1540, y: 340, width: 1280, height: 840, act: "II", chapter: "2", customFields: { status: text.nodes.e2.status }, ...text.nodes.e2 },
+      { id: "cf1", type: "ConversationFrame", x: 1840, y: 430, width: 900, height: 370, frameId: "e2", ...text.nodes.cf1 },
+      { id: "n7", type: "Choice", x: 1600, y: 560, frameId: "e2", choiceRevealMode: "disabled", ...text.nodes.n7 },
+      { id: "n8", type: "Clue", x: 1960, y: 560, frameId: "e2", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n8.title }] }, ...text.nodes.n8 },
+      { id: "n9", type: "InterviewNote", x: 2320, y: 560, frameId: "cf1", stateLogic: { effects: [{ trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "append", key: "walkthrough_notes", value: "cast_backlinks" }] }, ...text.nodes.n9 },
+      { id: "n10", type: "Content", x: 2320, y: 850, frameId: "e2", ...text.nodes.n10, body: conditionGateBody, condition: "", stateLogic: { requirements: conditionGateRequirement } },
+      { id: "e3", type: "InvestigationEvent", x: 2900, y: 340, width: 1220, height: 900, act: "III", chapter: "3", customFields: { status: text.nodes.e3.status, clueStatus: text.nodes.e3.clueStatus, risk: text.nodes.e3.risk, evidenceOwner: text.nodes.e3.evidenceOwner }, ...text.nodes.e3 },
+      { id: "n11", type: "Clue", x: 2960, y: 540, frameId: "e3", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "state_index_ready", value: "true" }, { trigger: "onVisit", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n11.title }] }, ...text.nodes.n11 },
+      { id: "n12", type: "Choice", x: 3290, y: 540, frameId: "e3", choiceRevealMode: "disabled", ...text.nodes.n12 },
+      { id: "n13", type: "Clue", x: 3660, y: 540, frameId: "e3", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "preview_checked", value: "true" }, { trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n13.title }] }, ...text.nodes.n13 },
+      { id: "e4", type: "StorySequence", x: 1450, y: 1320, width: 1480, height: 760, act: "IV", chapter: "4", customFields: { status: text.nodes.e4.status }, ...text.nodes.e4 },
+      { id: "n14", type: "Choice", x: 1520, y: 1520, frameId: "e4", choiceRevealMode: "disabled", ...text.nodes.n14 },
+      { id: "n15", type: "Content", x: 1960, y: 1360, frameId: "e4", ...text.nodes.n15 },
+      { id: "n16", type: "Content", x: 2240, y: 1500, frameId: "e4", ...text.nodes.n16 },
+      { id: "n17", type: "Content", x: 1960, y: 1660, frameId: "e4", ...text.nodes.n17 },
+      { id: "n18", type: "Content", x: 2540, y: 1660, frameId: "e4", ...text.nodes.n18 },
+      { id: "n19", type: "Marker", x: 3180, y: 1500, ...text.nodes.n19 },
+      { id: "df1", type: "DraftFrame", x: 4300, y: 540, width: 620, height: 360, ...text.nodes.df1 }
     ],
     links: [
       { id: "l0", from: "n0", to: "n1" },
-      { id: "l1", from: "n1", to: "n16" },
-      { id: "l2", from: "n16", to: "n2", label: "true", choiceIndex: 0 },
-      { id: "l3", from: "n16", to: "n18", label: "false", choiceIndex: 1 },
-      { id: "l16", from: "n2", to: "n3" },
-      { id: "l17", from: "n3", to: "n17" },
-      { id: "l18", from: "n17", to: "n19", label: "true", choiceIndex: 0 },
-      { id: "l19", from: "n17", to: "n21", label: "false", choiceIndex: 1 },
-      { id: "l20", from: "n19", to: "n20" },
-      { id: "l21", from: "n20", to: "n21" },
-      { id: "l22", from: "n21", to: "n4" },
-      { id: "l23", from: "n18", to: "n4" },
-      { id: "l4", from: "n4", to: "n5", label: "Offer the watch", choiceIndex: 0, choiceOptionId: "opt_offer_watch" },
-      { id: "l5", from: "n4", to: "n6", label: "Hide the watch", choiceIndex: 1, choiceOptionId: "opt_hide_watch" },
-      { id: "l6", from: "n4", to: "n14", label: "Ask about Old Reyes", choiceIndex: 2, choiceOptionId: "opt_ask_reyes" },
+      { id: "l1", from: "n1", to: "n2" },
+      { id: "l2", from: "n2", to: "n3" },
+      { id: "l3", from: "n3", to: "n4" },
+      { id: "l4", from: "n4", to: "n5", label: text.nodes.n4.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_map_story" },
+      { id: "l5", from: "n4", to: "n6", label: text.nodes.n4.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_write_dialog" },
+      { id: "l6", from: "n4", to: "n6", label: text.nodes.n4.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_open_playbook" },
       { id: "l7", from: "n5", to: "n7" },
       { id: "l8", from: "n6", to: "n7" },
-      { id: "l9", from: "n14", to: "n7" },
-      { id: "l10", from: "n7", to: "n8", label: "true", choiceIndex: 0 },
-      { id: "l11", from: "n7", to: "n10", label: "false", choiceIndex: 1 },
+      { id: "l9", from: "n7", to: "n8", label: text.nodes.n7.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_choice_effects" },
+      { id: "l10", from: "n7", to: "n9", label: text.nodes.n7.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_node_effects" },
+      { id: "l11", from: "n7", to: "n14", label: text.nodes.n7.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_action_rules" },
       { id: "l12", from: "n8", to: "n9" },
-      { id: "l13", from: "n9", to: "n11" },
+      { id: "l13", from: "n9", to: "n10" },
       { id: "l14", from: "n10", to: "n11" },
-      { id: "l15", from: "n11", to: "n12" }
+      { id: "l16", from: "n11", to: "n12" },
+      { id: "l17", from: "n12", to: "n13", label: text.nodes.n12.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_run_validation" },
+      { id: "l18", from: "n12", to: "n13", label: text.nodes.n12.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_document_notes" },
+      { id: "l19", from: "n12", to: "n13", label: text.nodes.n12.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_mark_review_ready" },
+      { id: "l20", from: "n13", to: "n14" },
+      { id: "l21", from: "n14", to: "n15", label: text.nodes.n14.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_return_content" },
+      { id: "l22", from: "n14", to: "n16", label: text.nodes.n14.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_play_preview" },
+      { id: "l23", from: "n14", to: "n17", label: text.nodes.n14.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_organize_notes" },
+      { id: "l24", from: "n14", to: "n18", label: text.nodes.n14.choiceOptions[3].label, choiceIndex: 3, choiceOptionId: "opt_finish_practice" },
+      { id: "l25", from: "n19", to: "n14" }
     ]
   };
 }
@@ -479,14 +922,89 @@ const uiTranslations = {
   zh: {
     "Add": "添加",
     "Add character": "添加角色",
+    "Add condition": "添加条件",
     "Add frame": "添加框架",
+    "Add variable action": "添加变量动作",
     "Add play rule": "添加演示规则",
+    "Add preview rule": "添加预览规则",
     "All play rules already enabled.": "演示规则已全部启用。",
-    "OK": "OK",
+    "All preview rules already enabled.": "预览规则已全部启用。",
+    "OK": "通过",
+    "Always available": "始终可用",
+    "Demo run can meet this condition": "演示流程可满足此条件",
+    "Requires demo run progress": "需在演示流程中达成此条件",
+    "Expression valid": "表达式可解析",
+    "Effect lines OK": "效果语句通过",
+    "{count} effect lines OK": "{count} 行效果语句通过",
+    "Effect line {line}: {message}": "第 {line} 行效果：{message}",
+    "Invalid effect syntax": "效果语法无法解析",
+    "Effect key is required.": "需要填写效果状态键。",
+    "Confirm OK": "确定",
     "Invalid expression": "表达式无法解析",
+    "JSON": "JSON",
+    "Option": "选项",
+    "Choice condition": "选择条件",
+    "Is true": "为真",
+    "Is false": "为假",
+    "Equals": "等于",
+    "Not equals": "不等于",
+    "At least": "大于等于",
+    "At most": "小于等于",
+    "Greater than": "大于",
+    "Less than": "小于",
+    "Contains": "包含",
+    "And": "并且",
+    "Or": "或者",
+    "All conditions": "全部满足",
+    "Any condition": "满足其一",
+    "Mixed conditions": "混合关系",
+    "Condition relation": "条件关系",
+    "Delete condition": "删除条件",
+    "Condition value is required.": "需要填写条件值。",
+    "Condition deleted.": "已删除条件。",
     "Unknown variable: {key}": "未识别的变量：{key}",
+    "Unknown key": "未知键",
+    "Read-only": "只读",
+    "Written-only": "只写",
+    "Object unreadable": "对象不可直接读取",
+    "Template mismatch": "模板未匹配",
+    "Export risk": "导出风险",
+    "Status details": "状态说明",
+    "Unknown key details": "未知 key",
+    "This key is used by a condition or template, but it has no initial value and no known write in the current project.": "该 key 被条件或模板引用，但当前项目未定义初始值，也未记录写入位置。",
+    "Fix hint: add this key to Variables, correct the spelling, or add an effect that writes it before it is read.": "处理建议：在变量定义中添加该 key，修正拼写，或在读取前添加写入效果。",
+    "Read-only details": "只读状态",
+    "This key is read by a condition, template, or export, but the project does not initialize it.": "该 key 被条件、模板或导出读取，但项目未设置初始值。",
+    "Fix hint: add an initial value in Variables, or document that the target runtime will provide it.": "处理建议：在变量定义中添加初始值；若由目标运行时提供，请在交接说明中注明来源。",
+    "Written-only details": "只写状态",
+    "This key is written by effects or actions, but nothing in the current project reads it.": "该 key 被效果或动作写入，但当前项目未读取该 key。",
+    "Fix hint: keep it only if the target runtime reads it; otherwise remove it or correct the key name.": "处理建议：仅在目标运行时读取该 key 时保留；否则删除该写入或修正 key 名称。",
+    "Object value details": "对象值说明",
+    "This key contains an object or complex value. Runtime JSON can keep it, but conditions, templates, Yarn, and Ink usually need simpler state.": "该 key 包含对象或复杂值。Runtime JSON 可保留该值；条件、模板、Yarn 和 Ink 通常需要扁平状态。",
+    "Fix hint: split the object into flat keys, or use supported list checks such as array_key.includes(value) for arrays.": "处理建议：将对象拆分为扁平 key；数组判断使用 array_key.includes(value)。",
+    "Template mismatch details": "模板未匹配",
+    "A text template references this key, but it does not match a node field or variable. The placeholder may remain unresolved.": "文本模板引用该 key，但该 key 未匹配节点字段或变量。导出后占位符可能保留原文。",
+    "Fix hint: add the variable, rename the placeholder, or use an existing node field name.": "处理建议：添加对应变量，修正占位符名称，或改用已有节点字段名。",
+    "Expression error details": "表达式错误",
+    "A condition related to this key cannot be parsed. The route or option check may not behave as intended.": "关联该 key 的条件无法解析，路线或选项判断可能偏离预期。",
+    "Fix hint: use JavaScript comparisons, && / ||, parentheses, array_key.includes(value), or a bare boolean key.": "处理建议：使用 JavaScript 比较、&& / ||、括号、array_key.includes(value)，或直接使用布尔 key。",
+    "Export risk details": "导出风险说明",
+    "Runtime JSON keeps the richest data. Yarn, Ink, and Twee may rename this state, comment it out, or need custom runtime handling.": "Runtime JSON 保留完整数据；Yarn、Ink 和 Twee 可能重命名该状态、将其注释输出，或要求自定义运行时处理。",
+    "No detailed export warning was attached to this key. Review the export report before handing files to an engine.": "该状态未关联具体导出警告。交付引擎前请检查导出报告。",
+    "Fix hint: use set/add/subtract/toggle for text exports, or handle this operation in your runtime.": "处理建议：文本格式导出使用 set、add、subtract 或 toggle；其他操作由运行时实现。",
+    "Fix hint: use Runtime JSON with a custom loader, or change this node to a default node type before text export.": "处理建议：使用 Runtime JSON 与自定义 loader，或在文本导出前改为默认节点类型。",
+    "Fix hint: flatten this value into simple variables if Yarn or Ink needs to read it.": "处理建议：若 Yarn 或 Ink 需要读取该值，请拆分为简单变量。",
+    "Fix hint: use the exported name in the target format, or rename the state key with underscores before exporting.": "处理建议：在目标格式中使用转换后的名称，或在导出前将状态键转换为下划线命名。",
+    "Fix hint: add this key to Variables with a starting value.": "处理建议：在变量定义中为该 key 添加初始值。",
+    "Fix hint: move this into node or choice effects for text export, or implement the action in your runtime.": "处理建议：文本格式导出时，将该写入移至节点或选项 Effects；否则由运行时实现该动作。",
+    "Fix hint: check this expression in the target engine, or rewrite it as a simpler supported comparison.": "处理建议：在目标引擎中检查该表达式，或改写为更简单的受支持比较。",
+    "Fix hint: use the exported name in the target format.": "处理建议：在目标格式中使用转换后的名称。",
+    "Review the export report before handing files to an engine.": "交付引擎前请检查导出报告。",
+    "Add choice": "添加选项",
     "Add script line": "添加旧脚本行",
+    "Add turn": "添加轮次",
     "Add variable": "添加变量",
+    "Add a variable definition before adding a variable action.": "添加变量动作前，请添加变量定义。",
     "Advanced JSON": "高级 JSON",
     "All": "全部",
     "All characters visible": "显示全部角色",
@@ -494,11 +1012,17 @@ const uiTranslations = {
     "All event rows visible": "显示全部事件行",
     "Action name": "动作名",
     "Action": "动作",
+    "Variable Actions": "变量动作",
+    "Variable Definitions": "变量定义",
+    "Playbook variable actions": "Playbook 变量动作",
+    "Variable Actions write defined Variables outside node rows. Node-specific changes belong in Script Builder or the node inspector.": "变量动作仅写入已定义变量；节点局部变化应写入脚本构建或节点检查器。",
+    "Variable action added.": "已添加变量动作。",
+    "Variable action deleted.": "已删除变量动作。",
+    "Actions": "动作",
     "Actor": "角色",
     "Alert": "提示",
     "Any node": "任意节点",
     "Append": "追加",
-    "Append instead of replacing": "追加而不是替换",
     "Applies to all {count} nodes of type {type}.": "应用到 {count} 个 {type} 类型节点。",
     "Apply to": "应用到",
     "Archived": "已归档",
@@ -506,10 +1030,12 @@ const uiTranslations = {
     "auto": "自动",
     "Body": "正文",
     "Build state changes with Playbook categories.": "用 Playbook 分类构建状态变化。",
+    "Build state changes with Playbook state groups.": "用 Playbook 状态分组构建状态变化。",
     "Buttons": "按钮",
     "Browser storage": "浏览器存储",
-    "A new project file will be created when possible.": "可以创建文件时会新建一个项目文件。",
+    "A new project file will be created when possible.": "满足创建条件时，新建项目文件。",
     "Cancel": "取消",
+    "Canvas": "画布",
     "Category": "分类",
     "Center": "居中",
     "Center canvas": "画布居中",
@@ -517,13 +1043,17 @@ const uiTranslations = {
     "Characters Markdown exported.": "角色 Markdown 已导出。",
     "Characters JSON exported.": "角色 JSON 已导出。",
     "Characters.md opened.": "Characters.md 已打开。",
+    "Cast": "演员表",
     "Clear": "清除",
     "Clear character focus": "清除角色聚焦",
     "Clear character search": "清除角色搜索",
     "Clear event search": "清除事件搜索",
+    "Clear manual drag order and re-sort by the canvas flow": "清除手动拖动顺序，并按画布流程重新排序",
+    "Clear manual drag order and re-sort rows by the canvas flow": "清除手动行顺序，并按画布流程重新排序",
     "Clear storage": "清除存储",
     "Confirm": "确认",
     "Collapse": "折叠",
+    "Collapse frame": "折叠框架",
     "Collapse left sidebar": "折叠左侧栏",
     "Collapse right sidebar": "折叠右侧栏",
     "Create": "创建",
@@ -531,22 +1061,40 @@ const uiTranslations = {
     "Dark": "深色",
     "Delete": "删除",
     "Delete character": "删除角色",
+    "Delete choice": "删除选项",
     "Delete link": "删除连线",
     "Delete node": "删除节点",
+    "Delete turn": "删除轮次",
+    "Delete {label}?": "删除 {label}？",
+    "Cannot delete {label}": "无法删除 {label}",
+    "\"{label}\" is still used by {count} canvas nodes, so it cannot be deleted. Hide it from the Node Library instead, or change those nodes to another type first.": "“{label}” 仍被 {count} 个画布节点使用，无法删除。可将其从节点库隐藏，或将这些节点改为其他类型后再删除。",
+    "Default node type \"{label}\" cannot be deleted. Hide it from the Node Library if you do not need it right now.": "默认节点类型 “{label}” 不能删除。如暂不需要，可将其从节点库隐藏。",
+    "Delete \"{label}\" from the Node Library schema? {recovery}": "从节点库结构中删除 “{label}”？{recovery}",
+    "Restore default types can bring this template back.": "通过“恢复默认类型”可恢复该模板。",
+    "Custom deleted types can only come back by importing or recreating them.": "自定义删除的类型只能通过导入或重新创建找回。",
     "Delete selected nodes": "删除选中的节点",
     "Delete script line": "删除旧脚本行",
+    "Delete action": "删除动作",
     "Description": "描述",
     "Destination label": "目标标签",
     "Destination note": "目标备注",
     "Condition": "条件",
+    "Condition added.": "已添加条件。",
+    "Condition expression is empty.": "条件表达式为空。",
+    "Condition expression": "条件表达式",
     "Content": "内容",
     "Choices": "选项",
     "Choice prompt": "选择提示",
+    "Choice text": "选项文本",
     "Choices, one per line": "选项，每行一个",
+    "Convert to property": "转换为属性",
+    "Copy turn": "复制轮次",
+    "Disabled": "停用",
     "Duplicate": "复制",
     "Drag to reorder": "拖动排序",
     "Drag to resize": "拖动调整大小",
     "Edit": "编辑",
+    "Enabled": "启用",
     "Empty rule": "空规则",
     "Event search cleared.": "事件搜索已清除。",
     "Event Frame": "事件框架",
@@ -560,7 +1108,81 @@ const uiTranslations = {
     "Export full project JSON": "导出完整项目 JSON",
     "Export JSON": "导出 JSON",
     "Export MD": "导出 MD",
+    "Project files": "项目文件",
+    "Export project files": "导出项目文件",
+    "Project .json": "项目文件 .json",
+    "Story .md": "剧情文本 .md",
+    "Layout .json": "画布布局 .json",
+    "State .json": "状态定义 .json",
+    "State schema .json": "状态定义 .json",
+    "Profile .json": "格式档案 .json",
+    "Export profile .json": "格式档案 .json",
+    "Runtime .json": "运行数据 .json",
+    "Runtime data .json": "运行数据 .json",
+    "Export Story MD": "导出剧情文本",
+    "Export Layout JSON": "导出画布布局",
+    "Export State Schema": "导出状态定义",
+    "Export Runtime JSON": "导出运行数据",
+    "Export Yarn": "导出 Yarn",
+    "Export Ink": "导出 Ink",
+    "Export Twee": "导出 Twee",
+    "Export Profile": "格式档案",
+    "Export editable project file (.json)": "导出可重新打开的完整项目文件（.json）",
+    "Export readable story text (.md)": "导出可阅读的剧情文本（.md）",
+    "Export canvas layout sidecar (.json)": "导出剧情文本对应的画布布局（.json）",
+    "Export state definitions and initial values (.json)": "导出变量初值和状态定义（.json）",
+    "Export file manifest and format profile (.json)": "导出文件清单和格式说明（.json）",
+    "Export engine runtime data (.json)": "导出给运行时或引擎读取的剧情数据（.json）",
+    "Export profile sidecar": "导出配置 sidecar",
+    "Export profile JSON exported.": "格式档案 JSON 已导出。",
+    "Export readable story Markdown": "导出可读剧本 Markdown",
+    "Export Story Markdown layout sidecar": "导出 Story Markdown 布局 sidecar",
+    "Export state schema sidecar": "导出状态结构 sidecar",
+    "Import Story Markdown layout sidecar": "导入 Story Markdown 布局 sidecar",
+    "Import state schema sidecar and replace variables": "导入状态结构 sidecar 并替换变量",
+    "Import Story Markdown and replace this project": "导入 Story Markdown 并替换当前项目",
+    "Import story .md": "导入剧情 .md",
+    "Import layout .json": "导入布局 .json",
+    "Import state .json": "导入状态 .json",
+    "Import Layout": "导入布局",
+    "Import Story Markdown and replace this project": "导入 Story Markdown 并替换当前项目",
+    "Import Story Markdown layout sidecar": "导入 Story Markdown 布局 sidecar",
+    "Import state schema sidecar and replace variables": "导入状态定义 sidecar 并替换变量",
+    "Import Story Layout?": "导入 Story Layout？",
+    "Choose a Layout JSON sidecar and apply canvas positions, frame membership, ports, collapsed state, and matching link metadata. Story nodes are not created or deleted.": "选择 Layout JSON sidecar，并应用画布坐标、frame 归属、端口、折叠状态和匹配连线元数据。剧情节点保持不变。",
+    "Import State": "导入状态",
+    "Import State Schema?": "导入 State Schema？",
+    "Choose a State Schema JSON file and replace current project variables with its initial values. Nodes and links stay unchanged.": "选择 State Schema JSON 文件，并用其中的初始值替换当前项目变量。节点和连线保持不变。",
+    "Export Twee / Twine script": "导出 Twee / Twine 脚本",
+    "Export report": "导出报告",
+    "{format} export report": "{format} 导出报告",
+    "No export warnings": "没有导出警告",
+    "{count} export warnings": "{count} 条导出警告",
+    "Runtime JSON keeps the full report. Review any warning before wiring the export into a target engine.": "Runtime JSON 保留完整报告。接入目标引擎前请检查警告。",
+    "Warnings": "警告",
+    "Effect \"{op}\" on \"{key}\" is kept in runtime JSON but commented in text exports.": "效果 “{op}” 作用于 “{key}”；Runtime JSON 保留该效果，文本导出以注释形式标记。",
+    "Custom node type \"{type}\" exports as rendered text and custom fields; target formats may need a custom loader.": "自定义节点类型 “{type}” 导出为渲染文本和自定义字段；目标格式可能需要自定义 loader。",
+    "Playbook action \"{id}\" ({detail}) is kept in runtime JSON but not emitted to text exports.": "Playbook 动作 “{id}”（{detail}）保留在 Runtime JSON 中，但不写入文本导出。",
+    "{count} Playbook action(s) are included in runtime JSON but not emitted to text exports.": "{count} 个 Playbook 动作包含在 Runtime JSON 中，但不写入文本导出。",
+    "Variable \"{key}\" is an array; runtime JSON and Twee keep it, Yarn exports it as a JSON string for membership predicates, and Ink exports a LIST when items are primitive.": "变量 “{key}” 是数组；Runtime JSON 和 Twee 保留该值，Yarn 将其导出为用于成员判断的 JSON 字符串，Ink 在元素为基础值时导出 LIST。",
+    "Variable \"{key}\" is an object; runtime JSON keeps it, Twee initializes it, and Yarn/Ink comment it out.": "变量 “{key}” 是对象；Runtime JSON 保留该值，Twee 初始化该值，Yarn/Ink 将其注释输出。",
+    "State key \"{key}\" exports with \".\" converted to \"_\" in portable text formats.": "状态键 “{key}” 导出到可移植文本格式时，“.” 转换为 “_”。",
+    "State path \"{key}\" exports as \"{exportKey}\" for portable text formats.": "状态路径 “{key}” 导出到可移植文本格式时转换为 “{exportKey}”。",
+    "State key \"{key}\" is referenced or written but has no initial variable value.": "状态键 “{key}” 被读取或写入，但没有初始变量值。",
+    "{kind} \"{source}\" exports as \"{target}\".": "{kind} “{source}” 导出为 “{target}”。",
+    "Variable": "变量",
+    "Node": "节点",
+    "Expression \"{expression}\" is kept in Runtime JSON; Yarn, Ink, and Twee use a false guard.": "表达式 “{expression}” 保留在 Runtime JSON 中；Yarn、Ink 和 Twee 使用 false 条件保护。",
+    "Variable name map": "变量名映射",
+    "Only changed names are shown.": "仅显示转换后的名称。",
+    "No variable names needed conversion.": "没有变量名需要转换。",
+    "Reference: {value}": "位置：{value}",
+    "{count} more warnings are available in Runtime JSON.": "还有 {count} 条警告可在 Runtime JSON 中查看。",
+    "{count} choices": "{count} 个选项",
+    "{count} turns — Play steps through each line. Cast Speaker chips auto-fill from speakers below.": "{count} 轮对话 - Play 会逐句播放；Speaker 演员标签会根据下方说话者自动补齐。",
+    "Export report is unavailable.": "导出报告不可用。",
     "Expand": "展开",
+    "Expand frame": "展开框架",
     "Expand left sidebar": "展开左侧栏",
     "Expand right sidebar": "展开右侧栏",
     "File": "文件",
@@ -573,7 +1195,10 @@ const uiTranslations = {
     "Find in Playbook": "在演示设置中查找",
     "Focus": "聚焦",
     "Frame": "框架",
-    "Gate": "条件门",
+    "Frame membership": "框架归属",
+    "Frame membership already matches current canvas.": "框架归属已与当前画布一致。",
+    "Frame membership updated.": "框架归属已更新。",
+    "Gate": "条件",
     "Gate name": "条件名",
     "Go to": "跳转到",
     "Hide": "隐藏",
@@ -582,9 +1207,7 @@ const uiTranslations = {
     "Hidden": "隐藏",
     "Hidden frame types": "隐藏的框架类型",
     "Hide JSON": "隐藏 JSON",
-    "HTML exported.": "HTML 已导出。",
-    "HTML": "HTML",
-    "Image": "图片",
+    "Export PNG": "导出 PNG",
     "Image export": "图片导出",
     "Image export maximum set to {value}.": "图片最大规格已设为 {value}。",
     "Image export resolution": "图片导出规格",
@@ -592,53 +1215,77 @@ const uiTranslations = {
     "Inspector": "检查器",
     "If": "如果",
     "Item": "物品",
+    "Item State": "物品状态",
     "Key": "键",
     "Light": "浅色",
     "Line": "台词",
     "Link": "连线",
     "Links": "连线",
     "Location": "地点",
+    "Location State": "地点状态",
     "Lock choice": "锁定选项",
+    "Legacy node type": "旧版节点类型",
     "Markdown": "Markdown",
     "manual": "手动",
     "Manual": "手动",
+    "Manual action": "手动动作",
     "Manual Enter": "手动输入",
+    "Manual Key": "手动键",
     "Misc": "杂项",
+    "Misc State": "杂项状态",
+    "Move down": "下移",
+    "Move turn down": "下移轮次",
+    "Move turn up": "上移轮次",
+    "Move up": "上移",
     "Name": "名称",
     "Narration": "叙述",
     "New": "新建",
     "New Canvas": "新画布",
+    "New choice": "新选项",
     "New project": "新建项目",
     "Name the new project": "命名新项目",
     "No .ncanvas selected": "未选择 .ncanvas",
     "No characters yet.": "还没有角色。",
     "No characters yet": "还没有角色",
     "No characters match {query}.": "没有匹配 {query} 的角色。",
+    "No choices yet.": "暂无选项。",
     "No linked scenes yet": "还没有关联场景",
     "No manual cast links.": "还没有手动演员关联。",
+    "No turns yet.": "暂无轮次。",
     "No visible frame nodes yet.": "还没有可显示的框架节点。",
     "No hidden columns": "没有隐藏列",
     "No matching frames.": "没有匹配的框架。",
     "No play rules yet.": "还没有演示规则。",
     "No script lines yet.": "还没有旧脚本行。",
     "No script lines in this category yet.": "该分类下暂无旧脚本行。",
+    "No state references yet.": "还没有状态引用。",
+    "No state issues found.": "没有发现状态问题。",
+    "No visits yet.": "还没有访问记录。",
     "No project file to reload.": "没有可重新加载的项目文件。",
     "No variables yet.": "还没有变量。",
+    "No variables match this variable type.": "当前变量类型没有变量。",
     "Node": "节点",
+    "Node assignment": "节点赋值",
     "Node behavior": "节点行为",
+    "Node choose": "节点选择时",
     "Node color": "节点颜色",
     "Node Library": "节点库",
+    "Node visit": "节点进入时",
     "Nodes": "节点",
     "Notes": "备注",
     "Note": "备注",
     "Opening text": "开场文本",
     "On visit": "进入时",
     "On choose": "选择时",
+    "Selected choice": "选择选项",
+    "Choice effect": "选项效果",
     "Open": "打开",
+    "Optional: split this Dialog into multiple turns so a single node carries a back-and-forth exchange.": "可选：将该 Dialog 拆成多轮，让单个节点承载来回对话。",
     "Owned nodes": "拥有的节点",
     "Play": "演示",
     "Play from entry": "从入口演示",
     "Play rules": "演示规则",
+    "Play Rules": "演示规则",
     "{pages} play pages, {frames} frames": "{pages} 个演示页，{frames} 个框架",
     "Playbook": "演示设置",
     "Project": "项目",
@@ -660,6 +1307,7 @@ const uiTranslations = {
     "Reset sheet columns?": "重置表格列？",
     "Resize": "调整大小",
     "Restore default types": "恢复默认类型",
+    "Restore node type": "恢复节点类型",
     "Role": "定位",
     "Rule": "规则",
     "Run": "运行",
@@ -673,81 +1321,196 @@ const uiTranslations = {
     "Search": "搜索",
     "Scene title": "场景标题",
     "Select character...": "选择角色...",
+    "Speaker": "说话者",
     "Speaker scenes": "发言场景",
+    "Present": "出场",
+    "Mentioned": "提及",
+    "Owner": "拥有者",
     "Show": "显示",
     "Show this frame type in Events Sheet": "在事件表中显示这一类框架",
     "Show fewer": "收起",
     "Set": "设置",
     "Present scenes": "出现场景",
-    "Script Builder": "脚本构建器",
+    "Script Builder": "脚本构建",
     "Script line added.": "脚本行已添加。",
     "Script line deleted.": "脚本行已删除。",
     "Sim Status": "模拟状态",
+    "Sim State": "模拟状态",
     "Mentioned in": "被提及于",
     "POV scenes": "POV 场景",
-    "Event frames": "框架",
-    "State categories": "状态分类",
+    "Frames": "框架",
+    "State categories": "状态分组",
+    "State group": "状态分组",
     "State key": "状态键",
+    "State key is required.": "需要填写状态键。",
+    "Defined variable": "已定义变量",
+    "Missing variable": "缺失变量",
+    "Define this key in Variables before this action can run.": "运行该动作前，需在变量定义中声明该 key。",
+    "Variable type": "变量类型",
+    "Variable": "变量",
+    "String": "字符串",
+    "Number": "数字",
+    "Boolean": "布尔",
+    "Array": "数组",
+    "Object": "对象",
+    "Legacy / missing": "旧版 / 缺失",
+    "Operation not available for this variable type.": "当前变量类型不支持该操作。",
     "Story": "故事",
+    "Story MD source": "Story MD 源",
+    "Story source workflow": "文本源工作流",
     "Start label": "起点标签",
     "Subtract": "减去",
+    "System rule": "系统规则",
     "Target scenes": "目标场景",
     "Text": "文本",
+    "Text source": "文本源",
+    "Text Source Mode": "文本源模式",
     "Title": "标题",
     "Toggle": "切换",
+    "Invert": "取反",
+    "Legacy global choose trigger": "旧版全局选择时",
+    "Legacy node choose trigger": "旧版节点选择时",
+    "Use Choice Effects": "使用选择时效果",
+    "Move this into a Choice option effect.": "请移至选项的选择时效果。",
+    "This old global on-choose trigger is still loaded for compatibility. New choice changes belong in each option's On choose effects.": "旧版全局选择时触发器仍会兼容读取。新的选择变化请写入每个选项的选择时效果。",
     "Switch to dark theme": "切换到深色模式",
     "Switch to light theme": "切换到浅色模式",
     "Switch language": "切换语言",
     "Switch to Chinese": "切换到中文",
     "Switch to English": "切换到英文",
     "Type": "类型",
+    "Turns": "对话轮次",
     "Untitled Story": "未命名故事",
     "Unnamed Character": "未命名角色",
+    "Use Story MD as the source workflow": "使用 Story MD 作为源工作流",
     "Variable": "变量",
+    "Initial": "初始值",
+    "Import MD": "导入 MD",
+    "Import Story Markdown?": "导入 Story Markdown？",
+    "Choose a Story Markdown file and replace the current canvas project. This does not watch files, merge external edits, or preserve canvas-only fields unless you also keep the layout sidecar.": "选择 Story Markdown 文件并替换当前 canvas 项目。此操作不监听文件、不合并外部编辑，也不保留仅存在于 canvas 的字段；需要布局信息时请同时保留 layout sidecar。",
+    "Layout JSON": "布局",
+    "Read by": "读取位置",
+    "Written by": "写入位置",
+    "Interpolated by": "插值位置",
+    "Status": "状态",
     "Unsaved": "未保存",
+    "Unavailable choices": "不可用选项",
     "Unlock choice": "解锁选项",
     "Value": "值",
     "Variables": "变量",
+    "Validation": "校验",
     "When": "时机",
     "True": "True",
     "False": "False",
+    "Template values": "模板变量",
+    "Affected values": "会影响的变量",
+    "No template values.": "没有模板变量。",
+    "No affected values.": "没有会被影响的变量。",
+    "current": "当前",
+    "Choice effect": "选项效果",
+    "Node effect": "节点效果",
+    "Variable action": "变量动作",
     "Custom": "自定义",
     "Add effect": "添加效果",
     "Apply": "应用",
-    "Batch-edit node requirements, effects, and routing. These are the same fields shown inside each node.": "批量编辑节点的条件要求、效果和路线；这些字段和节点内部显示的是同一组。",
-    "Batch-edit node Requirements, Effects, and Routing in Script Builder.": "在脚本构建器中批量编辑节点的条件要求、效果和路线。",
+    "Batch-edit node requirements, node effects, and routing. For ordinary per-node logic, use this instead of Actions.": "批量编辑节点条件、节点效果和路线。节点局部逻辑应在此处维护。",
+    "Batch-edit node requirements, node effects, and routing. For ordinary per-node logic, use this instead of Variable Actions.": "批量编辑节点条件、节点效果和路线。节点局部逻辑应在此处维护。",
+    "Batch-edit node Requirements, Effects, and Routing in Script Builder.": "在脚本构建中批量编辑节点的条件要求、效果和路线。",
+    "Batch-edit node logic rows: Requirements, Effects, and Routing.": "批量编辑节点逻辑行：条件要求、效果和路线。",
     "Bring forward": "上移一层",
     "Bring to front": "置于顶层",
-    "Can do": "可以做",
-    "Cannot do": "不能做",
-    "Control the demo runner with Start Node, Choice Display, End Condition, Visit Tracking, and Debug Mode.": "用起始节点、选项显示、结束条件、访问记录和调试模式控制演示路线。",
+    "Can do": "用途",
+    "Cannot do": "不支持",
+    "Control the demo runner with Start Node, End Condition, Debug Mode, and the Visit Tracking toggle inside Debug Mode.": "通过起始节点、结束条件、调试模式及其内部的访问记录开关配置演示路线。",
+    "Control Play preview with Start Node, End Condition, Debug Mode, and the Visit Tracking toggle inside Debug Mode.": "通过起始节点、结束条件、调试模式及其内部的访问记录开关配置演示预览。",
     "Create canvas links, move nodes, or change layout.": "创建画布连线、移动节点或更改布局。",
-    "Choice Display": "选项显示",
-    "Choose the exact node title Play starts from.": "填写演示开始时使用的精确节点标题。",
+    "Choose the exact node title Play starts from.": "填写 Play 起始节点的精确标题。",
+    "Choose whether unavailable choices are hidden or disabled.": "设置条件未满足选项的显示方式：隐藏或禁用。",
+    "Choose how unavailable choices appear in Play preview: hidden, disabled, or shown.": "设置条件未满足选项在预览中的显示方式：隐藏、禁用或显示。",
+    "Choose the exact node title where Play preview starts. This does not change canvas links or layout.": "填写 Play 预览起始节点的精确标题。该设置只影响 Play 弹窗，不修改画布连线或布局。",
+    "End Play preview when this condition becomes true. Route checks such as route == ending work well here.": "条件成立时结束 Play 预览。常用格式：route == ending。",
+    "Record visited nodes while previewing, so you can check whether the route reached the expected scenes.": "预览时记录已访问节点，用于核查路线可达性。",
+    "Show state values and condition results in Play preview, so it is easier to see why a choice appears or disappears.": "在 Play 预览中显示变量值和条件结果，用于定位选项显示原因。",
+    "Playbook keeps runtime state and preview settings. It does not edit the canvas layout.": "Playbook 管理运行时状态和预览设置；画布布局由 Canvas 编辑区维护。",
+    "Save variables such as route or trust_level for conditions, effects, and text templates.": "声明 route、trust_level 等变量，供条件、效果和文本模板读取。",
+    "Batch-edit each node's requirements, effects, and routing.": "批量编辑各节点的进入条件、状态效果和路线。",
+    "Choose how Play preview starts, stops, records visits, and shows debug details.": "配置 Play 预览的起点、结束条件、访问记录和调试信息。",
+    "Check missing keys, expression problems, and export risks before handing files off.": "交付前校验缺失 key、表达式错误和导出风险。",
+    "Edit the raw Playbook.json when you need an exact JSON change.": "需要精确修改 JSON 时，编辑 Playbook.json 原文。",
+    "Change canvas links, node positions, or layout.": "修改画布连线、节点位置或布局。",
+    "Change node type fields; edit the Node Library schema instead.": "修改节点类型字段；这类结构设置应在节点库中完成。",
+    "Act as a game engine. Complex runtime logic still belongs in the target engine.": "替代游戏引擎；复杂运行逻辑应由目标引擎实现。",
+    "Put state in Variables when it needs to be read by conditions, effects, text templates, or exports.": "需要被条件、效果、文本模板或导出读取的状态，应在变量定义中声明。",
+    "Use lower-case underscore keys such as inventory_coins.": "变量名使用小写下划线，例如 inventory_coins。",
+    "Use one key for one piece of state, then reuse it in conditions, effects, and templates.": "每个 key 对应单一状态含义，并在条件、效果和模板中复用。",
+    "Use clue_ or clue. only when you want this key grouped with clue-like state. It is just a list grouping.": "仅在线索类状态分组时使用 clue_ 或 clue. 前缀；该前缀只影响列表分组，不绑定节点实例。",
+    "Script Builder edits per-node logic: entry conditions, state changes, and routing.": "脚本构建编辑节点局部逻辑：进入条件、状态变化和路线。",
+    "Node requirements decide whether the node can be entered.": "节点条件用于判断该节点能否进入。",
+    "Node effects write state when the node is visited or an option is chosen.": "节点效果在访问节点或选择选项时写入状态。",
+    "Routing decides whether the story follows links, ends, or jumps to an exact node title.": "路线定义下一步：沿连线继续、结束，或跳转到指定节点标题。",
+    "Variable Actions are for state writes that do not belong to a single node. Most node logic should stay in Script Builder or the node panel.": "变量动作记录不属于单个节点的状态写入。节点局部逻辑应写入脚本构建或节点面板。",
+    "Use Variable Actions for manual writes, global bookkeeping, or imported state writes that need to stay outside node rows.": "变量动作用于手动写入、全局记录，或保留导入项目中的节点行外状态写入。",
+    "Add variable actions when a state write should stay outside a single node.": "不属于单个节点的状态写入，可添加变量动作。",
+    "Use the Add variable action button for manual writes, global bookkeeping, or imported state writes that need to stay outside node rows.": "手动写入、全局记录或导入项目中的节点行外状态写入，可使用添加变量动作按钮。",
+    "Put state in Variable Definitions when it needs to be read by conditions, effects, text templates, or exports.": "需要被条件、效果、文本模板或导出读取的状态，应放在变量定义中。",
+    "Use Append when the new value should be added to a list instead of replacing the old value.": "需要向列表加入新值时使用 Append；需要覆盖旧值时使用 Set。",
+    "When a state write belongs to a specific node or choice, put it in that node or choice effect so export stays easier to read.": "属于特定节点或选项的状态写入，应写入对应节点效果或选项效果，以提高导出可读性。",
+    "Choice Conditions batch-edit the conditions that make Choice options available.": "选项条件用于批量编辑 Choice 选项的可用条件。",
+    "Each row belongs to one Choice option. When the condition is met, the option is available in Play preview.": "每行对应一个 Choice 选项。条件成立时，该选项在 Play 预览中可用。",
+    "Conditions only decide availability; they do not write state.": "条件只决定是否可用，不写入状态。",
+    "Legacy condition rows are shown here only so older projects can be migrated or cleaned up.": "旧版条件行仅用于旧项目迁移或清理。",
+    "Play preview rules only affect the Play dialog. They are for testing routes, not for changing the project structure.": "Play 预览规则仅影响 Play 弹窗，用于路线测试，不修改项目结构。",
+    "Start Node uses an exact node title for the first Play preview scene.": "起始节点使用精确节点标题作为 Play 预览的第一幕。",
+    "Each Choice node decides whether unavailable choices are hidden or disabled.": "每个 Choice 节点单独决定不可用选项隐藏或禁用。",
+    "End Condition stops preview when a state check becomes true.": "结束条件成立时停止预览。",
+    "Debug Mode and its Visit Tracking toggle help you inspect the route while previewing.": "调试模式及其访问记录开关用于检查预览路线和状态变化。",
+    "Visit Tracking runs inside Debug Mode and is discarded when preview closes.": "访问记录仅在调试模式内运行，关闭预览后丢弃。",
+    "Enable Debug Mode before Visit Tracking.": "启用访问记录前，请先启用调试模式。",
+    "Record visited nodes while Debug Mode is enabled. The list is discarded when Play preview closes.": "调试模式启用时记录已访问节点；关闭 Play 预览后丢弃列表。",
+    "Validation lists where state keys are read, written, interpolated, and where export needs attention.": "校验页列出每个状态 key 的读取、写入、插值位置和导出注意项。",
+    "Validation reports unknown keys, read-only keys, write-only keys, expression errors, and export risks.": "校验页报告未知 key、只读 key、只写 key、表达式错误和导出风险。",
+    "Advanced JSON is for precise Playbook.json edits. It is useful for review, not the main editing path.": "高级 JSON 用于精确编辑 Playbook.json，适用于审查和修正；主要编辑入口为结构化表单。",
+    "Before exporting to Yarn, Ink, or Twee, review orange and red warnings.": "导出 Yarn、Ink 或 Twee 前，应先检查橙色和红色警告。",
     "Close preview": "关闭演示",
     "Confirm action?": "确认操作？",
+    "Update frame membership?": "更新框架归属？",
+    "\"{frame}\" changed canvas containment: {summary}. Apply the current containment as this frame's membership?": "“{frame}” 的画布包含关系已变化：{summary}。是否将当前包含关系写入该框架归属？",
+    "Update membership": "更新归属",
+    "{count} entered": "{count} 个加入",
+    "{count} left": "{count} 个移出",
     "Choice branch": "选项分支",
     "Condition branch": "条件分支",
     "Continue": "继续",
     "Continue by link": "沿连线继续",
     "Debug": "调试",
     "Debug Mode": "调试模式",
-    "Decide how gated choices appear in Play.": "设置不满足条件的选项在演示中如何显示。",
+    "Decide how gated choices appear in Play.": "设置条件未满足选项在 Play 中的显示方式。",
     "Delete effect": "删除效果",
     "Delete play rule": "删除演示规则",
-    "Delete node fields directly. Use Node Library for schema changes.": "直接增删节点字段。字段结构请在节点库里改。",
+    "Delete node fields directly. Use Node Library for schema changes.": "直接增删节点字段。字段结构应在节点库中维护。",
     "Discard": "放弃",
     "Discard unsaved changes?": "放弃未保存改动？",
     "Edit value": "编辑值",
     "End Condition": "结束条件",
     "End route": "结束路线",
     "Effects": "效果",
+    "Effect added.": "已添加效果。",
+    "Effect lines": "效果语句",
+    "Condition expression": "条件表达式",
+    "Each option is available when its condition is met; selecting it runs its Effects. Empty Requires = always available.": "条件成立时选项可用；选择后执行该选项的效果。条件要求为空表示始终可用。",
     "Event Column": "事件列",
     "Events sheet": "事件表",
     "Exact node title": "精确节点标题",
+    "Export engine runtime JSON": "导出引擎运行时 JSON",
+    "Export ink script": "导出 ink 脚本",
+    "Export Yarn Spinner script": "导出 Yarn Spinner 脚本",
     "Go to title": "跳到标题",
     "Got it": "知道了",
-    "Gate simple branches with conditions such as flag == true.": "用类似 flag == true 的条件控制简单分支。",
+    "Conditions use a safe JavaScript expression subset: bare keys, === / !== comparisons, grouping, && / || / !, array_key.includes(value), and flat-first object paths.": "条件使用安全的 JavaScript 表达式子集：裸 key、=== / !== 比较、括号分组、&& / || / !、array_key.includes(value)，以及扁平优先对象路径。",
+    "Gate simple branches with conditions such as a state check.": "使用状态检查控制简单分支。",
+    "Gate branches with conditions such as a state check.": "使用状态检查控制分支。",
+    "Choice Conditions": "选项条件",
+    "Choice Conditions batch-edit choice requirements. Legacy condition rows are shown here for compatibility.": "选项条件页批量编辑选项条件；旧版条件行保留用于兼容处理。",
     "Hidden characters": "隐藏的角色",
     "Hide character": "隐藏角色",
     "Hide unavailable choices": "隐藏不可用选项",
@@ -756,57 +1519,183 @@ const uiTranslations = {
     "Matches node:": "匹配节点：",
     "Narrative canvas": "叙事画布",
     "Next page": "下一页",
-    "No editable node logic yet.": "还没有可编辑的节点逻辑。",
-    "No effects yet.": "还没有效果。",
+    "No editable node logic yet.": "暂无可编辑节点逻辑。",
+    "No choice conditions yet.": "暂无选项条件。",
+    "No variable actions yet.": "暂无变量动作。",
+    "No variable actions match this variable type.": "当前变量类型没有变量动作。",
+    "No state key": "未填写状态键",
+    "No effects yet.": "暂无效果",
     "No matching node, type, or ID.": "没有匹配的节点、类型或 ID。",
+    "Node requirement": "节点条件",
+    "Node requirements": "节点条件",
+    "Node effects": "节点效果",
     "All characters are hidden.": "所有角色都已隐藏。",
+    "Variable Actions: state writes": "变量动作：状态写入",
+    "Advanced JSON is for exact edits and compatibility checks, not the main workflow.": "高级 JSON 用于精确编辑和兼容检查；主要编辑入口为结构化表单。",
+    "Use the Operation menu's Append option to keep the old value and add the new value to a list.": "在操作菜单中选择追加，可保留原列表并加入新值。",
+    "Click Add variable, then rename new_variable to a prefixed key.": "点击 Add variable，并将 new_variable 重命名为带前缀的 key。",
+    "Click Add variable inside Variable Definitions, then rename new_variable to a clear key.": "在变量定义页点击添加变量，并将 new_variable 重命名为明确 key。",
+    "Close": "关闭",
+    "Clue variables": "变量分组",
+    "Choice panel": "Choice 面板",
+    "Choice requirement": "选项条件",
+    "Condition node": "Condition 节点",
+    "Conditions are not actions.": "条件不是动作。",
+    "Delete a state write with the row's x button, or remove the matching effect in the node inspector.": "删除状态写入：点击行尾 x，或在节点检查器中删除对应 effect。",
+    "Each page covers one Playbook feature.": "每页说明一项 Playbook 功能。",
+    "For Clue grouping, use clue_ or clue. at the start of the variable key.": "Clue 分组使用 clue_ 或 clue. 作为变量 key 前缀。",
+    "If a value must be read by text templates, conditions, variable actions, or exports, put it in Variable Definitions.": "需要被文本模板、条件、变量动作或导出读取的值，应在变量定义中声明。",
+    "Choice conditions": "选项条件",
+    "Legacy action": "旧版动作",
+    "Legacy condition gate": "旧版条件动作",
+    "Legacy runtime-only action": "旧版仅运行时动作",
+    "Legacy gate migrated.": "旧版条件门已迁移。",
+    "Legacy gate trigger": "旧版条件触发器",
+    "Legacy gates": "旧版条件",
+    "Migrate": "迁移",
+    "Migrate this legacy gate into matching node condition fields.": "将该旧版条件迁移至匹配节点的条件字段。",
+    "Next tip": "下一页",
+    "Page {current} of {total}": "第 {current}/{total} 页",
+    "Play preview rules": "演示预览规则",
+    "Previous tip": "上一页",
+    "Node Requirements decide whether a node can be entered. Node Effects write state when the node is visited or chosen. Routing controls where the story goes next.": "节点条件决定节点能否进入；节点效果在进入或选择节点时写入状态；路线定义后续节点。",
+    "Script Builder": "脚本构建",
+    "The Clue group is automatic. It is not a per-node container.": "Clue 分组自动生成，不表示节点实例容器。",
+    "The old gate + if action is still loaded for compatibility. Edit node Requirements in Script Builder; edit choice Requirements in Choice Conditions or the Choice panel.": "旧项目条件动作保留用于兼容；节点条件在脚本构建中编辑，选项条件在选项条件页或 Choice 节点面板中编辑。",
+    "This old action is kept for compatibility. New actions should use state operations.": "旧版动作保留用于兼容。新建动作应使用状态操作。",
+    "This old gate trigger is handled in Choice Conditions.": "旧版条件触发器由选项条件页处理。",
+    "Use Variable Actions only for state writes that should live outside a node row, such as manual actions or legacy imports.": "变量动作仅用于节点行外状态写入，例如手动动作或旧项目导入。",
+    "Use Start Node, End Condition, Debug Mode, and its Visit Tracking toggle to control only the Play dialog.": "使用 Start Node、End Condition、Debug Mode 及其 Visit Tracking 开关配置 Play 预览弹窗。",
+    "Use Validation before exporting to find missing keys, runtime-only features, and portable export warnings.": "导出前使用校验页检查缺失 key、Runtime JSON 专属内容和可迁移导出警告。",
+    "Variables and groups": "变量与分组",
+    "Variable definitions and groups": "变量定义与分组",
+    "Validation and JSON": "校验与 JSON",
     "Playbook sections": "演示设置分区",
-    "Playbook.json stores variables, node logic, and demo runner rules. Variables define state. Script Builder batch-edits node Requirements, Effects, and Routing. Play Rules only control the sample runner: start node, choice display, end condition, visit tracking, and debug mode. It does not run JavaScript or replace a game engine.": "Playbook.json 保存变量、节点逻辑和演示运行规则。变量定义状态；脚本构建器批量编辑节点的条件要求、效果和路线；演示规则只控制样例演示器的起始节点、选项显示、结束条件、访问记录和调试模式。它不会运行 JavaScript，也不能替代游戏引擎。",
+    "State validation": "状态校验",
+    "Target": "目标",
+    "Quest State": "任务状态",
+    "Quest Entry State": "任务条目状态",
+    "Actor State": "角色状态",
+    "Alert State": "提示状态",
+    "Custom State": "自定义状态",
+    "Variable State": "变量状态",
+    "This legacy gate has no target. Add a target before migrating.": "该旧版条件没有目标。迁移前需补充目标。",
+    "Trigger": "时机",
+    "Operation": "操作",
+    "Key": "键",
+    "Value": "值",
+    "Mode": "模式",
+    "Writes": "写入",
+    "Workflow mode": "工作流模式",
+    "Scan conditions, effects, templates, and export risks before playtesting or exporting.": "在演示或导出前校验条件、效果、模板和导出风险。",
+    "{count} state issues": "{count} 个状态问题",
+    "{count} state keys": "{count} 个状态键",
+    "{count} reads": "{count} 次读取",
+    "{count} writes": "{count} 次写入",
+    "{count} templates": "{count} 处模板",
+    "{count} effects": "{count} 个效果",
+    "No initial value": "没有初始值",
+    "No references": "没有引用",
+    "More: {count}": "还有 {count} 个",
+    "Playbook.json stores variables, node logic, and demo runner rules. Variables define state. Use flat underscore variables such as inventory_coins when a value must be read by conditions, effects, or text templates. Script Builder batch-edits node Requirements, Effects, and Routing. Play Rules only control the sample runner: start node, end condition, visit tracking, and debug mode. Unavailable choice display is set on each Choice node. It does not run JavaScript or replace a game engine.": "Playbook.json 保存变量定义、节点逻辑和演示运行规则。变量定义声明状态；需要被条件、效果或文本模板读取的值，应使用 inventory_coins 等扁平下划线变量。脚本构建批量编辑节点条件要求、效果和路线；演示规则仅控制样例演示器的起始节点、结束条件、访问记录和调试模式。不可用选项显示在每个 Choice 节点内单独设置。Playbook.json 不执行 JavaScript，也不替代游戏引擎。",
+    "Playbook.json stores runtime variable definitions, node logic rows, Variable Actions, and Play preview rules. Variable Definitions define state. Script Builder edits node Requirements, Effects, and Routing. Variable Actions keep manual or imported state writes outside node rows. Preview rules only control the Play dialog: start node, end condition, debug details, and temporary visit tracking. Validation checks keys and export risks before you ship files.": "Playbook.json 保存运行时变量定义、节点逻辑行、变量动作和演示预览规则。变量定义声明状态；脚本构建编辑节点条件、效果和路线；变量动作保存手动写入或旧项目导入的节点行外状态写入；预览规则仅控制演示弹窗：起始节点、结束条件、调试细节和临时访问记录。校验页在导出前检查状态键和导出风险。",
+    "Pick the exact node title used as the first Play preview scene.": "填写作为 Play 预览第一幕的精确节点标题。",
     "Previous": "上一页",
     "Previous line": "上一句",
     "Record visited node titles": "记录已访问的节点标题",
-    "Record visited node titles during Play.": "演示过程中记录已经访问过的节点标题。",
+    "Record visited node titles during Play.": "Play 过程中记录已访问节点标题。",
     "Reconnect from output": "从输出端重连",
     "Reconnect to input": "重连到输入端",
+    "Choice requirements": "选择要求",
+    "Requires": "条件要求",
     "Requirements": "条件要求",
-    "Requirements not met": "条件未满足",
+    "Requirements not met": "条件不成立",
     "Restart": "重新开始",
-    "Replace a game engine runtime or evaluate complex code expressions.": "替代游戏引擎运行时，或计算复杂代码表达式。",
+    "Replace a game engine runtime or evaluate complex code expressions.": "替代游戏引擎运行时，或求值复杂代码表达式。",
     "Routing": "路线",
+    "Runtime JSON": "运行时 JSON",
+    "Runtime JSON exported.": "Runtime JSON 已导出。",
+    "State Schema": "状态",
+    "State schema JSON exported.": "State schema JSON 已导出。",
+    "State schema imported.": "State schema 已导入。",
+    "Story MD": "剧本",
+    "Story Markdown exported.": "Story Markdown 已导出。",
+    "Story Markdown imported.": "Story Markdown 已导入。",
+    "Story layout imported.": "Story layout 已导入。",
+    "Story layout JSON exported.": "Story layout JSON 已导出。",
+    "Import failed: invalid Story Markdown.": "导入失败：Story Markdown 无法解析。",
+    "Import failed: invalid Story Layout.": "导入失败：Story Layout 无法解析。",
+    "Import failed: invalid State Schema.": "导入失败：State Schema 无法解析。",
+    "Twee exported.": "Twee 已导出。",
     "Next": "下一步",
+    "Other": "其他",
     "On choose effects": "选择时效果",
-    "No effects.": "暂无效果。",
-    "Next step follows the outgoing link.": "下一步由节点的出口连线决定。",
+    "No effects.": "暂无效果",
+    "Next step follows the outgoing link.": "下一步沿节点出口连线继续。",
     "Route ends at this node — no next step.": "路线在此结束，没有后续节点。",
     "Runner rule": "演示规则",
+    "Play preview rule": "演示预览规则",
     "Runtime": "运行时",
     "Run arbitrary JavaScript.": "运行任意 JavaScript。",
     "Script action": "脚本动作",
+    "Delete variable": "删除变量",
+    "Delete node type": "删除节点类型",
+    "Edit node type": "编辑节点类型",
+    "Edit icon for {type}": "编辑 {type} 图标",
+    "Hide node type": "隐藏节点类型",
+    "No visible node types.": "没有可显示的节点类型。",
+    "No hidden node types.": "没有隐藏的节点类型。",
+    "Drop nodes here": "将节点拖入此处",
+    "No entry path found.": "没有找到入口路径。",
+    "{count} inside": "内部 {count} 个",
+    "Resize width": "调整宽度",
+    "Resize height": "调整高度",
+    "Resize node": "调整节点大小",
+    "Input": "输入",
+    "Input port": "输入端口",
+    "Output": "输出",
+    "Output port": "输出端口",
     "Send backward": "下移一层",
     "Send to back": "置于底层",
     "Show all choices": "显示全部选项",
     "Show all characters": "显示全部角色",
     "Show character": "显示角色",
     "Show unavailable choices disabled": "显示但禁用不可用选项",
-    "Show variable and condition details while previewing.": "预览时显示变量和条件细节。",
-    "Show variables and gate checks in Play": "演示时显示变量和条件检查",
+    "Show variable and condition details while previewing.": "预览时显示变量和条件详情。",
+    "Show state and condition details in Play preview.": "在演示预览中显示状态和条件详情。",
+    "Show variables and gate checks in Play": "显示变量和条件检查",
     "Start Node": "起始节点",
     "State Logic": "状态逻辑",
-    "Store project variables for text such as {traveler}.": "保存项目变量，例如文本中的 {traveler}。",
-    "Stop the demo route when a condition becomes true.": "当条件成立时停止演示路线。",
+    "Set / Condition are now node properties. The State Logic section below records this node's effects and gate.": "Set / Condition 现在作为节点属性维护；下方状态逻辑区域记录节点效果和条件。",
+    "Store project variables for text such as {protagonist}.": "声明项目变量，例如文本中的 {protagonist}。",
+    "Use flat underscore variables such as inventory_coins when conditions, effects, and text templates need the same value.": "条件、效果和文本模板需要读取同一个值时，使用 inventory_coins 这类扁平下划线变量。",
+    "Stop the demo route when a condition becomes true.": "条件成立时停止演示路线。",
+    "Stop Play preview when a condition becomes true.": "条件成立时停止 Play 预览。",
+    "Store runtime variables for conditions, effects, and text templates.": "声明供条件、效果和文本模板使用的运行时变量。",
     "Unsaved changes": "未保存改动",
     "Visit Tracking": "访问记录",
-    "What Playbook.json controls": "Playbook.json 控制什么",
-    "Use Advanced JSON for exact edits without changing the canvas schema.": "用高级 JSON 做精确编辑，不改变画布结构。",
+    "What Playbook controls": "Playbook 管理范围",
+    "Use Advanced JSON for exact edits without changing the canvas schema.": "使用高级 JSON 精确编辑 Playbook，不修改画布结构。",
+    "Use Validation before exporting to find unknown keys and runtime-only export risks.": "导出前使用校验页检查未知键和 Runtime JSON 专属导出风险。",
     "{count} hidden": "{count} 个隐藏",
     "{count} selected": "已选择 {count} 个",
     "{name} hidden.": "{name} 已隐藏。",
     "{name} shown.": "{name} 已显示。",
-    "{count} nodes share this title — rule applies to all.": "{count} 个节点共用这个标题，规则会应用到全部。",
+    "{count} nodes share this title — rule applies to all.": "{count} 个节点共用该标题，规则应用于全部。",
     "{variables} variables, {rules} Play rules": "{variables} 个变量，{rules} 条演示规则",
     "{variables} variables, {rules} Play rules, {actions} node logic rows": "{variables} 个变量，{rules} 条演示规则，{actions} 行节点逻辑",
+    "{variables} variables, {rules} Play rules, {scriptRows} node logic rows, {actions} actions": "{variables} 个变量，{rules} 条演示规则，{scriptRows} 行节点逻辑，{actions} 个动作",
+    "{variables} variable definitions, {actions} variable actions, {rules} Play rules, {scriptRows} node logic rows": "{variables} 个变量定义，{actions} 个变量动作，{rules} 条演示规则，{scriptRows} 行节点逻辑",
     "Voice": "语气",
-    "What can Playbook.json do?": "Playbook.json 能做什么？",
+    "Gate": "条件",
+    "Routing": "路线",
+    "Variables": "变量",
+    "Visited": "访问记录",
+    "What can Playbook.json do?": "查看 Playbook.json 说明",
+    "What does this rule do?": "查看这条规则的说明",
+    "This Play preview rule controls how the Play dialog behaves.": "该演示预览规则配置 Play 弹窗行为。",
+    "Ink exported.": "Ink 已导出。",
+    "Yarn exported.": "Yarn 已导出。",
     "Zoom": "缩放",
     "Zoom in": "放大",
     "Zoom out": "缩小",
@@ -823,7 +1712,156 @@ const uiTranslations = {
     "{visible} of {total} characters match {query}": "{visible}/{total} 个角色匹配 {query}",
     "{visible} of {total} rows": "{visible}/{total} 行",
     "{count} more not rendered yet.": "还有 {count} 个未渲染。",
-    "Show {count} more": "再显示 {count} 个"
+    "Show {count} more": "再显示 {count} 个",
+    "Behavior": "行为",
+    "Character mentions": "角色提及",
+    "Click an output port, then an input port to connect nodes.": "先点击输出端口，再点击输入端口以连接节点。",
+    "Color": "颜色",
+    "Custom icon": "自定义图标",
+    "Custom icon text or emoji": "自定义图标文本或表情",
+    "Delete column?": "删除列？",
+    "Edit node type icon": "编辑节点类型图标",
+    "Events Sheet": "事件表",
+    "Fields": "字段",
+    "Hide frame rows from Events Sheet": "从事件表隐藏框架行",
+    "Hide from library": "从节点库隐藏",
+    "History": "历史",
+    "Image resolution": "图片规格",
+    "Move canvas viewport": "移动画布视口",
+    "Node canvas": "节点画布",
+    "Node Icon": "节点图标",
+    "Node Inspector": "节点检查器",
+    "Node selection required": "需要选择节点",
+    "Node Type": "节点类型",
+    "Playbook help": "Playbook 帮助",
+    "Ready": "就绪",
+    "Redo": "重做",
+    "Redo (Ctrl+Shift+Z or Ctrl+Y)": "重做（Ctrl+Shift+Z 或 Ctrl+Y）",
+    "Resize left sidebar": "调整左侧栏宽度",
+    "Resize right sidebar": "调整右侧栏宽度",
+    "Select a node first to open the Node inspector.": "请先选择节点，再打开节点检查器。",
+    "Switch theme": "切换主题",
+    "This restores the default Events Sheet columns. It removes column renames, hidden-column settings, column order changes, and custom sheet-only columns. Frame nodes are not deleted, and stored field values are not actively cleared; values from removed columns may stop showing until that field or column is added again.": "这会恢复事件表默认列，移除列重命名、隐藏列设置、列顺序改动和仅存在于表格中的自定义列。框架节点不会被删除，已保存的字段值不会主动清空；被移除列中的值可能暂时不再显示，直到重新添加对应字段或列。",
+    "Undo": "撤销",
+    "Undo (Ctrl+Z)": "撤销（Ctrl+Z）",
+    "Use type initial": "使用类型首字母",
+    "Edit {label}": "编辑 {label}",
+    "Edit icon for {label}": "编辑 {label} 图标",
+    "Rename {label}": "重命名 {label}",
+    "Leave blank to use the type initial.": "留空则使用类型首字母。",
+    "Node type icon now uses type initial.": "节点类型图标已改用类型首字母。",
+    "Node type icon updated.": "节点类型图标已更新。",
+    "Frame type not found.": "没有找到框架类型。",
+    "Column name is required.": "列名不能为空。",
+    "Confirmation dialog is unavailable.": "确认弹窗不可用。",
+    "Text input dialog is unavailable.": "文本输入弹窗不可用。",
+    "Events Sheet columns restored.": "事件表列已恢复。",
+    "Could not open project picker.": "无法打开项目选择器。",
+    "No saved project to reload.": "没有可重新加载的已保存项目。",
+    "Could not clear browser storage.": "无法清除浏览器存储。",
+    "Node layer updated.": "节点图层已更新。",
+    "Node layers updated.": "节点图层已更新。",
+    "Connection canceled.": "连接已取消。",
+    "Choose an input port for the new link target.": "请选择新连线目标的输入端口。",
+    "A link cannot target its own source.": "连线不能指向自己的源节点。",
+    "Choose an output port for the new link source.": "请选择新连线源的输出端口。",
+    "A link cannot start from its own target.": "连线不能从自己的目标节点开始。",
+    "Enter a custom node type name.": "请输入自定义节点类型名称。",
+    "Default node types restored.": "默认节点类型已恢复。",
+    "Default node types are already available.": "默认节点类型已存在。",
+    "Character added.": "角色已添加。",
+    "Character name is required.": "角色名称不能为空。",
+    "Character focus cleared.": "角色聚焦已清除。",
+    "Character search cleared.": "角色搜索已清除。",
+    "Character links collapsed.": "角色关联已折叠。",
+    "Character links expanded.": "角色关联已展开。",
+    "Select a character first.": "请先选择角色。",
+    "Cast link added.": "演员关联已添加。",
+    "Cast link removed.": "演员关联已移除。",
+    "Effect deleted.": "效果已删除。",
+    "Choice option added.": "选项已添加。",
+    "Choice option deleted.": "选项已删除。",
+    "Turn added.": "轮次已添加。",
+    "Turn copied.": "轮次已复制。",
+    "Turn moved.": "轮次已移动。",
+    "Turn deleted.": "轮次已删除。",
+    "This node is not a legacy type.": "该节点不是旧版类型。",
+    "Condition has no expression to convert.": "条件没有可转换的表达式。",
+    "This node cannot auto-convert: it needs exactly 1 incoming and the expected outgoing shape.": "该节点无法自动转换：需要正好 1 条进入连线，并符合预期的外出连线结构。",
+    "Set and Condition Play rules added.": "Set 和 Condition 演示规则已添加。",
+    "Variable key already exists.": "变量键已存在。",
+    "Node type name is required.": "节点类型名称不能为空。",
+    "Playbook JSON updated.": "Playbook JSON 已更新。",
+    "Playbook JSON is invalid.": "Playbook JSON 无效。",
+    "Node duplicated.": "节点已复制。",
+    "Node deleted and archived outside runtime.": "节点已删除，并归档在运行时之外。",
+    "Link deleted.": "连线已删除。",
+    "Could not assign branch.": "无法分配分支。",
+    "Link reconnected.": "连线已重新连接。",
+    "Canvas moved from minimap.": "已通过小地图移动画布。",
+    "Canvas centered.": "画布已居中。",
+    "No nodes to arrange.": "没有可排列的节点。",
+    "Creating new project file...": "正在创建新项目文件...",
+    "New project created, but vault file creation failed.": "新项目已创建，但 vault 文件创建失败。",
+    "New project created.": "新项目已创建。",
+    "Project saved.": "项目已保存。",
+    "Project save failed.": "项目保存失败。",
+    "New project created, but vault JSON creation failed.": "新项目已创建，但 vault JSON 创建失败。",
+    "Sample project loaded in browser storage.": "示例项目已加载到浏览器存储。",
+    "Creating sample project...": "正在创建示例项目...",
+    "Sample project creation failed.": "示例项目创建失败。",
+    "Could not load saved state.": "无法加载已保存状态。",
+    "Loaded browser saved state.": "已加载浏览器保存状态。",
+    "Could not load vault project.": "无法加载 vault 项目。",
+    "Could not create vault project file.": "无法创建 vault 项目文件。",
+    "PNG export failed; SVG exported.": "PNG 导出失败；已导出 SVG。",
+    "Project export package created.": "项目导出包已创建。",
+    "Project export package failed.": "项目导出包创建失败。",
+    "No nodes to play.": "没有可演示的节点。",
+    "Variable JSON value is invalid.": "变量 JSON 值无效。",
+    "Left": "左",
+    "Right": "右",
+    "left": "左",
+    "right": "右",
+    "enabled": "启用",
+    "disabled": "停用",
+    "collapsed": "已折叠",
+    "expanded": "已展开",
+    "{side} sidebar {state}.": "{side}侧栏{state}。",
+    "{side} sidebar resized.": "{side}侧栏宽度已调整。",
+    "{label} applied.": "{label} 已应用。",
+    "{label} failed.": "{label} 失败。",
+    "Showing more {file}.": "正在显示更多 {file}。",
+    "{label} hidden from Events Sheet.": "{label} 已从事件表隐藏。",
+    "{label} shown in Events Sheet.": "{label} 已显示在事件表中。",
+    "{oldName} renamed to {newName}.": "{oldName} 已重命名为 {newName}。",
+    "{label} column hidden. Data kept.": "{label} 列已隐藏，数据已保留。",
+    "{label} column shown.": "{label} 列已显示。",
+    "{label} column deleted.": "{label} 列已删除。",
+    "{count} nodes deleted and archived outside runtime.": "{count} 个节点已删除，并归档在运行时之外。",
+    "{file} opened.": "{file} 已打开。",
+    "{label} added.": "{label} 已添加。",
+    "{label} node type added.": "{label} 节点类型已添加。",
+    "{label} is a system type and cannot be deleted.": "{label} 是系统类型，不能删除。",
+    "{label} node type deleted.": "{label} 节点类型已删除。",
+    "{label} hidden from Node Library. Data kept.": "{label} 已从节点库隐藏，数据已保留。",
+    "{label} restored to Node Library.": "{label} 已恢复到节点库。",
+    "Updated {count} references.": "已更新 {count} 个引用。",
+    "Converted Set \"{source}\" into onVisit effect on \"{target}\".": "已将 Set “{source}” 转为 “{target}” 上的 onVisit 效果。",
+    "Converted Condition \"{source}\" into two gated links.": "已将 Condition “{source}” 转为两条条件连线。",
+    "{rule} rule added from selected node.": "已基于选中节点添加 {rule} 规则。",
+    "{label} deleted.": "{label} 已删除。",
+    "{rule} is a system rule.": "{rule} 是系统规则。",
+    "{rule} disabled.": "{rule} 已停用。",
+    "{rule} {state}.": "{rule} 已{state}。",
+    "{label} focused.": "已聚焦 {label}。",
+    "{label} focused for editing.": "已聚焦 {label} 并进入编辑。",
+    "Branch set: {label}.": "分支已设为：{label}。",
+    "New project created at {target}.": "新项目已创建于 {target}。",
+    "Loaded {target}.": "已加载 {target}。",
+    "Created {target}.": "已创建 {target}。",
+    "{label} reordered.": "{label} 已重新排序。",
+    "Link created: {label}.": "连线已创建：{label}。"
   }
 };
 
@@ -893,6 +1931,8 @@ function createInitialRuntimeState() {
   draggingNode: null,
   draggingPort: null,
   suppressPortClick: false,
+  ignoreNextCanvasClick: false,
+  ignoreNextCanvasClickTargetId: null,
   geometryHistoryTarget: null,
   draggingStoryNodeId: null,
   storyPointerDrag: null,
@@ -905,6 +1945,7 @@ function createInitialRuntimeState() {
   iconDialogType: null,
   typeDialogType: null,
   eventColumnDeleteKey: null,
+  eventColumnDeleteType: null,
   genericConfirmAction: null,
   genericTextAction: null,
   pendingNodeTitleEdit: null,
@@ -921,7 +1962,11 @@ function createInitialRuntimeState() {
   playbookJsonOpen: false,
   playbookCategoryFilter: null,
   playbookFocusTarget: null,
+  playbookHelpPage: 0,
+  playbookRuleHelpOpenIds: new Set(),
   playbookTab: "variables",
+  playbookActionDraftOpen: false,
+  playbookActionDraft: null,
   projectFilePath: "",
   hasUnsavedChanges: false,
   isSaving: false,
@@ -937,6 +1982,13 @@ function createInitialRuntimeState() {
   autoSaveTimer: null,
   characterBacklinkExpandedIds: new Set(),
   choiceOptionExpandedIds: new Set(),
+  choiceOptionConditionExpandedIds: new Set(),
+  nodeSectionExpandedIds: new Set(),
+  nodeConditionDraftNodeId: "",
+  nodeEffectDraftNodeId: "",
+  choiceConditionDraftIds: new Set(),
+  choiceEffectDraftIds: new Set(),
+  playbookChoiceEffectDraftIds: new Set(),
   history: { undo: [], redo: [], current: "", pending: null, applying: false },
   editHistoryTarget: null,
   lastAppInteractionAt: 0,
@@ -946,16 +1998,24 @@ function createInitialRuntimeState() {
   lastNodeClick: { id: null, time: 0 },
   playNodeId: null,
   playPath: [],
+  playStepIndex: 0,
+  playSteps: [],
   playTurnIndex: 0,
+  playVariables: null,
+  playVisitedNodeIds: new Set(),
+  playVisitRecords: [],
+  playManualActionRunIds: new Set(),
+  playDebugOpen: true,
   search: "",
   eventRowDrag: null,
   eventColumnResize: null,
   mention: null,
   characterRenderContext: null,
+  characterIndex: null,
   nodeIndex: null,
   linkIndex: null,
   outgoingIndex: null,
-  derived: { flowOrder: null, displayId: null, nodeTypeMap: null, projectNodeTypes: null },
+  derived: { flowOrder: null, displayId: null, frameChildFlowOrder: null, frameDescendantNodes: null, nodeSearchText: null, eventSearchText: null, characterMentionContext: null, nodeTypeMap: null, projectNodeTypes: null },
   canvasViewportRenderFrame: null,
   storyPanelRenderTimer: null,
   documentRenderLimits: {
@@ -963,6 +2023,7 @@ function createInitialRuntimeState() {
     events: DOCUMENT_RENDER_INITIAL_LIMIT,
     variables: DOCUMENT_RENDER_INITIAL_LIMIT
   },
+  pendingImportKind: "",
   sidebar: {
     leftWidth: SIDEBAR_CONFIG.left.defaultWidth,
     rightWidth: SIDEBAR_CONFIG.right.defaultWidth,
@@ -989,7 +2050,10 @@ window.NarrativeCanvasApp = {
   getLanguage: () => state.language,
   createSampleProjectFile,
   ensureVaultFile: ensureVaultProjectFile,
-  loadVaultProject: loadCurrentVaultProject
+  loadVaultProject: loadCurrentVaultProject,
+  importStoryMarkdownText,
+  importStoryLayoutText,
+  importStateSchemaText
 };
 
 let eventController = null;
@@ -1100,6 +2164,10 @@ function bindDom(scopeOverride = null) {
   dom.nodeTypeHiddenInput = dom.scope.querySelector("#nodeTypeHiddenInput");
   dom.nodeTypeEventHiddenInput = dom.scope.querySelector("#nodeTypeEventHiddenInput");
   dom.playDialog = dom.scope.querySelector("#playDialog");
+  dom.exportReportDialog = dom.scope.querySelector("#exportReportDialog");
+  dom.exportReportKicker = dom.scope.querySelector("#exportReportKicker");
+  dom.exportReportTitle = dom.scope.querySelector("#exportReportTitle");
+  dom.exportReportBody = dom.scope.querySelector("#exportReportBody");
   dom.confirmDialog = dom.scope.querySelector("#confirmDialog");
   dom.playRuleDialog = dom.scope.querySelector("#playRuleDialog");
   dom.playRuleTargetInput = dom.scope.querySelector("#playRuleTargetInput");
@@ -1227,10 +2295,11 @@ function bindEvents() {
   dom.eventColumnDeleteDialog.addEventListener("close", () => {
     if (dom.eventColumnDeleteDialog.returnValue === "confirm") {
       const historyBefore = getHistorySnapshot();
-      deleteEventColumn(state.eventColumnDeleteKey);
+      deleteEventColumn(state.eventColumnDeleteKey, state.eventColumnDeleteType);
       commitHistoryFromSnapshot(historyBefore);
     }
     state.eventColumnDeleteKey = null;
+    state.eventColumnDeleteType = null;
   }, { signal });
   dom.eventColumnsResetDialog.addEventListener("close", () => {
     if (dom.eventColumnsResetDialog.returnValue === "confirm") {
@@ -1240,6 +2309,14 @@ function bindEvents() {
     }
   }, { signal });
   dom.genericConfirmDialog.addEventListener("close", handleGenericConfirmClose, { signal });
+  dom.genericConfirmButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    closeGenericConfirmDialog("confirm");
+  }, { signal });
+  dom.genericConfirmSecondaryButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    closeGenericConfirmDialog("secondary");
+  }, { signal });
   dom.genericConfirmDialog.addEventListener("click", (event) => {
     if (event.target === dom.genericConfirmDialog) dom.genericConfirmDialog.close("cancel");
   }, { signal });
@@ -1254,6 +2331,11 @@ function bindEvents() {
   }, { signal });
   dom.playbookHelpDialog.addEventListener("click", (event) => {
     if (event.target === dom.playbookHelpDialog) dom.playbookHelpDialog.close();
+  }, { signal });
+  dom.playDialog.addEventListener("toggle", handlePlayDebugToggle, { capture: true, signal });
+  dom.playDialog.addEventListener("close", resetPreviewSessionState, { signal });
+  dom.exportReportDialog.addEventListener("click", (event) => {
+    if (event.target === dom.exportReportDialog) dom.exportReportDialog.close();
   }, { signal });
   dom.playRuleDialog.addEventListener("click", (event) => {
     if (event.target === dom.playRuleDialog) dom.playRuleDialog.close();
@@ -1318,6 +2400,11 @@ function setLanguage(language, options = {}) {
       // Browser storage can be unavailable in restrictive embeds.
     }
   }
+  // Surfaces cache rendered output by version; bump both so open and inactive
+  // panels re-render their baked-in UI strings in the new language.
+  invalidateCanvasSurface();
+  invalidateDocumentSurfaces();
+  invalidateCharacterRenderContext();
   if (initialized) renderAll();
   return true;
 }
@@ -1514,6 +2601,14 @@ function cloneProject(project) {
 
 function defaultVariables() {
   return {};
+}
+
+function normalizeWorkflowMode(value) {
+  const text = String(value || "").trim();
+  if (WORKFLOW_MODES.has(text)) return text;
+  const normalized = text.toLowerCase().replace(/[\s_-]+/g, "");
+  if (["textsource", "storysource", "storymd", "storymarkdown", "markdown"].includes(normalized)) return WORKFLOW_MODE_TEXT_SOURCE;
+  return WORKFLOW_MODE_CANVAS;
 }
 
 function normalizeProjectCharacters(project) {
@@ -1758,9 +2853,26 @@ function shouldRecordAction(action) {
     "add-node-cast",
     "delete-node-cast",
     "add-node-effect",
+    "add-node-condition-clause",
+    "delete-node-condition-clause",
+    "add-direct-node-condition",
+    "delete-direct-node-condition",
+    "add-choice-option-condition",
+    "delete-choice-option-condition",
+    "add-gate-condition",
+    "delete-gate-condition",
+    "add-script-node-condition",
+    "delete-script-node-condition",
+    "commit-node-condition-draft",
+    "commit-node-effect-draft",
+    "commit-choice-option-condition-draft",
+    "commit-choice-option-effect-draft",
+    "commit-playbook-choice-effect-draft",
+    "commit-playbook-action-draft",
     "delete-node-effect",
     "add-variable",
-    "add-playbook-action",
+    "delete-playbook-choice-effect",
+    "migrate-legacy-gate",
     "create-play-rule",
     "add-playbook-node-rule",
     "add-playbook-choice-rule",
@@ -1888,10 +3000,11 @@ function renderShellState() {
   });
 
   if (dom.activeFileTab) {
-    dom.activeFileTab.textContent = getFileViewLabel(state.activeFileId);
+  dom.activeFileTab.textContent = getFileViewLabel(state.activeFileId);
   }
 
   dom.workspaceToolbar.hidden = state.activeFileId !== "adventure";
+  dom.fileScopedActions = [...dom.scope.querySelectorAll("[data-files]")];
 
   dom.fileScopedActions.forEach((button) => {
     const files = String(button.dataset.files || "").split(/\s+/);
@@ -1903,166 +3016,644 @@ function renderShellState() {
   renderHistoryButtons();
 }
 
+function localizeText(selector, key, root = dom.scope) {
+  const element = root?.querySelector?.(selector);
+  if (element) element.textContent = t(key);
+}
+
+function localizeAllText(selector, key, root = dom.scope) {
+  root?.querySelectorAll?.(selector).forEach((element) => {
+    element.textContent = t(key);
+  });
+}
+
+function localizeAttr(selector, attr, key, root = dom.scope) {
+  const element = root?.querySelector?.(selector);
+  if (element) element.setAttribute(attr, t(key));
+}
+
+function localizeLabelText(selector, key, root = dom.scope) {
+  const element = root?.querySelector?.(selector);
+  if (!element) return;
+  const textNodeType = window.Node?.TEXT_NODE || 3;
+  const textNode = [...element.childNodes].find((node) => node.nodeType === textNodeType && node.nodeValue.trim());
+  if (textNode) {
+    textNode.nodeValue = `${t(key)} `;
+  } else {
+    element.prepend(document.createTextNode(`${t(key)} `));
+  }
+}
+
+function localizeSelectOptions(selector, labels, root = dom.scope) {
+  const select = root?.querySelector?.(selector);
+  if (!select) return;
+  [...select.options].forEach((option) => {
+    option.textContent = t(labels[option.value] || option.textContent);
+  });
+}
+
 function localizeStaticShell() {
   if (!dom.scope) return;
-  const setText = (selector, key) => {
-    const element = dom.scope.querySelector(selector);
-    if (element) element.textContent = t(key);
-  };
-  const setAttr = (selector, attr, key) => {
-    const element = dom.scope.querySelector(selector);
-    if (element) element.setAttribute(attr, t(key));
-  };
-  const setLabelText = (selector, key) => {
-    const element = dom.scope.querySelector(selector);
-    if (!element) return;
-    const textNode = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.nodeValue.trim());
-    if (textNode) {
-      textNode.nodeValue = `${t(key)} `;
-    } else {
-      element.prepend(document.createTextNode(`${t(key)} `));
-    }
-  };
-  const setAllText = (selector, key) => {
-    dom.scope.querySelectorAll(selector).forEach((element) => {
-      element.textContent = t(key);
-    });
-  };
 
-  setText(".project-file-section h2", "Project File");
-  setText(".sidebar-left .nav-section:nth-of-type(2) h2", "Files");
-  setText(".palette h2", "Node Library");
-  setText(".workspace-file-label .pane-kicker", "File");
-  setText(".sidebar-right .pane-kicker", "Inspector");
-  setText("[data-panel='project']", "Project");
-  setText("[data-panel='node']", "Node");
-  setText("[data-panel='story']", "Story");
+  [
+    [".project-file-section h2", "Project File"],
+    [".sidebar-left .nav-section:nth-of-type(2) h2", "Files"],
+    [".palette h2", "Node Library"],
+    [".workspace-file-label .pane-kicker", "File"],
+    [".sidebar-right .pane-kicker", "Inspector"],
+    ["[data-panel='project']", "Project"],
+    ["[data-panel='node']", "Node"],
+    ["[data-panel='story']", "Story"],
+    ["[data-action='save-project']", "Save"],
+    ["[data-action='new-project']", "New"],
+    ["[data-action='open-project-file']", "Open"],
+    ["[data-action='reload-project-file']", "Reload"],
+    ["[data-action='clear-browser-storage']", "Clear storage"],
+    ["[data-action='add-custom-node-type']", "Add"],
+    ["[data-action='zoom-out']", "-"],
+    ["[data-action='zoom-in']", "+"],
+    ["[data-action='center-view']", "Center"],
+    ["[data-action='play']", "Play"],
+    ["[data-action='export-json']", "Project .json"],
+    ["[data-action='export-story-md']", "Story .md"],
+    ["[data-action='import-story-md']", "Import story .md"],
+    ["[data-action='export-story-layout']", "Layout .json"],
+    ["[data-action='import-story-layout']", "Import layout .json"],
+    ["[data-action='export-state-schema']", "State .json"],
+    ["[data-action='import-state-schema']", "Import state .json"],
+    ["[data-action='export-profile']", "Profile .json"],
+    ["[data-action='export-runtime-json']", "Runtime .json"],
+    ["[data-action='export-yarn']", "Yarn .yarn"],
+    ["[data-action='export-ink']", "Ink .ink"],
+    ["[data-action='export-twee']", "Twee .twee"],
+    ["[data-action='export-image']", "Export PNG"],
+    [".export-image-scale-label .visually-hidden", "Image resolution"],
+    ["#selectionHint", "Click an output port, then an input port to connect nodes."]
+  ].forEach(([selector, key]) => localizeText(selector, key));
+
   dom.scope.querySelectorAll(".nc-file-item[data-file-id]").forEach((button) => {
     const label = button.querySelector(".nc-file-item-label");
     if (label) label.textContent = getFileViewLabel(button.dataset.fileId);
   });
 
-  setText("[data-action='save-project']", "Save");
-  setText("[data-action='new-project']", "New");
-  setText("[data-action='open-project-file']", "Open");
-  setText("[data-action='reload-project-file']", "Reload");
-  setText("[data-action='clear-browser-storage']", "Clear storage");
-  setText("[data-action='add-custom-node-type']", "Add");
-  setText("[data-action='zoom-out']", "-");
-  setText("[data-action='zoom-in']", "+");
-  setText("[data-action='center-view']", "Center");
-  setText("[data-action='play']", "Play");
-  setText("[data-action='export-json']", "Export JSON");
-  setText("[data-action='export-image']", "Image");
-  setText("[data-action='export-html']", "HTML");
-  setAllText(".confirm-cancel", "Cancel");
+  localizeAllText(".confirm-cancel", "Cancel");
 
-  setAttr("[data-action='save-project']", "title", "Save project state");
-  setAttr("[data-action='new-project']", "title", "New project");
-  setAttr("[data-action='zoom-out']", "title", "Zoom out");
-  setAttr("[data-action='zoom-in']", "title", "Zoom in");
-  setAttr("[data-action='center-view']", "title", "Center canvas");
-  setAttr("[data-action='play']", "title", "Play from entry");
-  setAttr("[data-action='export-json']", "title", "Export full project JSON");
-  setAttr("[data-action='export-image']", "title", "Export canvas as PNG");
-  setAttr("#exportImageScale", "title", "Image export resolution");
-  setAttr("#playDialog [value='close']", "aria-label", "Close preview");
+  [
+    ["[data-action='save-project']", "title", "Save project state"],
+    ["[data-action='new-project']", "title", "New project"],
+    ["[data-action='zoom-out']", "title", "Zoom out"],
+    ["[data-action='zoom-in']", "title", "Zoom in"],
+    ["[data-action='center-view']", "title", "Center canvas"],
+    ["[data-action='play']", "title", "Play from entry"],
+    ["[data-action='export-json']", "title", "Export editable project file (.json)"],
+    ["[data-action='export-story-md']", "title", "Export readable story text (.md)"],
+    ["[data-action='import-story-md']", "title", "Import Story Markdown and replace this project"],
+    ["[data-action='export-story-layout']", "title", "Export canvas layout sidecar (.json)"],
+    ["[data-action='import-story-layout']", "title", "Import Story Markdown layout sidecar"],
+    ["[data-action='export-state-schema']", "title", "Export state definitions and initial values (.json)"],
+    ["[data-action='import-state-schema']", "title", "Import state schema sidecar and replace variables"],
+    ["[data-action='export-profile']", "title", "Export file manifest and format profile (.json)"],
+    ["[data-action='export-runtime-json']", "title", "Export engine runtime data (.json)"],
+    ["[data-action='export-yarn']", "title", "Export Yarn Spinner script"],
+    ["[data-action='export-ink']", "title", "Export ink script"],
+    ["[data-action='export-twee']", "title", "Export Twee / Twine script"],
+    ["[data-action='export-image']", "title", "Export canvas as PNG"],
+    ["#exportImageScale", "title", "Image export resolution"],
+    ["#playDialog [value='close']", "aria-label", "Close preview"],
+    ["[data-sidebar-resizer='left']", "aria-label", "Resize left sidebar"],
+    ["[data-sidebar-resizer='right']", "aria-label", "Resize right sidebar"],
+    [".project-history", "aria-label", "History"],
+    ["#undoButton", "title", "Undo (Ctrl+Z)"],
+    ["#undoButton", "aria-label", "Undo"],
+    ["#redoButton", "title", "Redo (Ctrl+Shift+Z or Ctrl+Y)"],
+    ["#redoButton", "aria-label", "Redo"],
+    [".export-image-controls", "aria-label", "Image export"],
+    ["#canvasViewport", "aria-label", "Node canvas"],
+    ["#minimap", "aria-label", "Move canvas viewport"],
+    ["#charactersPanel", "aria-label", "Characters"],
+    ["#variablesPanel", "aria-label", "Variables"],
+    ["#eventsPanel", "aria-label", "Events Sheet"],
+    ["#workspaceSearchControls", "aria-label", "Search"],
+    ["#mentionPopover", "aria-label", "Character mentions"],
+    ["#themeToggle", "title", "Switch theme"]
+  ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
 
-  setLabelText(".canvas-search-box", "Query");
-  setLabelText(".character-search-box", "Find");
-  setLabelText(".event-search-box", "Find");
-  setAttr("#queryInput", "placeholder", "Find nodes");
-  setAttr("#characterSearchInput", "placeholder", "Find character");
-  setAttr("#eventSearchInput", "placeholder", "Find event");
-  setAttr("#playbookSearchInput", "placeholder", "Find in Playbook");
-  setAttr("#customNodeName", "placeholder", "Name");
-  setAttr("#customNodeColor", "title", "Node color");
-  setAttr("#customNodeKind", "title", "Node behavior");
-  setAttr("#customNodeFields", "placeholder", "Fields, one per line");
-
-  const customKind = dom.scope.querySelector("#customNodeKind");
-  if (customKind) {
-    const labels = { node: "Node", frame: "Frame" };
-    [...customKind.options].forEach((option) => {
-      option.textContent = t(labels[option.value] || option.textContent);
-    });
-  }
+  localizeLabelText(".canvas-search-box", "Query");
+  localizeLabelText(".character-search-box", "Find");
+  localizeLabelText(".event-search-box", "Find");
+  localizeLabelText(".playbook-search-box", "Find");
+  [
+    ["#queryInput", "Find nodes"],
+    ["#characterSearchInput", "Find character"],
+    ["#eventSearchInput", "Find event"],
+    ["#playbookSearchInput", "Find in Playbook"],
+    ["#customNodeName", "Name"],
+    ["#customNodeFields", "Fields, one per line"]
+  ].forEach(([selector, key]) => localizeAttr(selector, "placeholder", key));
+  localizeAttr("#customNodeColor", "title", "Node color");
+  localizeAttr("#customNodeKind", "title", "Node behavior");
+  localizeSelectOptions("#customNodeKind", { node: "Node", frame: "Frame" });
   localizeStaticDialogs();
 }
 
 function localizeStaticDialogs() {
   if (!dom.scope) return;
-  const setText = (selector, key) => {
-    const element = dom.scope.querySelector(selector);
-    if (element) element.textContent = t(key);
-  };
-  setText("#playDialog .pane-kicker", "Runtime");
+  localizeText("#playDialog .pane-kicker", "Runtime");
   if (dom.playTitle && dom.playTitle.textContent === "Preview") dom.playTitle.textContent = t("Play");
-  setText("#confirmDialog .pane-kicker", "New Canvas");
-  setText("#confirmDialog h2", "Name the new project");
-  setText("#confirmDialog label span", "Project name");
-  setText("#newProjectPathPreview", "A new project file will be created when possible.");
-  setText("#eventColumnDeleteDialog .pane-kicker", "Event Column");
-  setText("#eventColumnDeleteDialog [value='confirm']", "Delete");
-  setText("#eventColumnsResetDialog .pane-kicker", "Events Sheet");
-  setText("#eventColumnsResetDialog h2", "Reset sheet columns?");
-  setText("#eventColumnsResetDialog [value='confirm']", "Reset columns");
-  setText("#genericConfirmKicker", "Confirm");
-  setText("#genericConfirmTitle", "Confirm action?");
-  setText("#genericConfirmButton", "Confirm");
-  setText("#genericConfirmSecondaryButton", "Keep");
-  setText("#genericTextKicker", "Edit");
-  setText("#genericTextTitle", "Edit value");
-  setText("#genericTextLabel", "Value");
-  setText("#genericTextButton", "Apply");
+
+  [
+    ["#nodeContextMenu [data-layer-action='front']", "Bring to front"],
+    ["#nodeContextMenu [data-layer-action='forward']", "Bring forward"],
+    ["#nodeContextMenu [data-layer-action='backward']", "Send backward"],
+    ["#nodeContextMenu [data-layer-action='back']", "Send to back"],
+    ["#nodeContextMenu [data-action='delete-node']", "Delete node"],
+    ["#confirmDialog .pane-kicker", "New Canvas"],
+    ["#confirmDialog h2", "Name the new project"],
+    ["#confirmDialog label span", "Project name"],
+    ["#newProjectPathPreview", "A new project file will be created when possible."],
+    ["#confirmDialog [data-action='confirm-new-project']", "Create"],
+    ["#eventColumnDeleteDialog .pane-kicker", "Event Column"],
+    ["#eventColumnDeleteDialog [value='confirm']", "Delete"],
+    ["#eventColumnsResetDialog .pane-kicker", "Events Sheet"],
+    ["#eventColumnsResetDialog h2", "Reset sheet columns?"],
+    ["#eventColumnsResetDialog .confirm-body", "This restores the default Events Sheet columns. It removes column renames, hidden-column settings, column order changes, and custom sheet-only columns. Frame nodes are not deleted, and stored field values are not actively cleared; values from removed columns may stop showing until that field or column is added again."],
+    ["#eventColumnsResetDialog [value='confirm']", "Reset columns"],
+    ["#genericConfirmKicker", "Confirm"],
+    ["#genericConfirmTitle", "Confirm action?"],
+    ["#genericConfirmButton", "Confirm"],
+    ["#genericConfirmSecondaryButton", "Keep"],
+    ["#genericTextKicker", "Edit"],
+    ["#genericTextTitle", "Edit value"],
+    ["#genericTextLabel", "Value"],
+    ["#genericTextButton", "Apply"],
+    ["#exportReportKicker", "Export report"],
+    ["#exportReportDialog [value='confirm']", "Confirm OK"],
+    ["#nodeIconDialog .pane-kicker", "Node Icon"],
+    ["#nodeIconDialog label span", "Custom icon"],
+    ["#nodeIconDialog [data-action='reset-node-icon']", "Use type initial"],
+    ["#nodeIconDialog [value='confirm']", "Apply"],
+    ["#nodeTypeDialog .pane-kicker", "Node Type"],
+    ["#nodeTypeDialog label:nth-of-type(1) span", "Name"],
+    ["#nodeTypeDialog label:nth-of-type(2) span", "Behavior"],
+    ["#nodeTypeDialog label:nth-of-type(3) span", "Fields"],
+    ["#nodeTypeDialog .type-dialog-row .field span", "Color"],
+    ["#nodeTypeHiddenInput + span", "Hide from library"],
+    ["#nodeTypeEventHiddenInput + span", "Hide frame rows from Events Sheet"],
+    ["#nodeTypeDialog [value='confirm']", "Save"],
+    ["#nodeRequiredDialog .pane-kicker", "Node Inspector"],
+    ["#nodeRequiredDialog p", "Select a node first to open the Node inspector."]
+  ].forEach(([selector, key]) => localizeText(selector, key));
+
+  if (!dom.nodeIconDialog?.open) localizeText("#nodeIconDialogTitle", "Edit node type icon");
+  if (!dom.nodeTypeDialog?.open) localizeText("#nodeTypeDialogTitle", "Edit node type");
+
+  [
+    ["#exportReportDialog", "aria-label", "Export report"],
+    ["#playbookHelpDialog", "aria-label", "Playbook help"],
+    ["#nodeIconDialog", "aria-label", "Edit node type icon"],
+    ["#nodeIconInput", "aria-label", "Custom icon text or emoji"],
+    ["#nodeTypeDialog", "aria-label", "Edit node type"],
+    ["#nodeRequiredDialog", "aria-label", "Node selection required"]
+  ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
+  localizeAttr("#nodeTypeFieldsInput", "placeholder", "Fields, one per line");
+  localizeSelectOptions("#nodeTypeKindInput", { node: "Node", frame: "Frame" });
   localizePlaybookHelpDialog();
   localizePlayRuleDialog();
 }
 
 function localizePlaybookHelpDialog() {
+  renderPlaybookHelpDialog();
+}
+
+function getPlaybookHelpPages() {
+  if (state.language === "zh") {
+    return [
+      {
+        title: "Playbook 管理范围",
+        lead: "Playbook 管理运行状态、节点逻辑、选项逻辑、演示预览规则和校验信息；画布布局、节点位置和连线仍在画布中维护。",
+        sections: [
+          {
+            heading: "适合放在 Playbook 的内容",
+            items: [
+              "变量定义：供条件、效果、文本模板和 Play 预览复用的状态键。",
+              "变量动作：手动触发、全局记录、旧项目导入保留的状态写入。",
+              "脚本构建：节点条件要求、节点效果和路线。",
+              "选项条件：Choice 选项的可用条件和选择时效果。",
+              "演示预览规则与校验：起始节点、结束条件、调试细节、临时访问记录、变量引用和表达式错误。"
+            ]
+          },
+          {
+            heading: "不适合放在 Playbook 的内容",
+            items: [
+              "节点位置、框架尺寸、连线形状和画布布局。",
+              "节点类型字段结构；这些应在节点库维护。",
+              "任意 JavaScript 运行逻辑；条件表达式只用于安全求值。",
+              "工具外部运行系统中的复杂逻辑。"
+            ]
+          }
+        ],
+        code: [
+          "{",
+          '  "variables": { "route": "overview", "draft_focus": "dialog" },',
+          '  "playRules": {',
+          '    "debugMode": { "enabled": true, "value": true },',
+          '    "visitTracking": { "enabled": true, "value": true }',
+          "  }",
+          "}"
+        ].join("\n")
+      },
+      {
+        title: "变量定义",
+        lead: "先定义状态键，再在条件、效果和文本模板中引用它。未定义的键会在编辑区下方或校验页标出。",
+        sections: [
+          {
+            heading: "写法建议",
+            items: [
+              "使用小写下划线，例如 workflow_progress、data_integrity。",
+              "一个键只表达一个状态，便于检查读写位置。",
+              "布尔值用于开关，数字用于进度和计数，数组用于记录列表。",
+              "条件和效果应优先使用扁平、明确的状态键。"
+            ]
+          }
+        ],
+        code: [
+          "workflow_progress = 0",
+          "script_builder_seen = false",
+          'route = "overview"',
+          "walkthrough_notes = []"
+        ].join("\n")
+      },
+      {
+        title: "变量动作",
+        lead: "变量动作写入已定义变量，适合节点行之外的状态变化。节点局部变化应写在脚本构建或节点检查器里。",
+        sections: [
+          {
+            heading: "常见用途",
+            items: [
+              "手动动作：在演示时由按钮触发。",
+              "全局记录：按节点标题或节点类型匹配多个节点。",
+              "选项专属的效果应写在该选项的选择时效果里，不要放进变量动作。"
+            ]
+          }
+        ],
+        code: [
+          "手动动作:",
+          "toggle playbook_seen",
+          "",
+          "全局动作:",
+          "onVisit Choice add type_choice_visits = 1"
+        ].join("\n")
+      },
+      {
+        title: "脚本构建",
+        lead: "脚本构建按节点批量编辑条件、效果和路线。结构化添加行适合常见条件与效果，复杂表达式仍可直接编辑文本。",
+        sections: [
+          {
+            heading: "条件与效果",
+            items: [
+              "添加条件可选择状态键、运算符、连接词和值；提交后写入条件文本。",
+              "添加效果可选择状态键、操作和值；提交后写入效果文本。",
+              "可用操作按变量类型筛选：字符串和对象用设置；数字用设置、添加、减去；布尔用设置、取反；数组用设置、追加、移除。",
+              "编辑区下方会显示当前状态是否满足条件、未定义变量或语法错误。"
+            ]
+          },
+          {
+            heading: "路线",
+            items: [
+              "沿连线继续：按画布连线进入下一节点。",
+              "结束路线：在该节点结束演示。",
+              "跳到标题：按精确节点标题跳转。"
+            ]
+          }
+        ],
+        code: [
+          "条件:",
+          "section_notes_ready === true || data_integrity >= 2",
+          "",
+          "效果:",
+          "set script_builder_seen = true",
+          "append walkthrough_notes = playbook_manual"
+        ].join("\n")
+      },
+      {
+        title: "选项条件",
+        lead: "选项条件页按 Choice 选项编辑选择条件和选择时效果。Inspector 与本页读写同一组选项数据。",
+        sections: [
+          {
+            heading: "工作方式",
+            items: [
+              "每一行对应一个 Choice 选项。",
+              "选择条件成立时，选项在演示中可用；空条件表示始终可用。",
+              "条件行支持状态键、运算符、值和 && / || 连接词。",
+              "选择时效果在用户点击该选项后执行，并写入调试访问记录。",
+              "旧版条件行只用于兼容读取，应迁移到选项条件或节点条件。"
+            ]
+          }
+        ],
+        code: [
+          "选项:",
+          "打开 Playbook",
+          "",
+          "选择条件:",
+          "script_builder_seen === true",
+          "",
+          "选择时效果:",
+          "add data_integrity = 1",
+          "set route = playbook_pass"
+        ].join("\n")
+      },
+      {
+        title: "演示预览规则",
+        lead: "演示预览规则只影响 Play 对话框，用于测试路线，不改变画布结构。",
+        sections: [
+          {
+            heading: "规则说明",
+            items: [
+              "起始节点：填写 Play 预览起始节点的精确标题；该设置只影响 Play 弹窗。",
+              "结束条件：表达式为 true 时停止 Play 预览。",
+              "调试模式：在 Play 预览中显示变量值、条件结果、路线和调试细节。",
+              "访问记录：位于调试模式内；调试模式开启时可记录已访问节点，关闭 Play 预览后丢弃。"
+            ]
+          }
+        ],
+        code: [
+          "起始节点:",
+          "从这里开始",
+          "",
+          "结束条件:",
+          'route === "finish" || route === "play_preview"'
+        ].join("\n")
+      },
+      {
+        title: "校验与 JSON",
+        lead: "校验页用于演示前检查状态引用。Advanced JSON 用于精确编辑 Playbook.json。",
+        sections: [
+          {
+            heading: "校验内容",
+            items: [
+              "未知变量、只读变量、只写变量和表达式错误。",
+              "文本模板中的变量插值。",
+              "文本模板中的未定义变量。",
+              "优先处理红色和橙色提示。"
+            ]
+          }
+        ],
+        code: [
+          "校验项:",
+          "未知变量",
+          "只写变量",
+          "表达式错误",
+          "文本模板缺失变量"
+        ].join("\n")
+      }
+    ];
+  }
+  return [
+    {
+      title: "What Playbook controls",
+      lead: "Playbook manages runtime state, node logic, choice logic, Play preview rules, and validation. Canvas layout, node positions, and links stay on the canvas.",
+      sections: [
+        {
+          heading: "Use Playbook for",
+          items: [
+            "Variable definitions shared by conditions, effects, templates, and Play preview.",
+            "Variable actions for manual triggers, global bookkeeping, and legacy imports.",
+            "Script Builder node requirements, node effects, and routing.",
+            "Choice Conditions for option availability and on-choose effects.",
+            "Play preview rules and validation: start node, end condition, debug details, temporary visit tracking, state references, and expression errors."
+          ]
+        },
+        {
+          heading: "Keep outside Playbook",
+          items: [
+            "Node positions, frame sizes, link shapes, and canvas layout.",
+            "Node type field schemas; edit those in Node Library.",
+            "Arbitrary JavaScript execution. Conditions are evaluated as safe expressions.",
+            "Complex external runtime systems."
+          ]
+        }
+      ],
+      code: [
+        "{",
+        '  "variables": { "route": "overview", "draft_focus": "dialog" },',
+        '  "playRules": {',
+        '    "debugMode": { "enabled": true, "value": true },',
+        '    "visitTracking": { "enabled": true, "value": true }',
+        "  }",
+        "}"
+      ].join("\n")
+    },
+    {
+      title: "Variable Definitions",
+      lead: "Define state keys before using them in conditions, effects, templates, or preview. Unknown keys are reported under editors and in Validation.",
+      sections: [
+        {
+          heading: "Recommended shape",
+          items: [
+            "Use lower-case underscore keys, such as workflow_progress or data_integrity.",
+            "Keep one key tied to one piece of state so reads and writes remain easy to audit.",
+            "Use booleans for switches, numbers for progress and counters, and arrays for collected notes.",
+            "Prefer flat, explicit state keys for conditions and effects."
+          ]
+        }
+      ],
+      code: [
+        "workflow_progress = 0",
+        "script_builder_seen = false",
+        'route = "overview"',
+        "walkthrough_notes = []"
+      ].join("\n")
+    },
+    {
+      title: "Variable Actions",
+      lead: "Variable Actions write defined variables outside node rows. Node-local changes belong in Script Builder or the node inspector.",
+      sections: [
+        {
+          heading: "Use cases",
+          items: [
+            "Manual actions shown as buttons during Play preview.",
+            "Global bookkeeping that matches node titles or node types.",
+            "Keep option-specific effects on each option's On choose effects, not here."
+          ]
+        }
+      ],
+      code: [
+        "Manual action:",
+        "toggle playbook_seen",
+        "",
+        "Global action:",
+        "onVisit Choice add type_choice_visits = 1"
+      ].join("\n")
+    },
+    {
+      title: "Script Builder",
+      lead: "Script Builder batch-edits node conditions, node effects, and routing. Structured add rows cover common logic, and complex expressions remain editable as text.",
+      sections: [
+        {
+          heading: "Conditions and effects",
+          items: [
+            "Add Condition lets you choose state key, operator, connector, and value, then writes the condition text.",
+            "Add Effect lets you choose state key, operation, and value, then writes the effect text.",
+            "Available operations are filtered by variable type: strings and objects use Set; numbers use Set, Add, and Subtract; booleans use Set and Invert; arrays use Set, Append, and Remove.",
+            "The status text under each editor reports whether the current state meets the condition, plus unknown variables or syntax errors."
+          ]
+        },
+        {
+          heading: "Routing",
+          items: [
+            "Continue follows the outgoing canvas link.",
+            "End stops preview at the node.",
+            "Go to title jumps to an exact node title."
+          ]
+        }
+      ],
+      code: [
+        "Condition:",
+        "section_notes_ready === true || data_integrity >= 2",
+        "",
+        "Effects:",
+        "set script_builder_seen = true",
+        "append walkthrough_notes = playbook_manual"
+      ].join("\n")
+    },
+    {
+      title: "Choice Conditions",
+      lead: "Choice Conditions edits each Choice option's availability condition and on-choose effects. The inspector and this tab write the same option data.",
+      sections: [
+        {
+          heading: "How rows work",
+          items: [
+            "Each row belongs to one Choice option.",
+            "When the choice condition is met, the option is available in Play. Empty means always available.",
+            "Condition rows support state key, operator, value, and && / || connectors.",
+            "On-choose effects run after the user selects the option and are recorded in debug visit tracking.",
+            "Legacy condition rows are read for compatibility and should be migrated to node or choice logic."
+          ]
+        }
+      ],
+      code: [
+        "Option:",
+        "Open Playbook first",
+        "",
+        "Choice condition:",
+        "script_builder_seen === true",
+        "",
+        "On choose effects:",
+        "add data_integrity = 1",
+        "set route = playbook_pass"
+      ].join("\n")
+    },
+    {
+      title: "Play Preview Rules",
+      lead: "Play preview rules affect only the Play dialog. They test routes without changing the canvas structure.",
+      sections: [
+        {
+          heading: "Rule list",
+          items: [
+            "Start Node uses an exact node title for the first Play preview scene; it only affects the Play dialog.",
+            "End Condition stops preview when the expression becomes true.",
+            "Debug Mode shows state values, condition results, routing, and debug details.",
+            "Visit Tracking lives inside Debug Mode. When enabled, it records visited nodes for the current preview and is discarded when Play closes."
+          ]
+        }
+      ],
+      code: [
+        "Start node:",
+          "Start",
+        "",
+        "End condition:",
+        'route === "finish" || route === "play_preview"'
+      ].join("\n")
+    },
+    {
+      title: "Validation and JSON",
+      lead: "Validation checks state references before preview. Advanced JSON is for exact Playbook.json edits.",
+      sections: [
+        {
+          heading: "Checks",
+          items: [
+            "Unknown variables, read-only variables, write-only variables, and expression errors.",
+            "Variables used in text templates.",
+            "Undefined variables in text templates.",
+            "Review orange and red warnings first."
+          ]
+        }
+      ],
+      code: [
+        "Validation checks:",
+        "- unknown keys",
+        "- write-only keys",
+        "- template variables"
+      ].join("\n")
+    }
+  ];
+}
+
+function renderPlaybookHelpDialog() {
   const dialog = dom.scope?.querySelector("#playbookHelpDialog");
   if (!dialog) return;
-  const canItems = [
-    "Store project variables for text such as {traveler}.",
-    "Batch-edit node Requirements, Effects, and Routing in Script Builder.",
-    "Gate simple branches with conditions such as flag == true.",
-    "Control the demo runner with Start Node, Choice Display, End Condition, Visit Tracking, and Debug Mode.",
-    "Use Advanced JSON for exact edits without changing the canvas schema."
-  ];
-  const cannotItems = [
-    "Run arbitrary JavaScript.",
-    "Create canvas links, move nodes, or change layout.",
-    "Delete node fields directly. Use Node Library for schema changes.",
-    "Replace a game engine runtime or evaluate complex code expressions."
-  ];
+  const pages = getPlaybookHelpPages();
+  const maxPage = Math.max(0, pages.length - 1);
+  state.playbookHelpPage = Math.min(Math.max(Number(state.playbookHelpPage) || 0, 0), maxPage);
+  const page = pages[state.playbookHelpPage] || pages[0];
+  const body = dialog.querySelector("[data-playbook-help-body]");
   dialog.querySelector(".pane-kicker").textContent = t("Playbook");
-  dialog.querySelector("h2").textContent = t("What Playbook.json controls");
-  const sections = dialog.querySelectorAll(".playbook-help-grid section");
-  const renderItems = (items) => items.map((item) => `<li>${escapeHtml(t(item))}</li>`).join("");
-  if (sections[0]) {
-    sections[0].querySelector("h3").textContent = t("Can do");
-    sections[0].querySelector("ul").innerHTML = renderItems(canItems);
+  dialog.querySelector("h2").textContent = t(page.title);
+  if (body) {
+    body.innerHTML = `
+      <article class="playbook-help-page">
+        ${page.lead ? `<p class="playbook-help-lead">${escapeHtml(t(page.lead))}</p>` : ""}
+        ${page.sections.map(renderPlaybookHelpSection).join("")}
+        ${page.code ? `<pre class="playbook-example"><code>${escapeHtml(page.code)}</code></pre>` : ""}
+      </article>
+    `;
   }
-  if (sections[1]) {
-    sections[1].querySelector("h3").textContent = t("Cannot do");
-    sections[1].querySelector("ul").innerHTML = renderItems(cannotItems);
+  const current = state.playbookHelpPage + 1;
+  const total = pages.length;
+  const pageLabel = dialog.querySelector("[data-playbook-help-page-label]");
+  if (pageLabel) pageLabel.textContent = t("Page {current} of {total}", { current, total });
+  const prevButton = dialog.querySelector("[data-action='playbook-help-prev']");
+  const nextButton = dialog.querySelector("[data-action='playbook-help-next']");
+  if (prevButton) {
+    prevButton.textContent = t("Previous tip");
+    prevButton.disabled = state.playbookHelpPage <= 0;
   }
-  const confirmButton = dialog.querySelector("footer button[value='confirm']");
-  if (confirmButton) confirmButton.textContent = t("Got it");
+  if (nextButton) {
+    nextButton.textContent = t("Next tip");
+    nextButton.disabled = state.playbookHelpPage >= maxPage;
+  }
+  const closeButton = dialog.querySelector("[value='confirm']");
+  if (closeButton) closeButton.textContent = t("Close");
+  const dots = dialog.querySelector("[data-playbook-help-dots]");
+  if (dots) {
+    dots.innerHTML = pages.map((item, index) => `
+      <button type="button" class="playbook-help-dot${index === state.playbookHelpPage ? " active" : ""}" data-action="playbook-help-page" data-playbook-help-page="${index}" aria-label="${escapeAttr(t("Page {current} of {total}", { current: index + 1, total }))}" aria-current="${index === state.playbookHelpPage ? "page" : "false"}"></button>
+    `).join("");
+  }
+}
+
+function renderPlaybookHelpSection(section) {
+  return `
+    <section class="playbook-help-section">
+      <h3>${escapeHtml(t(section.heading))}</h3>
+      <ul>
+        ${(section.items || []).map((item) => `<li>${escapeHtml(t(item))}</li>`).join("")}
+      </ul>
+    </section>
+  `;
 }
 
 function localizePlayRuleDialog() {
   const dialog = dom.playRuleDialog;
   if (!dialog) return;
-  dialog.setAttribute("aria-label", t("Add play rule"));
+  dialog.setAttribute("aria-label", t("Add preview rule"));
   dialog.querySelector(".pane-kicker").textContent = t("Playbook");
-  dialog.querySelector("h2").textContent = t("Add play rule");
+  dialog.querySelector("h2").textContent = t("Add preview rule");
   const labels = {
-    startNode: ["Start Node", "Choose the exact node title Play starts from."],
-    choiceDisplay: ["Choice Display", "Decide how gated choices appear in Play."],
-    endCondition: ["End Condition", "Stop the demo route when a condition becomes true."],
-    visitTracking: ["Visit Tracking", "Record visited node titles during Play."],
-    debugMode: ["Debug Mode", "Show variable and condition details while previewing."]
+    startNode: ["Start Node", "Choose the exact node title where Play preview starts. This does not change canvas links or layout."],
+    endCondition: ["End Condition", "End Play preview when this condition becomes true. Route checks such as route == ending work well here."],
+    visitTracking: ["Visit Tracking", "Record visited nodes while Debug Mode is enabled. The list is discarded when Play preview closes."],
+    debugMode: ["Debug Mode", "Show state values and condition results in Play preview, so it is easier to see why a choice appears or disappears."]
   };
   dialog.querySelectorAll("[data-playbook-rule-kind]").forEach((button) => {
     const [title, body] = labels[button.dataset.playbookRuleKind] || [];
@@ -2071,7 +3662,7 @@ function localizePlayRuleDialog() {
     button.querySelector("span").textContent = t(body);
   });
   const allSet = dialog.querySelector("[data-playbook-rule-allset]");
-  if (allSet) allSet.textContent = t("All play rules already enabled.");
+  if (allSet) allSet.textContent = t("All preview rules already enabled.");
   const cancel = dialog.querySelector(".confirm-cancel");
   if (cancel) cancel.textContent = t("Cancel");
 }
@@ -2185,6 +3776,11 @@ function markProjectStructureChanged(options = {}) {
   if (!state.derived) return;
   state.derived.flowOrder = null;
   state.derived.displayId = null;
+  state.derived.frameChildFlowOrder = null;
+  state.derived.frameDescendantNodes = null;
+  state.derived.nodeSearchText = null;
+  state.derived.eventSearchText = null;
+  state.derived.characterMentionContext = null;
   if (options.nodeTypes) {
     state.derived.nodeTypeMap = null;
     state.derived.projectNodeTypes = null;
@@ -2460,6 +4056,8 @@ function buildCharacterRenderContext() {
 
 function invalidateCharacterRenderContext() {
   state.characterRenderContext = null;
+  state.characterIndex = null;
+  if (state.derived) state.derived.characterMentionContext = null;
 }
 
 function renderCharacterMasonryColumns(characters, context) {
@@ -2603,7 +4201,7 @@ function renderCharacterBacklinkItem(item) {
     <button class="linked-node character-backlink" data-action="focus-character-node" data-node-id="${escapeAttr(node.id)}">
       <span class="character-backlink-main">
         <strong>${escapeHtml(node.title || getNodeTypeLabel(node.type))}</strong>
-        <small>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</small>
+        <small>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(node.id || getNodeDisplayId(node))}</small>
       </span>
     </button>
   `;
@@ -2618,15 +4216,26 @@ function renderVariablesPage(options = {}) {
   const ruleCards = getPlaybookRuleCards();
   const actionCount = actions.length;
   const ruleCount = ruleCards.length;
-  const optionalRuleCount = ruleCards.filter((card) => !card.required).length;
+  const enabledRuleCount = ruleCards.filter((card) => card.enabled).length;
   const limit = getDocumentRenderLimit("variables");
-  const visibleEntries = entries.slice(0, limit);
-  const activeCategoryFilter = state.playbookCategoryFilter;
+  const variableFilters = getVariableDefinitionFilterOptions(entries);
+  const validFilters = new Set(variableFilters.map((filter) => filter.value));
+  if (state.playbookCategoryFilter && !validFilters.has(state.playbookCategoryFilter)) state.playbookCategoryFilter = null;
+  const activeVariableFilter = state.playbookCategoryFilter;
+  const filteredEntries = activeVariableFilter ? entries.filter((entry) => getVariableDefinitionFilterKey(entry[1]) === activeVariableFilter) : entries;
+  const filteredActions = actions;
   const scriptNodes = getScriptBuilderNodes();
+  const gateRows = getPlaybookGateRows();
+  const stateReport = buildStateReport();
+  const validationRows = stateReport.rows;
+  const visibleEntries = filteredEntries.slice(0, limit);
   const visibleScriptNodes = scriptNodes.slice(0, limit);
+  const visibleGateRows = gateRows.slice(0, limit);
+  const visibleActions = filteredActions.slice(0, limit);
   const visibleRuleCards = ruleCards.slice(0, limit);
-  const shownCount = Math.max(visibleEntries.length, visibleScriptNodes.length, visibleRuleCards.length);
-  const totalCount = Math.max(entries.length, scriptNodes.length, ruleCount);
+  const visibleValidationRows = validationRows.slice(0, limit);
+  const shownCount = Math.max(visibleEntries.length, visibleScriptNodes.length, visibleGateRows.length, visibleActions.length, visibleRuleCards.length, visibleValidationRows.length);
+  const totalCount = Math.max(filteredEntries.length, scriptNodes.length, gateRows.length, filteredActions.length, ruleCount, validationRows.length);
   const playbookJson = buildVariablesJson();
   const activeTab = getValidPlaybookTab(state.playbookTab);
   dom.variablesPanel.innerHTML = `
@@ -2635,64 +4244,58 @@ function renderVariablesPage(options = {}) {
         <div>
           <span class="pane-kicker">Playbook</span>
           <h2>${PLAYBOOK_FILE_NAME}</h2>
-          <div class="document-meta">${t("{variables} variables, {rules} Play rules, {actions} node logic rows", { variables: entries.length, rules: optionalRuleCount, actions: scriptNodes.length })}</div>
+          <div class="document-meta">${t("{variables} variable definitions, {actions} variable actions, {rules} Play rules, {scriptRows} node logic rows", { variables: entries.length, actions: actionCount, rules: enabledRuleCount, scriptRows: scriptNodes.length })}</div>
         </div>
         <div class="document-actions">
           <button class="help-button" type="button" data-action="show-playbook-help" aria-label="${escapeAttr(t("What can Playbook.json do?"))}">?</button>
-          <button class="small-button" type="button" data-action="add-variable">${t("Add variable")}</button>
-          <button class="small-button" type="button" data-action="add-play-rule">${t("Add play rule")}</button>
           <button class="small-button" type="button" data-action="toggle-playbook-json">${state.playbookJsonOpen ? t("Hide JSON") : t("Advanced JSON")}</button>
           <button class="small-button" type="button" data-action="export-variables-json">${t("Export JSON")}</button>
         </div>
       </header>
       ${renderPlaybookValueDatalists()}
       ${renderPlaybookTabs(activeTab)}
-      ${activeTab === "script" ? `
-        <section class="playbook-section playbook-builder-section">
-        <header class="playbook-section-header">
-          <div>
-            <h3>${t("Script Builder")}</h3>
-            <p>${t("Batch-edit node requirements, effects, and routing. These are the same fields shown inside each node.")}</p>
-          </div>
-          <span>${scriptNodes.length}</span>
-        </header>
-        <div class="script-node-table">
-          <div class="script-node-row script-node-heading">
-            <span>${t("Node")}</span>
-            <span>${t("Requirements")}</span>
-            <span>${t("Effects")}</span>
-            <span>${t("Routing")}</span>
-            <span>${t("Go to title")}</span>
-          </div>
-          ${visibleScriptNodes.map(renderScriptNodeRow).join("") || `<div class="nc-empty-state">${t("No editable node logic yet.")}</div>`}
-        </div>
-      </section>` : ""}
+      ${activeTab === "script" ? renderScriptBuilderSection(scriptNodes, visibleScriptNodes) : ""}
+      ${activeTab === "actions" ? renderPlaybookActionsSection(actions, visibleActions) : ""}
+      ${activeTab === "gates" ? renderPlaybookGatesSection(gateRows, visibleGateRows) : ""}
       ${activeTab === "variables" ? `
         <section class="playbook-section">
         <header class="playbook-section-header">
-          <h3>${t("Variables")}</h3>
-          <span>${entries.length}</span>
+          <div>
+            <h3>${t("Variable Definitions")}</h3>
+          </div>
+          <div class="playbook-section-header-actions">
+            <span>${filteredEntries.length}</span>
+            <button class="small-button" type="button" data-action="add-variable">${t("Add variable")}</button>
+          </div>
         </header>
+        ${renderPlaybookCategoryStrip(entries, { filters: variableFilters, total: entries.length })}
         <div class="variable-table">
           <div class="variable-row variable-heading">
             <span>${t("Key")}</span>
             <span>${t("Type")}</span>
             <span>${t("Value")}</span>
+            <span>JSON</span>
             <span></span>
           </div>
-          ${visibleEntries.map(([key, value]) => renderVariableRow(key, value)).join("") || `<div class="nc-empty-state">${t("No variables yet.")}</div>`}
+          ${renderVariableRows(visibleEntries, activeVariableFilter ? "No variables match this variable type." : "No variables yet.")}
         </div>
       </section>` : ""}
       ${activeTab === "rules" ? `
         <section class="playbook-section">
         <header class="playbook-section-header">
-          <h3>${t("Play rules")}</h3>
-          <span>${ruleCount}</span>
+          <div>
+            <h3>${t("Play rules")}</h3>
+          </div>
+          <div class="playbook-section-header-actions">
+            <span>${enabledRuleCount}/${ruleCount}</span>
+            <button class="small-button" type="button" data-action="add-play-rule">${t("Add preview rule")}</button>
+          </div>
         </header>
         <div class="playbook-rule-grid">
           ${visibleRuleCards.length ? visibleRuleCards.map(renderPlaybookRuleCard).join("") : `<div class="nc-empty-state">${t("No play rules yet.")}</div>`}
         </div>
       </section>` : ""}
+      ${activeTab === "validation" ? renderPlaybookValidationReport(stateReport, visibleValidationRows) : ""}
       ${renderDocumentLimitNotice("variables", shownCount, totalCount)}
       ${state.playbookJsonOpen ? `
         <label class="field json-field">
@@ -2716,7 +4319,7 @@ function renderVariablesPage(options = {}) {
 function renderPlaybookValueDatalists() {
   const stateKeys = getPlaybookStateKeySuggestions();
   const targets = getPlaybookTargetEntries();
-  const values = ["True", "False", "0", "1", "{title}", "{body}", "{value}", "{traveler}", "{route}"];
+  const values = ["True", "False", "0", "1", "{title}", "{body}", "{value}", "{protagonist}", "{route}"];
   return `
     <datalist id="playbookStateKeyOptions">
       ${stateKeys.map((value) => `<option value="${escapeAttr(value)}"></option>`).join("")}
@@ -2730,11 +4333,39 @@ function renderPlaybookValueDatalists() {
   `;
 }
 
+function renderScriptBuilderSection(scriptNodes, visibleScriptNodes) {
+  return `
+    <section class="playbook-section playbook-builder-section">
+      <header class="playbook-section-header">
+        <div>
+          <h3>${t("Script Builder")}</h3>
+          <p>${t("Batch-edit node requirements, node effects, and routing. For ordinary per-node logic, use this instead of Variable Actions.")}</p>
+        </div>
+        <span>${scriptNodes.length}</span>
+      </header>
+      <div class="script-node-table">
+        <div class="script-node-row script-node-heading">
+          <span>${t("Node")}</span>
+          <span>${t("Node requirements")}</span>
+          <span>${t("Node effects")}</span>
+          <span>${t("Routing")}</span>
+          <span>${t("Go to title")}</span>
+          <span>JSON</span>
+        </div>
+        ${visibleScriptNodes.map(renderScriptNodeRow).join("") || `<div class="nc-empty-state">${t("No editable node logic yet.")}</div>`}
+      </div>
+    </section>
+  `;
+}
+
 function renderPlaybookTabs(activeTab) {
   const tabs = [
-    { id: "variables", label: "Variables" },
+    { id: "variables", label: "Variable Definitions" },
+    { id: "actions", label: "Variable Actions" },
     { id: "script", label: "Script Builder" },
-    { id: "rules", label: "Play rules" }
+    { id: "gates", label: "Choice Conditions" },
+    { id: "rules", label: "Play Rules" },
+    { id: "validation", label: "Validation" }
   ];
   return `
     <div class="playbook-tabs" role="tablist" aria-label="${escapeAttr(t("Playbook sections"))}">
@@ -2747,24 +4378,1316 @@ function renderPlaybookTabs(activeTab) {
   `;
 }
 
-function renderPlaybookCategoryStrip(actions) {
-  const counts = new Map(PLAYBOOK_STATE_CATEGORIES.map((category) => [category, 0]));
-  actions.forEach((action) => counts.set(action.category, (counts.get(action.category) || 0) + 1));
-  const activeFilter = state.playbookCategoryFilter;
+function getPlaybookGateRows() {
+  const rows = [];
+  getScriptBuilderNodes().forEach((node) => {
+    if (hasNodeCondition(node)) {
+      rows.push({
+        id: `condition:${node.id}`,
+        kind: "conditionNode",
+        typeLabel: "Condition node",
+        targetLabel: `${node.title || getNodeDisplayId(node)} (${getNodeTypeLabel(node.type)} ${getNodeDisplayId(node)})`,
+        condition: node.condition || (node.type === "Condition" ? node.body || "" : ""),
+        conditionMode: normalizeStoredConditionGroupMode(node.conditionMode),
+        nodeId: node.id,
+        legacyActionId: ""
+      });
+    }
+    getGateChoiceOptions(node).forEach((option) => {
+      rows.push({
+        id: `choice:${node.id}:${option.id}`,
+        kind: "choiceRequirement",
+        typeLabel: "Choice requirement",
+        targetLabel: `${node.title || getNodeDisplayId(node)} -> ${option.label}`,
+        condition: option.requires || "",
+        conditionMode: option.requiresMode || "all",
+        effects: normalizeNodeEffects(option.effects),
+        nodeId: node.id,
+        choiceOptionId: option.id,
+        legacyActionId: ""
+      });
+    });
+  });
+  getPlaybookActions()
+    .filter((action) => action.trigger === "gate" && action.op === "if")
+    .forEach((action) => {
+      rows.push({
+        id: `legacy:${action.id}`,
+        kind: "legacy",
+        typeLabel: "Legacy action",
+        targetLabel: action.target || t("Any node"),
+        condition: formatLegacyGateCondition(action),
+        nodeId: "",
+        legacyActionId: action.id
+      });
+    });
+  return rows;
+}
+
+function getGateChoiceOptions(node) {
+  if (Array.isArray(node?.choiceOptions) && node.choiceOptions.length) return normalizeChoiceOptions(node);
+  return parseChoiceLines(node?.choices).map((label, index) => ({
+    id: `index:${index}`,
+    label,
+    requires: "",
+    requiresMode: "all",
+    effects: []
+  }));
+}
+
+function renderPlaybookGatesSection(gates, visibleGates) {
   return `
-    <div class="playbook-category-strip" role="group" aria-label="${escapeAttr(t("State categories"))}">
+    <section class="playbook-section playbook-gates-section">
+      <header class="playbook-section-header">
+        <div>
+          <h3>${t("Choice Conditions")}</h3>
+          <p>${t("Choice Conditions batch-edit choice requirements. Legacy condition rows are shown here for compatibility.")}</p>
+        </div>
+        <span>${gates.length}</span>
+      </header>
+      <div class="playbook-gate-table">
+        <div class="playbook-gate-row playbook-gate-heading">
+          <span>${t("Option")}</span>
+          <span>${t("Choice condition")}</span>
+          <span>${t("On choose effects")}</span>
+          <span>JSON</span>
+        </div>
+        ${visibleGates.length ? visibleGates.map(renderPlaybookGateRow).join("") : `<div class="nc-empty-state">${t("No choice conditions yet.")}</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderPlaybookGateRow(row) {
+  return `
+    <div class="playbook-gate-row" data-gate-id="${escapeAttr(row.id)}" data-gate-kind="${escapeAttr(row.kind)}">
+      <button class="linked-node script-node-link" type="button" ${row.nodeId ? `data-action="focus-canvas-node" data-node-id="${escapeAttr(row.nodeId)}"` : "disabled"}>
+        <strong>${escapeHtml(row.targetLabel)}</strong>
+        ${row.choiceOptionId ? `<small>${escapeHtml(row.choiceOptionId)}</small>` : ""}
+      </button>
+      ${renderPlaybookGateConditionCell(row)}
+      ${renderPlaybookGateEffectsCell(row)}
+      ${renderPlaybookJsonButton(getPlaybookJsonPairToken("rowId", row.id))}
+    </div>
+  `;
+}
+
+function renderPlaybookGateConditionCell(row) {
+  return `
+    <div class="playbook-gate-condition">
+      ${renderPlaybookConditionCodeCell({
+        value: row.condition,
+        attributes: row.kind === "legacy" ? "" : `data-gate-id="${escapeAttr(row.id)}" data-gate-field="condition"`,
+        readonly: row.kind === "legacy"
+      })}
+    </div>
+  `;
+}
+
+function renderPlaybookGateEffectsCell(row) {
+  if (row.kind === "legacy") {
+    return `
+      <div class="playbook-gate-effects">
+        ${renderPlaybookEffectsCodeCell({
+          value: "",
+          defaultTrigger: "onChoose",
+          readonly: true
+        })}
+        <small>${escapeHtml(t("Legacy gates"))}</small>
+      </div>
+    `;
+  }
+  if (row.kind !== "choiceRequirement") {
+    return `<div class="playbook-gate-effects">${renderPlaybookEffectsCodeCell({ value: "", defaultTrigger: "onChoose", readonly: true })}</div>`;
+  }
+  const effects = normalizeNodeEffects(row.effects);
+  const effectsText = formatStateEffectsText(effects, { defaultTrigger: "onChoose" });
+  return `
+    <div class="playbook-gate-effects">
+      ${renderPlaybookEffectsCodeCell({
+        value: effectsText,
+        defaultTrigger: "onChoose",
+        attributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-field="effects"`
+      })}
+    </div>
+  `;
+}
+
+function renderPlaybookChoiceEffectDraft(row) {
+  return renderEffectDraftRow({
+    action: "commit-playbook-choice-effect-draft",
+    defaultTrigger: "onChoose",
+    includeTrigger: false,
+    effectId: row.id
+  });
+}
+
+function renderPlaybookGateEffectRow(effect, row, effectIndex) {
+  return `
+    <div class="node-effect-row no-trigger playbook-gate-effect-row">
+      ${renderStateKeySelect({
+        attributes: `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="key"`,
+        selected: effect.key || "",
+        placeholder: "State key"
+      })}
+      ${renderStateEffectOperationControl(effect, `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="op"`)}
+      ${renderStateEffectValueControl(effect, `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="value"`)}
+    </div>
+  `;
+}
+
+function renderPlaybookGateConditionControl(row) {
+  if (row.kind === "legacy") {
+    return `<input value="${escapeAttr(row.condition)}" readonly spellcheck="false">`;
+  }
+  return renderConditionBuilderControl({
+    expression: row.condition,
+    mode: row.conditionMode,
+    className: "gate-condition-builder",
+    keyAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="key"`,
+    opAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="op"`,
+    valueAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="value"`,
+    connectorAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="connector"`,
+    modeAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="mode"`,
+    customAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-field="condition"`
+  });
+}
+
+function getGateConditionStatus(row) {
+  return getConditionEvaluationStatus(row?.condition, state.project.variables);
+}
+
+function getConditionEvaluationStatus(source, variables = state.project.variables) {
+  const text = String(source || "").trim();
+  if (!text) return { status: "always" };
+  const normalizedVariables = normalizeVariablesObject(variables);
+  const result = collectExpressionKeys(text, normalizedVariables);
+  if (result.invalid) return { status: "invalid" };
+  const unknown = result.keys.filter((key) => !resolveRuntimeStatePath(key, normalizedVariables).found);
+  if (unknown.length) return { status: "unknown", key: unknown[0] };
+  const parsed = parseJsConditionExpression(text);
+  if (parsed.invalid) return { status: "invalid" };
+  return { status: coerceBoolean(evaluateJsConditionAst(parsed.ast, normalizedVariables)) ? "pass" : "fail" };
+}
+
+function formatConditionEvaluationStatusLabel(status) {
+  if (!status || status.status === "always") return t("Always available");
+  if (status.status === "pass") return t("Demo run can meet this condition");
+  if (status.status === "fail") return t("Requires demo run progress");
+  if (status.status === "invalid") return t("Invalid expression");
+  if (status.status === "unknown") return t("Unknown variable: {key}", { key: status.key });
+  return "";
+}
+
+function normalizePlaybookEditorStatus(status) {
+  if (!status || typeof status !== "object") return { status: "invalid", message: t("Invalid expression") };
+  return {
+    status: String(normalizeOptionalString(status.status)).trim().toLowerCase() || "invalid",
+    message: normalizeOptionalString(status.message),
+    key: normalizeOptionalString(status.key),
+    count: Number.isFinite(Number(status.count)) ? Number(status.count) : 0,
+    line: Number.isFinite(Number(status.line)) ? Number(status.line) : 0
+  };
+}
+
+function getPlaybookCodeStatusClass(status) {
+  const normalized = normalizePlaybookEditorStatus(status);
+  return normalized.status === "ok" ? "pass" : normalized.status;
+}
+
+function formatPlaybookEditorStatusLabel(status) {
+  const normalized = normalizePlaybookEditorStatus(status);
+  if (normalized.message) return normalized.message;
+  if (["always", "pass", "fail", "invalid", "unknown"].includes(normalized.status)) {
+    return formatConditionEvaluationStatusLabel(normalized);
+  }
+  if (normalized.status === "ok") {
+    return normalized.count === 1 ? t("Effect lines OK") : t("{count} effect lines OK", { count: normalized.count });
+  }
+  if (normalized.status === "empty") return t("No effects.");
+  return "";
+}
+
+function getPlaybookEffectsTextStatus(value, options = {}) {
+  return parsePlaybookEffectsText(value, options).status;
+}
+
+function parsePlaybookEffectsText(value, options = {}) {
+  const defaultTrigger = normalizePlaybookActionTrigger(options.defaultTrigger || "onVisit");
+  const forceTrigger = options.forceTrigger ? normalizePlaybookActionTrigger(options.forceTrigger) : "";
+  const effects = [];
+  const lines = String(value || "").split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
+    const line = rawLine.trim();
+    if (!line) continue;
+    const parsed = parsePlaybookEffectLine(line, { defaultTrigger, forceTrigger });
+    if (parsed.status.status !== "ok") {
+      return {
+        effects: [],
+        status: {
+          ...parsed.status,
+          line: index + 1,
+          message: t("Effect line {line}: {message}", { line: index + 1, message: parsed.status.message })
+        }
+      };
+    }
+    effects.push(parsed.effect);
+  }
+  return {
+    effects,
+    status: effects.length
+      ? { status: "ok", count: effects.length }
+      : { status: "none", message: t("No effects.") }
+  };
+}
+
+function parsePlaybookEffectLine(line, { defaultTrigger = "onVisit", forceTrigger = "" } = {}) {
+  const triggerMatch = line.match(/^\[(onVisit|onChoose|manual)\]\s*(.+)$/i);
+  const trigger = forceTrigger || (triggerMatch ? normalizePlaybookActionTrigger(triggerMatch[1]) : normalizePlaybookActionTrigger(defaultTrigger));
+  const body = triggerMatch ? triggerMatch[2].trim() : line;
+  const match = body.match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([^\s=]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
+  if (!match) {
+    return { effect: null, status: { status: "invalid", message: t("Invalid effect syntax") } };
+  }
+  const op = normalizePlaybookEffectTextOperation(match[1]);
+  const key = normalizeOptionalString(match[2]).trim();
+  if (!key) return { effect: null, status: { status: "invalid", message: t("Effect key is required.") } };
+  const effect = {
+    trigger,
+    op,
+    key,
+    value: normalizeOptionalString(match[3] ?? match[4] ?? "")
+  };
+  const info = getVariableInfoForStateEffect(effect);
+  if (!info.hasVariable) {
+    return { effect: null, status: { status: "unknown", key, message: t("Unknown variable: {key}", { key }) } };
+  }
+  const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
+  if (!allowed.some((option) => option.value === op)) {
+    return { effect: null, status: { status: "invalid", message: t("Operation not available for this variable type.") } };
+  }
+  return {
+    effect: normalizeStateEffectForVariableSchema(effect, { coerceValue: false }),
+    status: { status: "ok" }
+  };
+}
+
+function normalizePlaybookEffectTextOperation(value) {
+  const op = normalizeOptionalString(value).trim().toLowerCase();
+  if (op === "invert") return "toggle";
+  return normalizePlaybookActionOperation(op);
+}
+
+function formatPlaybookEffectSummary(effect) {
+  const operation = PLAYBOOK_ACTION_OPERATIONS.find((option) => option.value === effect?.op)?.label || effect?.op || "Set";
+  const key = normalizeOptionalString(effect?.key).trim();
+  const value = normalizeOptionalString(effect?.value).trim();
+  const valueSuffix = value && effect?.op !== "toggle" && effect?.op !== "clear" ? ` = ${value}` : "";
+  return `${t(operation)} ${key}${valueSuffix}`.trim();
+}
+
+function formatLegacyGateCondition(action) {
+  const key = getPlaybookActionStateKey(action);
+  const value = normalizeOptionalString(action?.value).trim();
+  return `${key} ${value}`.trim();
+}
+
+function renderPlaybookActionsSection(actions, visibleActions) {
+  return `
+    <section class="playbook-section playbook-actions-section">
+      <header class="playbook-section-header">
+        <div>
+          <h3>${t("Playbook variable actions")}</h3>
+          <p>${t("Variable Actions write defined Variables outside node rows. Node-specific changes belong in Script Builder or the node inspector.")}</p>
+        </div>
+        <div class="playbook-section-header-actions">
+          <span>${visibleActions.length}</span>
+          <button class="small-button" type="button" data-action="show-playbook-action-draft">${t("Add variable action")}</button>
+        </div>
+      </header>
+      <div class="playbook-action-table">
+        <div class="playbook-action-row playbook-action-heading">
+          <span>${t("Trigger")}</span>
+          <span>${t("Target")}</span>
+          <span>${t("Key")}</span>
+          <span>${t("Operation")}</span>
+          <span>${t("Value")}</span>
+          <span>JSON</span>
+          <span></span>
+        </div>
+        ${renderPlaybookActionDraftRow()}
+        ${visibleActions.length ? visibleActions.map(renderPlaybookActionRow).join("") : (state.playbookActionDraftOpen ? "" : `<div class="nc-empty-state">${t("No variable actions yet.")}</div>`)}
+      </div>
+    </section>
+  `;
+}
+
+function renderPlaybookValidationReport(report, visibleRows, activeFilter = "") {
+  const rows = Array.isArray(visibleRows) ? visibleRows : [];
+  return `
+    <section class="playbook-section state-report-section">
+      <header class="playbook-section-header">
+        <div>
+          <h3>${t("State validation")}</h3>
+          <p>${t("Scan conditions, effects, templates, and export risks before playtesting or exporting.")}</p>
+        </div>
+        <span>${t("{count} state issues", { count: report.issueCount })}</span>
+      </header>
+      <div class="state-report-summary">
+        ${renderStateReportSummaryMetric({
+          primary: t("{count} state keys", { count: report.rows.length }),
+          secondary: report.issueCount ? t("{count} state issues", { count: report.issueCount }) : t("No state issues found.")
+        })}
+        ${renderStateReportSummaryMetric({
+          primary: t("{count} reads", { count: report.readCount }),
+          secondary: t("{count} writes", { count: report.writeCount })
+        })}
+        ${renderStateReportSummaryMetric({
+          primary: t("{count} templates", { count: report.interpolationCount }),
+          secondary: t("Validation")
+        })}
+      </div>
+      ${renderStateReportInvalidExpressions(report.invalidExpressions)}
+      ${renderStateReportExportBlocks(report.exportBlocks)}
+      <div class="state-report-table">
+        ${rows.length ? rows.map(renderStateReportRow).join("") : `<div class="nc-empty-state">${t("No state references yet.")}</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderStateReportSummaryMetric({ primary, secondary }) {
+  return `
+    <div class="state-report-summary-metric">
+      <strong>${escapeHtml(primary)}</strong>
+      <span>${escapeHtml(secondary)}</span>
+    </div>
+  `;
+}
+
+function renderStateReportInvalidExpressions(refs) {
+  if (!Array.isArray(refs) || !refs.length) return "";
+  return `
+    <div class="state-report-invalid">
+      <strong>${escapeHtml(t("Invalid expression"))}</strong>
+      <div class="state-report-ref-list">
+        ${refs.slice(0, 8).map(renderStateReportReference).join("")}
+        ${refs.length > 8 ? `<span class="state-report-more">${escapeHtml(t("More: {count}", { count: refs.length - 8 }))}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderStateReportExportBlocks(blocks) {
+  if (!Array.isArray(blocks) || !blocks.length) return "";
+  const visible = blocks.slice(0, 12);
+  return `
+    <div class="state-report-export-blocks">
+      <strong>${escapeHtml(t("Export risk"))}</strong>
+      <div class="state-report-export-list">
+        ${visible.map((block) => `
+          <article class="state-report-export-item">
+            <code>${escapeHtml(block.code)}</code>
+            <span>${escapeHtml(formatExportWarningMessage(block))}</span>
+            ${renderStateReportReference(block)}
+          </article>
+        `).join("")}
+        ${blocks.length > visible.length ? `<span class="state-report-more">${escapeHtml(t("More: {count}", { count: blocks.length - visible.length }))}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderStateReportRow(row) {
+  return `
+    <article class="state-report-card" data-state-key="${escapeAttr(row.key)}" data-state-status="${escapeAttr(row.primaryStatus)}">
+      <header class="state-report-card-head">
+        <div class="state-report-key">
+          <code>${escapeHtml(row.key)}</code>
+          <small>${escapeHtml(row.typeLabel)}</small>
+        </div>
+        <div class="state-report-status-list">
+          ${row.statuses.map((status, index) => renderStateReportStatusBadge(row, status, index)).join("")}
+          ${renderPlaybookJsonButton(getPlaybookJsonPairToken("rowId", `state:${row.key}`))}
+        </div>
+      </header>
+      <div class="state-report-card-grid">
+        ${renderStateReportValueBlock(t("Initial"), row.hasInitial ? `<code>${escapeHtml(formatStateReportValue(row.initialValue))}</code>` : `<span>${escapeHtml(t("No initial value"))}</span>`)}
+        ${renderStateReportReferenceBlock(t("Read by"), row.reads)}
+        ${renderStateReportReferenceBlock(t("Written by"), row.writes)}
+        ${renderStateReportReferenceBlock(t("Interpolated by"), row.interpolations)}
+      </div>
+    </article>
+  `;
+}
+
+function renderStateReportStatusBadge(row, status, index = 0) {
+  const label = t(STATE_REPORT_STATUS_LABELS[status] || status);
+  const base = `state-report-status state-report-status-${escapeAttr(status)}`;
+  if (status === "ok") {
+    return `<span class="${base}">${escapeHtml(label)}</span>`;
+  }
+  const tooltipId = `state-status-${slugPlaybookCategory(row?.key || "state")}-${slugPlaybookCategory(status)}-${index}`;
+  const title = formatStateReportStatusTitle(row, status);
+  return `
+    <span class="state-report-status-wrap">
+      <span class="${base}" tabindex="0" aria-describedby="${escapeAttr(tooltipId)}" title="${escapeAttr(title)}">${escapeHtml(label)}</span>
+      <span class="state-report-status-tooltip state-report-status-tooltip-${escapeAttr(status)}" id="${escapeAttr(tooltipId)}" role="tooltip">
+        ${status === "export-blocked" ? renderStateReportExportRiskTooltip(row) : renderStateReportStatusTooltip(row, status)}
+      </span>
+    </span>
+  `;
+}
+
+function renderStateReportStatusTooltip(row, status) {
+  const detail = getStateReportStatusDetail(row, status);
+  return `
+    <strong>${escapeHtml(detail.title)}</strong>
+    <span class="state-report-risk-summary">${escapeHtml(detail.body)}</span>
+    <span class="state-report-risk-detail">
+      <em>${escapeHtml(detail.hint)}</em>
+    </span>
+  `;
+}
+
+function formatStateReportStatusTitle(row, status) {
+  if (status === "export-blocked") return formatStateReportExportRiskTitle(row);
+  const detail = getStateReportStatusDetail(row, status);
+  return [detail.title, detail.body, detail.hint].join("\n");
+}
+
+function getStateReportStatusDetail(row, status) {
+  switch (status) {
+    case "unknown-key":
+      return {
+        title: t("Unknown key details"),
+        body: t("This key is used by a condition or template, but it has no initial value and no known write in the current project."),
+        hint: t("Fix hint: add this key to Variables, correct the spelling, or add an effect that writes it before it is read.")
+      };
+    case "read-only":
+      return {
+        title: t("Read-only details"),
+        body: t("This key is read by a condition, template, or export, but the project does not initialize it."),
+        hint: t("Fix hint: add an initial value in Variables, or document that the target runtime will provide it.")
+      };
+    case "written-only":
+      return {
+        title: t("Written-only details"),
+        body: t("This key is written by effects or actions, but nothing in the current project reads it."),
+        hint: t("Fix hint: keep it only if the target runtime reads it; otherwise remove it or correct the key name.")
+      };
+    case "object-unreadable":
+      return {
+        title: t("Object value details"),
+        body: t("This key contains an object or complex value. Runtime JSON can keep it, but conditions, templates, Yarn, and Ink usually need simpler state."),
+        hint: t("Fix hint: split the object into flat keys, or use supported list checks such as array_key.includes(value) for arrays.")
+      };
+    case "template-mismatch":
+      return {
+        title: t("Template mismatch details"),
+        body: t("A text template references this key, but it does not match a node field or variable. The placeholder may remain unresolved."),
+        hint: t("Fix hint: add the variable, rename the placeholder, or use an existing node field name.")
+      };
+    case "invalid-expression":
+      return {
+        title: t("Expression error details"),
+        body: t("A condition related to this key cannot be parsed. The route or option check may not behave as intended."),
+        hint: t("Fix hint: use JavaScript comparisons, && / ||, parentheses, array_key.includes(value), or a bare boolean key.")
+      };
+    default:
+      return {
+        title: t("Status details"),
+        body: t(STATE_REPORT_STATUS_LABELS[status] || status),
+        hint: t("Review the export report before handing files to an engine.")
+      };
+  }
+}
+
+function renderStateReportExportRiskTooltip(row) {
+  const blocks = Array.isArray(row?.exportBlocks) ? row.exportBlocks : [];
+  const visible = blocks.slice(0, 4);
+  const items = visible.length
+    ? visible.map((block) => `
+      <span class="state-report-risk-detail">
+        <span>${escapeHtml(formatExportWarningMessage(block))}</span>
+        ${block.label ? `<small>${escapeHtml(block.label)}</small>` : ""}
+        <em>${escapeHtml(getStateReportExportRiskFixHint(block))}</em>
+      </span>
+    `).join("")
+    : `<span class="state-report-risk-detail"><span>${escapeHtml(t("No detailed export warning was attached to this key. Review the export report before handing files to an engine."))}</span></span>`;
+  const more = blocks.length > visible.length
+    ? `<span class="state-report-risk-more">${escapeHtml(t("More: {count}", { count: blocks.length - visible.length }))}</span>`
+    : "";
+  return `
+    <strong>${escapeHtml(t("Export risk details"))}</strong>
+    <span class="state-report-risk-summary">${escapeHtml(t("Runtime JSON keeps the richest data. Yarn, Ink, and Twee may rename this state, comment it out, or need custom runtime handling."))}</span>
+    ${items}
+    ${more}
+  `;
+}
+
+function formatStateReportExportRiskTitle(row) {
+  const blocks = Array.isArray(row?.exportBlocks) ? row.exportBlocks : [];
+  const lines = [
+    t("Export risk details"),
+    t("Runtime JSON keeps the richest data. Yarn, Ink, and Twee may rename this state, comment it out, or need custom runtime handling.")
+  ];
+  if (!blocks.length) {
+    lines.push(t("No detailed export warning was attached to this key. Review the export report before handing files to an engine."));
+    return lines.join("\n");
+  }
+  blocks.slice(0, 4).forEach((block) => {
+    lines.push(formatExportWarningMessage(block));
+    lines.push(getStateReportExportRiskFixHint(block));
+  });
+  if (blocks.length > 4) lines.push(t("More: {count}", { count: blocks.length - 4 }));
+  return lines.join("\n");
+}
+
+function getStateReportExportRiskFixHint(block) {
+  const code = String(block?.code || "");
+  if (code === "effect-op-runtime-only") return t("Fix hint: use set/add/subtract/toggle for text exports, or handle this operation in your runtime.");
+  if (code === "custom-node-type-runtime-only") return t("Fix hint: use Runtime JSON with a custom loader, or change this node to a default node type before text export.");
+  if (code === "complex-variable") return t("Fix hint: flatten this value into simple variables if Yarn or Ink needs to read it.");
+  if (code === "state-key-name-sanitized" || code === "state-path-flattened") return t("Fix hint: use the exported name in the target format, or rename the state key with underscores before exporting.");
+  if (code === "implicit-variable") return t("Fix hint: add this key to Variables with a starting value.");
+  if (code === "playbook-action-runtime-only" || code === "playbook-actions-runtime-only") return t("Fix hint: move this into node or choice effects for text export, or implement the action in your runtime.");
+  if (code === "expression-not-translated") return t("Fix hint: check this expression in the target engine, or rewrite it as a simpler supported comparison.");
+  if (code === "variable-name-sanitized" || code === "variable-name-collision" || code === "node-name-sanitized" || code === "node-name-collision") return t("Fix hint: use the exported name in the target format.");
+  return t("Review the export report before handing files to an engine.");
+}
+
+function renderStateReportValueBlock(label, body) {
+  return `
+    <section class="state-report-card-block state-report-initial">
+      <h4>${escapeHtml(label)}</h4>
+      <div>${body}</div>
+    </section>
+  `;
+}
+
+function renderStateReportReferenceBlock(label, refs) {
+  return `
+    <section class="state-report-card-block">
+      <h4>${escapeHtml(label)}</h4>
+      ${renderStateReportReferenceList(refs)}
+    </section>
+  `;
+}
+
+function renderStateReportReferenceList(refs) {
+  const visible = (Array.isArray(refs) ? refs : []).slice(0, 3);
+  const remaining = Math.max((refs?.length || 0) - visible.length, 0);
+  if (!visible.length) return `<div class="state-report-ref-list"><span class="state-report-empty">${escapeHtml(t("No references"))}</span></div>`;
+  return `
+    <div class="state-report-ref-list">
+      ${visible.map(renderStateReportReference).join("")}
+      ${remaining ? `<span class="state-report-more">${escapeHtml(t("More: {count}", { count: remaining }))}</span>` : ""}
+    </div>
+  `;
+}
+
+function renderStateReportReference(ref) {
+  const label = ref?.label || "Reference";
+  const labelAttr = escapeAttr(label);
+  const labelText = escapeHtml(label);
+  if (ref?.nodeId) {
+    return `
+      <button class="state-report-ref" type="button" data-action="focus-canvas-node" data-node-id="${escapeAttr(ref.nodeId)}" title="${labelAttr}">
+        ${labelText}
+      </button>
+    `;
+  }
+  if (ref?.jsonToken) {
+    return `
+      <button class="state-report-ref" type="button" data-action="focus-playbook-json" data-playbook-token="${escapeAttr(JSON.stringify(ref.jsonToken))}" title="${labelAttr}">
+        ${labelText}
+      </button>
+    `;
+  }
+  return `<span class="state-report-ref state-report-ref-static" title="${labelAttr}">${labelText}</span>`;
+}
+
+function formatStateReportValue(value) {
+  const text = formatVariableValue(value);
+  return text.length > 64 ? `${text.slice(0, 61)}...` : text;
+}
+
+function buildStateReport() {
+  const variables = normalizeVariablesObject(state.project.variables);
+  const rowsByKey = new Map();
+  const invalidExpressions = [];
+  const exportBlocks = [];
+  const exportBlockIds = new Set();
+  const ensureRow = (key) => {
+    const normalizedKey = normalizeStateReportKey(key);
+    if (!normalizedKey) return null;
+    if (!rowsByKey.has(normalizedKey)) {
+      rowsByKey.set(normalizedKey, {
+        key: normalizedKey,
+        hasInitial: Object.prototype.hasOwnProperty.call(variables, normalizedKey),
+        initialValue: variables[normalizedKey],
+        typeLabel: Object.prototype.hasOwnProperty.call(variables, normalizedKey) ? variableType(variables[normalizedKey]) : "implicit",
+        reads: [],
+        writes: [],
+        interpolations: [],
+        statusSet: new Set(),
+        refIds: new Set()
+      });
+    }
+    return rowsByKey.get(normalizedKey);
+  };
+  const addRef = (key, bucket, ref) => {
+    const row = ensureRow(key);
+    if (!row) return null;
+    const normalized = normalizeStateReportRef(ref);
+    const id = `${bucket}:${row.key}:${normalized.label}:${normalized.nodeId || ""}:${normalized.jsonToken || ""}`;
+    if (!row.refIds.has(id)) {
+      row.refIds.add(id);
+      row[bucket].push(normalized);
+    }
+    return row;
+  };
+  const addRead = (key, ref) => addRef(key, "reads", ref);
+  const addWrite = (key, ref) => addRef(key, "writes", ref);
+  const addInterpolation = (key, ref) => addRef(key, "interpolations", ref);
+  const addStatus = (key, status) => {
+    const row = ensureRow(key);
+    if (row) row.statusSet.add(status);
+  };
+  const addExportBlock = (block) => {
+    const normalized = normalizeStateReportExportBlock(block);
+    if (!normalized.code || !normalized.message) return;
+    const id = [normalized.code, normalized.message, normalized.key, normalized.nodeId, normalized.jsonToken].join("|");
+    if (exportBlockIds.has(id)) return;
+    exportBlockIds.add(id);
+    exportBlocks.push(normalized);
+    if (normalized.key) addStatus(normalized.key, "export-blocked");
+  };
+  const addInvalidExpression = (source, ref) => {
+    invalidExpressions.push(normalizeStateReportRef({
+      ...ref,
+      label: `${ref?.label || "Expression"}: ${String(source || "").trim()}`
+    }));
+  };
+  const scanExpression = (source, node, ref) => {
+    const raw = normalizeOptionalString(source).trim();
+    if (!raw) return;
+    scanTemplateReferences(raw, node, { ...ref, label: `${ref?.label || "Expression"} template` }, addInterpolation, addStatus);
+    const expression = normalizeExpressionForStateReport(raw, node, variables);
+    const result = collectExpressionKeys(expression, variables);
+    if (result.invalid) {
+      addInvalidExpression(raw, ref);
+      return;
+    }
+    const membershipKeys = new Set(result.membershipKeys || []);
+    result.keys.forEach((key) => {
+      const row = addRead(key, ref);
+      const resolved = resolveRuntimeStatePath(key, variables);
+      if (row && resolved.found && isComplexRuntimeValue(resolved.value) && !membershipKeys.has(key)) row.statusSet.add("object-unreadable");
+    });
+  };
+  const scanEffectValue = (effect, node, ref) => {
+    if (!effect || effect.op === "clear") return;
+    scanTemplateReferences(effect.value, node, { ...ref, label: `${ref?.label || "Effect"} value` }, addInterpolation, addStatus);
+  };
+  const scanStateEffect = (effect, node, ref) => {
+    if (!effect) return;
+    const key = normalizeStateReportKey(effect.key);
+    if (key) {
+      addWrite(key, ref);
+      if (["add", "subtract", "remove", "toggle"].includes(effect.op)) addRead(key, ref);
+      if (isRuntimeOnlyEffectOperation(effect.op)) {
+        addExportBlock({
+          code: "effect-op-runtime-only",
+          key,
+          nodeId: ref?.nodeId || "",
+          label: ref?.label || key,
+          message: `Effect "${effect.op}" on "${key}" is kept in runtime JSON but commented in Yarn, Ink, and Twee.`
+        });
+      }
+    }
+    scanEffectValue(effect, node, ref);
+  };
+
+  Object.keys(variables).forEach(ensureRow);
+
+  getRuntimeExportableNodes().forEach((node) => {
+    const nodeLabel = getStateReportNodeLabel(node);
+    const script = getNodeRuntimeScript(node);
+    if (isCustomRuntimeNodeType(node.type) && !hasExplicitRuntimeScript(script)) {
+      addExportBlock({
+        code: "custom-node-type-runtime-only",
+        nodeId: node.id,
+        label: `${nodeLabel} custom type`,
+        message: `Custom node type "${getNodeTypeLabel(node.type)}" exports as rendered text and custom fields; target formats may need a custom loader.`
+      });
+    }
+    const logic = normalizeNodeStateLogic(node.stateLogic);
+    scanExpression(logic.requirements, node, { label: `${nodeLabel} requirement`, nodeId: node.id });
+    const gateAction = getPlaybookGateAction(node);
+    if (gateAction) {
+      addRead(getPlaybookActionStateKey(gateAction), { label: `${nodeLabel} gate`, nodeId: node.id, jsonToken: gateAction.id });
+      scanTemplateReferences(gateAction.value, node, { label: `${nodeLabel} gate value`, nodeId: node.id, jsonToken: gateAction.id }, addInterpolation, addStatus);
+    }
+    if (script?.condition) {
+      const fieldValue = getNodeFieldValue(node, script.condition);
+      scanExpression(fieldValue !== "" ? fieldValue : script.condition, node, { label: `${nodeLabel} condition`, nodeId: node.id });
+    } else if (hasNodeCondition(node)) {
+      scanExpression(node.condition || node.body, node, { label: `${nodeLabel} condition`, nodeId: node.id });
+    }
+
+    const assignment = getRuntimeAssignment(node, script);
+    if (assignment.key) {
+      addWrite(assignment.key, { label: `${nodeLabel} assignment`, nodeId: node.id });
+      scanTemplateReferences(assignment.value, node, { label: `${nodeLabel} assignment value`, nodeId: node.id }, addInterpolation, addStatus);
+    }
+    logic.effects.forEach((effect, index) => scanStateEffect(effect, node, { label: `${nodeLabel} effect ${index + 1}`, nodeId: node.id }));
+
+    scanTemplateReferences(script.title || node.title, node, { label: `${nodeLabel} title`, nodeId: node.id }, addInterpolation, addStatus);
+    scanTemplateReferences(script.body || displayBody(node), node, { label: `${nodeLabel} body`, nodeId: node.id }, addInterpolation, addStatus);
+    if (node.type === "Dialog" && Array.isArray(node.turns)) {
+      node.turns.forEach((turn, index) => {
+        scanTemplateReferences(turn.speaker, node, { label: `${nodeLabel} speaker ${index + 1}`, nodeId: node.id }, addInterpolation, addStatus);
+        scanTemplateReferences(turn.line, node, { label: `${nodeLabel} line ${index + 1}`, nodeId: node.id }, addInterpolation, addStatus);
+      });
+    }
+    getNodeCustomFieldEntries(node).forEach((field) => {
+      scanTemplateReferences(field.value, node, { label: `${nodeLabel} ${field.label}`, nodeId: node.id }, addInterpolation, addStatus);
+    });
+    (Array.isArray(node.choiceOptions) ? node.choiceOptions : []).forEach((option, optionIndex) => {
+      const optionLabel = option.label || `Choice ${optionIndex + 1}`;
+      scanTemplateReferences(option.label, node, { label: `${nodeLabel} choice "${optionLabel}"`, nodeId: node.id }, addInterpolation, addStatus);
+      scanExpression(option.requires, node, { label: `${nodeLabel} choice "${optionLabel}"`, nodeId: node.id });
+      (Array.isArray(option.effects) ? option.effects : []).forEach((effect, effectIndex) => {
+        scanStateEffect(effect, node, { label: `${nodeLabel} choice effect ${effectIndex + 1}`, nodeId: node.id });
+      });
+    });
+  });
+
+  (Array.isArray(state.project.links) ? state.project.links : []).forEach((link) => {
+    const fromNode = getNode(link.from);
+    const label = fromNode ? `${getStateReportNodeLabel(fromNode)} link` : `Link ${link.id || ""}`.trim();
+    scanExpression(link.requirements || link.requires, fromNode, { label, nodeId: fromNode?.id || "" });
+  });
+
+  const rules = getRunnerRules();
+  if (rules.endCondition?.enabled) {
+    scanExpression(rules.endCondition.value, null, { label: "End Condition", jsonToken: "endCondition" });
+  }
+  getPlaybookActions().forEach((action) => {
+    const key = getPlaybookActionStateKey(action);
+    const ref = { label: `Script action ${action.id || ""}`.trim(), jsonToken: action.id };
+    if (isPlaybookActionRuntimeOnlyForPortableExport(action)) {
+      addExportBlock({
+        code: "playbook-action-runtime-only",
+        key,
+        label: ref.label,
+        jsonToken: action.id,
+        message: `Playbook action "${action.id || action.op}" (${action.trigger}/${action.op}) is kept in runtime JSON but not emitted to Yarn, Ink, or Twee.`
+      });
+    }
+    if (action.trigger === "gate" || action.op === "if") {
+      addRead(key, ref);
+      scanTemplateReferences(action.value, null, { ...ref, label: `${ref.label} value` }, addInterpolation, addStatus);
+    } else if (["set", "add", "subtract", "append", "remove", "toggle", "clear"].includes(action.op)) {
+      addWrite(key, ref);
+      if (["add", "subtract", "remove", "toggle"].includes(action.op)) addRead(key, ref);
+      scanTemplateReferences(action.value, null, { ...ref, label: `${ref.label} value` }, addInterpolation, addStatus);
+    } else if (key) {
+      addStatus(key, "export-blocked");
+    }
+    if (key && key.includes(".")) addStatus(key, "export-blocked");
+  });
+
+  rowsByKey.forEach((row) => {
+    const resolvedInitial = resolveRuntimeStatePath(row.key, variables);
+    row.hasInitial = resolvedInitial.found;
+    row.initialValue = resolvedInitial.value;
+    row.typeLabel = row.hasInitial ? variableType(row.initialValue) : "implicit";
+    if (row.hasInitial && isComplexRuntimeValue(row.initialValue)) {
+      if (Array.isArray(row.initialValue)) {
+        if (row.interpolations.length) row.statusSet.add("object-unreadable");
+      } else {
+        addExportBlock({
+          code: "complex-variable",
+          key: row.key,
+          label: row.key,
+          message: `Variable "${row.key}" is an object; runtime JSON keeps it, Twee initializes it, and Yarn/Ink comment it out.`
+        });
+        if (row.reads.length || row.interpolations.length) row.statusSet.add("object-unreadable");
+      }
+    }
+    if (row.key.includes(".")) {
+      addExportBlock({
+        code: "state-key-name-sanitized",
+        key: row.key,
+        label: row.key,
+        message: `State key "${row.key}" exports with "." converted to "_" in portable text formats.`
+      });
+    }
+    if (!row.hasInitial && row.reads.length && !row.writes.length) row.statusSet.add("read-only");
+    if (!row.hasInitial && (row.reads.length || row.interpolations.length) && !row.writes.length) row.statusSet.add("unknown-key");
+    if (row.writes.length && !row.reads.length && !row.interpolations.length) row.statusSet.add("written-only");
+    if (!row.statusSet.size) row.statusSet.add("ok");
+  });
+
+  const filteredExportBlocks = exportBlocks.filter((block) => !isTransientVisitStateKey(block.key));
+  const exportBlocksByKey = new Map();
+  filteredExportBlocks.forEach((block) => {
+    if (!block.key) return;
+    const blocks = exportBlocksByKey.get(block.key) || [];
+    blocks.push(block);
+    exportBlocksByKey.set(block.key, blocks);
+  });
+
+  const rows = [...rowsByKey.values()]
+    .filter((row) => !shouldOmitTransientVisitStateRow(row))
+    .map((row) => ({
+      ...row,
+      statuses: sortStateReportStatuses([...row.statusSet]),
+      primaryStatus: sortStateReportStatuses([...row.statusSet])[0] || "ok",
+      exportBlocks: exportBlocksByKey.get(row.key) || []
+    }))
+    .sort(compareStateReportRows);
+  const issueCount = rows.reduce((sum, row) => sum + row.statuses.filter((status) => status !== "ok").length, 0) + invalidExpressions.length;
+  return {
+    rows,
+    invalidExpressions,
+    exportBlocks: filteredExportBlocks,
+    issueCount,
+    readCount: rows.reduce((sum, row) => sum + row.reads.length, 0),
+    writeCount: rows.reduce((sum, row) => sum + row.writes.length, 0),
+    interpolationCount: rows.reduce((sum, row) => sum + row.interpolations.length, 0)
+  };
+}
+
+function normalizeStateReportKey(key) {
+  return normalizeOptionalString(key).trim();
+}
+
+function isTransientVisitStateKey(key) {
+  return /^visited\.[a-z0-9_]+$/i.test(normalizeStateReportKey(key));
+}
+
+function shouldOmitTransientVisitStateRow(row) {
+  return isTransientVisitStateKey(row?.key)
+    && !row.hasInitial
+    && !row.writes.length
+    && !row.interpolations.length;
+}
+
+function normalizeStateReportRef(ref = {}) {
+  return {
+    label: normalizeOptionalString(ref.label).trim() || "Reference",
+    nodeId: normalizeOptionalString(ref.nodeId).trim(),
+    jsonToken: ref.jsonToken == null ? "" : String(ref.jsonToken)
+  };
+}
+
+function normalizeStateReportExportBlock(block = {}) {
+  const ref = normalizeStateReportRef(block);
+  return {
+    code: normalizeOptionalString(block.code).trim(),
+    message: normalizeOptionalString(block.message).trim(),
+    key: normalizeStateReportKey(block.key),
+    label: ref.label,
+    nodeId: ref.nodeId,
+    jsonToken: ref.jsonToken
+  };
+}
+
+function getStateReportNodeLabel(node) {
+  if (!node) return "Node";
+  return `${node.title || getNodeTypeLabel(node.type)} (${getNodeDisplayId(node)})`;
+}
+
+function isRuntimeOnlyEffectOperation(op) {
+  return !["set", "add", "subtract", "toggle"].includes(op || "set");
+}
+
+function isPlaybookActionRuntimeOnlyForPortableExport(action) {
+  if (!action || (!action.id && !action.trigger && !action.op)) return false;
+  if (isPortableChoiceGateAction(action) && findPlaybookChoiceActionMatches(action).length) return false;
+  return true;
+}
+
+function isPortableChoiceGateAction(action) {
+  return action?.trigger === "gate" && (action.op === "lockChoice" || action.op === "unlockChoice");
+}
+
+function findPlaybookChoiceActionMatches(action) {
+  if (!isPortableChoiceGateAction(action)) return [];
+  return getRuntimeExportableNodes().flatMap((node) => {
+    if (!matchesPlaybookActionTarget(action, node)) return [];
+    const options = Array.isArray(node.choiceOptions) ? node.choiceOptions : [];
+    return options
+      .filter((option) => playbookChoiceActionMatchesOption(action, option, option.label))
+      .map((option) => ({ node, option }));
+  });
+}
+
+function isCustomRuntimeNodeType(type) {
+  const value = normalizeOptionalString(type).trim();
+  if (!value) return false;
+  return !Object.prototype.hasOwnProperty.call(nodeTypes, value) || Boolean(getNodeMeta(value).custom);
+}
+
+function hasExplicitRuntimeScript(script) {
+  if (!script || typeof script !== "object" || Array.isArray(script)) return false;
+  return Object.values(script).some((value) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === "object") return Object.keys(value).length > 0;
+    return normalizeOptionalString(value).trim() !== "";
+  });
+}
+
+function scanTemplateReferences(source, node, ref, addInterpolation, addStatus, depth = 0) {
+  if (depth > 4) return;
+  collectTemplateReferences(source).forEach((entry) => {
+    const resolved = resolveRuntimeTemplateReference(node, entry.key, normalizeVariablesObject(state.project.variables));
+    if (resolved.kind === "variable") {
+      addInterpolation(resolved.key, { ...ref, label: `${ref?.label || "Template"} {${entry.key}}` });
+      if (isComplexRuntimeValue(resolved.value)) addStatus(resolved.key, "object-unreadable");
+      return;
+    }
+    if (resolved.kind === "nodeField") {
+      scanTemplateReferences(resolved.value, node, ref, addInterpolation, addStatus, depth + 1);
+      return;
+    }
+    const key = normalizeStateReportKey(entry.key.startsWith("variables.") ? entry.key.slice("variables.".length) : entry.key);
+    if (key) {
+      addInterpolation(key, { ...ref, label: `${ref?.label || "Template"} {${entry.key}}` });
+      addStatus(key, "template-mismatch");
+    }
+  });
+}
+
+function collectTemplateReferences(source) {
+  const refs = [];
+  String(source || "").replace(/\{([a-zA-Z_][\w.-]*)\}/g, (match, key) => {
+    refs.push({ key });
+    return match;
+  });
+  return refs;
+}
+
+function resolveRuntimeTemplateReference(node, key, variables) {
+  const raw = normalizeOptionalString(key).trim();
+  if (!raw) return { kind: "missing", key: "" };
+  if (raw.startsWith("variables.")) {
+    const variableKey = raw.slice("variables.".length);
+    const resolved = resolveRuntimeStatePath(variableKey, variables);
+    return resolved.found
+      ? { kind: "variable", key: variableKey, value: resolved.value }
+      : { kind: "missing", key: variableKey };
+  }
+  const nodeValue = getNodeFieldValue(node, raw);
+  if (nodeValue !== "") return { kind: "nodeField", key: raw, value: nodeValue };
+  const resolved = resolveRuntimeStatePath(raw, variables);
+  if (resolved.found) return { kind: "variable", key: raw, value: resolved.value };
+  return { kind: "missing", key: raw };
+}
+
+function normalizeExpressionForStateReport(source, node, variables) {
+  return String(source || "").replace(/\{([a-zA-Z_][\w.-]*)\}/g, (match, key) => {
+    const resolved = resolveRuntimeTemplateReference(node, key, variables);
+    if (resolved.kind === "variable") return resolved.key;
+    if (resolved.kind === "nodeField") return resolved.value;
+    return key.startsWith("variables.") ? key.slice("variables.".length) : key;
+  });
+}
+
+function sortStateReportStatuses(statuses) {
+  const order = ["invalid-expression", "template-mismatch", "unknown-key", "object-unreadable", "export-blocked", "read-only", "written-only", "ok"];
+  return statuses.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+}
+
+function compareStateReportRows(a, b) {
+  const issueA = a.statuses.some((status) => status !== "ok") ? 0 : 1;
+  const issueB = b.statuses.some((status) => status !== "ok") ? 0 : 1;
+  if (issueA !== issueB) return issueA - issueB;
+  return a.key.localeCompare(b.key);
+}
+
+function getPlaybookCategoryDisplayLabel(category) {
+  const labels = {
+    Quest: "Quest State",
+    "Quest Entry": "Quest Entry State",
+    Variable: "Variable State",
+    Actor: "Actor State",
+    Item: "Item State",
+    Location: "Location State",
+    "Sim Status": "Sim State",
+    Alert: "Alert State",
+    Misc: "Misc State",
+    Custom: "Custom State",
+    "Manual Enter": "Manual Key"
+  };
+  return labels[category] || category;
+}
+
+function getVariableDefinitionFilterOptions(entries) {
+  const counts = createVariableTypeFilterCounts();
+  entries.forEach((entry) => {
+    const filterKey = getVariableDefinitionFilterKey(entry[1]);
+    counts.set(filterKey, (counts.get(filterKey) || 0) + 1);
+  });
+  return formatVariableTypeFilterOptions(counts);
+}
+
+function getVariableDefinitionFilterKey(value) {
+  return getActionVariableType(value);
+}
+
+function createVariableTypeFilterCounts() {
+  return new Map([
+    ["string", 0],
+    ["number", 0],
+    ["boolean", 0],
+    ["array", 0],
+    ["object", 0],
+    ["legacy", 0]
+  ]);
+}
+
+function formatVariableTypeFilterOptions(counts) {
+  return [
+    { value: "string", label: "String", count: counts.get("string") || 0 },
+    { value: "number", label: "Number", count: counts.get("number") || 0 },
+    { value: "boolean", label: "Boolean", count: counts.get("boolean") || 0 },
+    { value: "array", label: "Array", count: counts.get("array") || 0 },
+    { value: "object", label: "Object", count: counts.get("object") || 0 },
+    { value: "legacy", label: "Legacy / missing", count: counts.get("legacy") || 0 }
+  ];
+}
+
+function renderPlaybookCategoryStrip(items, options = {}) {
+  const activeFilter = state.playbookCategoryFilter;
+  const filters = options.filters || [];
+  const total = Number.isFinite(options.total) ? options.total : items.length;
+  return `
+    <div class="playbook-category-strip" role="group" aria-label="${escapeAttr(t("Variable type"))}">
       <button type="button" class="playbook-category-chip${!activeFilter ? " is-active" : ""}" data-action="filter-playbook-category" data-playbook-category="" aria-pressed="${!activeFilter}">
         <span>${t("All")}</span>
-        <strong>${actions.length}</strong>
+        <strong>${total}</strong>
       </button>
-      ${PLAYBOOK_STATE_CATEGORIES.map((category) => `
-        <button type="button" class="playbook-category-chip${activeFilter === category ? " is-active" : ""}" data-action="filter-playbook-category" data-playbook-category="${escapeAttr(category)}" aria-pressed="${activeFilter === category}">
-          <span>${escapeHtml(t(category))}</span>
-          <strong>${counts.get(category) || 0}</strong>
+      ${filters.map((filter) => `
+        <button type="button" class="playbook-category-chip${activeFilter === filter.value ? " is-active" : ""}" data-action="filter-playbook-category" data-playbook-category="${escapeAttr(filter.value)}" aria-pressed="${activeFilter === filter.value}">
+          <span>${escapeHtml(t(filter.label))}</span>
+          <strong>${filter.count}</strong>
         </button>
       `).join("")}
     </div>
   `;
+}
+
+function getPlaybookActionVariableInfo(action) {
+  const stateKey = getPlaybookActionStateKey(action);
+  const variables = normalizeVariablesObject(state.project.variables);
+  const hasVariable = Boolean(stateKey) && Object.prototype.hasOwnProperty.call(variables, stateKey);
+  const value = hasVariable ? variables[stateKey] : undefined;
+  const type = hasVariable ? getActionVariableType(value) : "missing";
+  return {
+    stateKey,
+    hasVariable,
+    value,
+    type,
+    filterKey: hasVariable ? type : "legacy",
+    typeLabel: getActionVariableTypeLabel(type)
+  };
+}
+
+function getActionVariableType(value) {
+  if (Array.isArray(value)) return "array";
+  if (value && typeof value === "object") return "object";
+  return variableType(value);
+}
+
+function getActionVariableTypeLabel(type) {
+  const labels = {
+    string: "String",
+    number: "Number",
+    boolean: "Boolean",
+    array: "Array",
+    object: "Object",
+    missing: "Missing variable"
+  };
+  return labels[type] || "Missing variable";
+}
+
+function getAllowedPlaybookActionOperationsForVariableInfo(info) {
+  if (!info?.hasVariable) return [];
+  const valuesByType = {
+    string: ["set"],
+    number: ["set", "add", "subtract"],
+    boolean: ["set", "toggle"],
+    array: ["set", "append", "remove"],
+    object: ["set"]
+  };
+  const values = valuesByType[info.type] || ["set"];
+  return PLAYBOOK_ACTION_OPERATIONS.filter((option) => values.includes(option.value));
+}
+
+function getDefaultPlaybookActionValueForVariableInfo(info) {
+  if (!info?.hasVariable) return "";
+  if (info.type === "number") return "1";
+  if (info.type === "boolean") return "true";
+  if (info.type === "array") return "";
+  if (info.type === "object") return "{}";
+  return "";
+}
+
+function playbookActionUsesValue(op) {
+  return !["toggle", "clear"].includes(op || "set");
+}
+
+function parsePlaybookActionJsonValue(value, fallback, validator) {
+  try {
+    const parsed = JSON.parse(value || JSON.stringify(fallback));
+    return validator(parsed) ? parsed : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function normalizePlaybookActionValueForVariableInfo(value, info, op) {
+  if (!info?.hasVariable || !playbookActionUsesValue(op)) return "";
+  const text = normalizeOptionalString(value);
+  if (info.type === "number") {
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? String(parsed) : getDefaultPlaybookActionValueForVariableInfo(info);
+  }
+  if (info.type === "boolean") return coerceBoolean(text) ? "true" : "false";
+  if (info.type === "array" && op === "set") {
+    return JSON.stringify(parsePlaybookActionJsonValue(text, [], Array.isArray));
+  }
+  if (info.type === "object" && op === "set") {
+    const parsed = parsePlaybookActionJsonValue(text, {}, (item) => item && typeof item === "object" && !Array.isArray(item));
+    return JSON.stringify(parsed);
+  }
+  return text;
+}
+
+function renderPlaybookActionValueField({ attributes = "", value = "", variableInfo, op = "set", disabled = false } = {}) {
+  const valueDisabled = disabled || !variableInfo?.hasVariable || !playbookActionUsesValue(op);
+  const disabledAttr = valueDisabled ? "disabled" : "";
+  const selectedValue = normalizePlaybookActionValueForVariableInfo(value, variableInfo, op);
+  if (valueDisabled) {
+    return `<input ${attributes} value="" placeholder="${escapeAttr(t("Value"))}" aria-label="${escapeAttr(t("Value"))}" disabled>`;
+  }
+  if (variableInfo.type === "boolean" && op === "set") {
+    return `
+      <select ${attributes} aria-label="${escapeAttr(t("Value"))}">
+        <option value="true" ${selectedValue === "true" ? "selected" : ""}>true</option>
+        <option value="false" ${selectedValue === "false" ? "selected" : ""}>false</option>
+      </select>
+    `;
+  }
+  if (variableInfo.type === "number") {
+    return `<input ${attributes} type="number" step="any" inputmode="decimal" value="${escapeAttr(selectedValue)}" placeholder="${escapeAttr(t("Value"))}" spellcheck="false" ${disabledAttr}>`;
+  }
+  if (variableInfo.type === "array" && op === "set") {
+    return `<input ${attributes} value="${escapeAttr(selectedValue || "[]")}" placeholder="[]" spellcheck="false" ${disabledAttr}>`;
+  }
+  if (variableInfo.type === "object" && op === "set") {
+    return `<input ${attributes} value="${escapeAttr(selectedValue || "{}")}" placeholder="{}" spellcheck="false" ${disabledAttr}>`;
+  }
+  return `<input ${attributes} value="${escapeAttr(selectedValue)}" placeholder="${escapeAttr(t("Value"))}" spellcheck="false" ${disabledAttr}>`;
+}
+
+function getVariableInfoForStateEffect(effectOrKey) {
+  const key = typeof effectOrKey === "string" ? effectOrKey : effectOrKey?.key;
+  return getPlaybookActionVariableInfo({ category: "Variable", key: normalizeOptionalString(key).trim() });
+}
+
+function getEffectOperationOptions(key, selectedOp = "set") {
+  const variableInfo = getVariableInfoForStateEffect(key);
+  const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
+  const requestedOp = normalizePlaybookActionOperation(selectedOp || "set");
+  const op = allowedOperations.some((option) => option.value === requestedOp)
+    ? requestedOp
+    : (allowedOperations[0]?.value || "set");
+  return { variableInfo, allowedOperations, op };
+}
+
+function renderEffectOperationOptions(key, selectedOp = "set") {
+  const { allowedOperations, op } = getEffectOperationOptions(key, selectedOp);
+  if (!allowedOperations.length) return `<option value="">${escapeHtml(t("Operation"))}</option>`;
+  return renderPlaybookOptionList(allowedOperations, op);
+}
+
+function renderStateEffectOperationControl(effect, attributes) {
+  const op = normalizePlaybookActionOperation(effect?.op || "set");
+  if (!PLAYBOOK_ACTION_OPERATIONS.some((option) => option.value === op)) {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("This old action is kept for compatibility. New actions should use state operations."))}">
+        <strong>${escapeHtml(t("Legacy runtime-only action"))}</strong>
+        <small>${escapeHtml(op)}</small>
+      </div>
+    `;
+  }
+  const variableInfo = getVariableInfoForStateEffect(effect);
+  const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
+  if (!allowedOperations.length) {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("Define this key in Variables before this action can run."))}">
+        <strong>${escapeHtml(t("Missing variable"))}</strong>
+        <small>${escapeHtml(t("Operation"))}</small>
+      </div>
+    `;
+  }
+  if (!allowedOperations.some((option) => option.value === op)) {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("Operation not available for this variable type."))}">
+        <strong>${escapeHtml(t("Operation not available for this variable type."))}</strong>
+        <small>${escapeHtml(op)}</small>
+      </div>
+    `;
+  }
+  return `
+    <select ${attributes}>
+      ${renderPlaybookOptionList(allowedOperations, op)}
+    </select>
+  `;
+}
+
+function renderStateEffectValueControl(effect, attributes) {
+  const variableInfo = getVariableInfoForStateEffect(effect);
+  const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
+  const op = normalizePlaybookActionOperation(effect?.op || "set");
+  const operationAllowed = allowedOperations.some((option) => option.value === op);
+  return renderPlaybookActionValueField({
+    attributes,
+    value: effect?.value || "",
+    variableInfo,
+    op,
+    disabled: !operationAllowed
+  });
+}
+
+function normalizeStateEffectForVariableSchema(effect, options = {}) {
+  const action = {
+    id: "effect",
+    trigger: normalizePlaybookActionTrigger(effect?.trigger || "onVisit"),
+    target: "",
+    op: normalizePlaybookActionOperation(effect?.op || "set"),
+    category: "Variable",
+    key: normalizeOptionalString(effect?.key).trim(),
+    value: normalizeOptionalString(effect?.value)
+  };
+  normalizePlaybookActionForVariableSchema(action, options);
+  return {
+    trigger: action.trigger,
+    op: action.op,
+    key: action.key,
+    value: action.value
+  };
+}
+
+function getPreferredVariableKeyForPlaybookAction(keys) {
+  return keys[0];
 }
 
 function getScriptBuilderNodes() {
@@ -2777,20 +5700,99 @@ function renderScriptNodeRow(node) {
   const logic = normalizeNodeStateLogic(node.stateLogic);
   const routing = normalizeNodeRouting(node.routing);
   const targetStatus = routing.mode === "goTo" ? renderTargetResolutionStatus(routing.target) : "";
+  const effectsText = formatNodeEffectsText(node);
   return `
     <div class="script-node-row" data-script-node-id="${escapeAttr(node.id)}">
       <button class="linked-node script-node-link" type="button" data-action="focus-canvas-node" data-node-id="${escapeAttr(node.id)}">
-        <strong>${escapeHtml(node.title || getNodeDisplayId(node))}</strong>
-        <small>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</small>
+          <strong>${escapeHtml(node.title || node.id || getNodeDisplayId(node))}</strong>
+          <small>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(node.id || getNodeDisplayId(node))}</small>
       </button>
-      <textarea data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="requirements" placeholder="trust_level >= 2" spellcheck="false">${escapeHtml(logic.requirements)}</textarea>
-      <textarea data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="effects" placeholder="set route = badge">${escapeHtml(formatNodeEffectsText(node))}</textarea>
+      ${renderPlaybookConditionCodeCell({
+        value: logic.requirements,
+        attributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="requirements"`
+      })}
+      ${renderPlaybookEffectsCodeCell({
+        value: effectsText,
+        defaultTrigger: "onVisit",
+        attributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="effects"`
+      })}
       <select data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="routingMode">
         ${renderPlaybookOptionList(NODE_ROUTING_MODES, routing.mode)}
       </select>
       ${renderScriptNodeTargetSlot(node, routing, targetStatus)}
+      ${renderPlaybookJsonButton(getPlaybookJsonPairToken("rowId", `node:${node.id}`))}
     </div>
   `;
+}
+
+function renderScriptNodeConditionControl(node, logic) {
+  return renderConditionBuilderControl({
+    expression: logic.requirements,
+    mode: logic.requirementsMode,
+    className: "script-condition-builder",
+    keyAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="key"`,
+    opAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="op"`,
+    valueAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="value"`,
+    connectorAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="connector"`,
+    modeAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="mode"`,
+    customAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="requirements"`
+  });
+}
+
+function renderPlaybookConditionCodeCell({ value = "", attributes = "", readonly = false } = {}) {
+  const status = getConditionEvaluationStatus(value, state.project.variables);
+  return `
+    <div class="playbook-code-cell playbook-condition-code-cell">
+      <textarea class="playbook-code-editor playbook-condition-code-editor" ${attributes} ${readonly ? "readonly" : ""} spellcheck="false" placeholder="${escapeAttr(t("Condition expression"))}">${escapeHtml(value || "")}</textarea>
+      ${renderPlaybookCodeStatus(status)}
+    </div>
+  `;
+}
+
+function renderPlaybookEffectsCodeCell({ value = "", attributes = "", defaultTrigger = "onVisit", readonly = false } = {}) {
+  const status = getPlaybookEffectsTextStatus(value, { defaultTrigger });
+  return `
+    <div class="playbook-code-cell playbook-effects-code-cell">
+      <textarea class="playbook-code-editor playbook-effects-code-editor" ${attributes} data-playbook-effects-default-trigger="${escapeAttr(defaultTrigger)}" ${readonly ? "readonly" : ""} spellcheck="false" placeholder="${escapeAttr(t("Effect lines"))}">${escapeHtml(value || "")}</textarea>
+      ${renderPlaybookCodeStatus(status)}
+    </div>
+  `;
+}
+
+function renderPlaybookCodeStatus(status) {
+  const normalized = normalizePlaybookEditorStatus(status);
+  const label = formatPlaybookEditorStatusLabel(normalized);
+  const statusClass = getPlaybookCodeStatusClass(normalized);
+  return `<small class="play-rule-status play-rule-status-${escapeAttr(statusClass)}" data-playbook-code-status>${escapeHtml(label)}</small>`;
+}
+
+function getPlaybookCodeStatusForControl(target) {
+  if (!target?.dataset) return null;
+  if (target.dataset.scriptNodeField === "requirements" || target.dataset.gateField === "condition") {
+    return getConditionEvaluationStatus(target.value, state.project.variables);
+  }
+  if (target.dataset.scriptNodeField === "effects" || target.dataset.gateField === "effects") {
+    return getPlaybookEffectsTextStatus(target.value, {
+      defaultTrigger: target.dataset.playbookEffectsDefaultTrigger || "onVisit"
+    });
+  }
+  if (target.dataset.choiceOptionField === "requires") {
+    return getConditionEvaluationStatus(target.value, state.project.variables);
+  }
+  if (target.dataset.choiceOptionField === "effects") {
+    return getPlaybookEffectsTextStatus(target.value, {
+      defaultTrigger: target.dataset.playbookEffectsDefaultTrigger || "onChoose"
+    });
+  }
+  return null;
+}
+
+function updatePlaybookCodeStatusForControl(target) {
+  const status = normalizePlaybookEditorStatus(getPlaybookCodeStatusForControl(target));
+  const statusElement = target?.closest?.(".playbook-code-cell")?.querySelector?.("[data-playbook-code-status]");
+  if (!statusElement) return;
+  statusElement.textContent = formatPlaybookEditorStatusLabel(status);
+  statusElement.className = `play-rule-status play-rule-status-${getPlaybookCodeStatusClass(status)}`;
 }
 
 function renderScriptNodeTargetSlot(node, routing, targetStatus) {
@@ -2814,34 +5816,276 @@ function renderScriptNodeTargetSlot(node, routing, targetStatus) {
 
 function renderPlaybookActionRow(action) {
   const targetStatus = renderTargetResolutionStatus(action.target);
+  const variableInfo = getPlaybookActionVariableInfo(action);
+  const operationAllowed = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo).some((option) => option.value === action.op);
+  const valueDisabled = !variableInfo.hasVariable || !operationAllowed || action.op === "toggle";
   return `
     <div class="playbook-action-row">
-      <select data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="trigger">
-        ${renderPlaybookOptionList(PLAYBOOK_ACTION_TRIGGERS, action.trigger)}
-      </select>
+      ${renderPlaybookActionTriggerControl(action)}
       <div class="script-node-target">
         <input data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="target" list="playbookTargetOptions" value="${escapeAttr(action.target)}" placeholder="${escapeAttr(t("Any node"))}" spellcheck="false">
         ${targetStatus}
       </div>
-      <select data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="op">
-        ${renderPlaybookOptionList(PLAYBOOK_ACTION_OPERATIONS, action.op)}
-      </select>
-      <select data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="category">
-        ${PLAYBOOK_STATE_CATEGORIES.map((category) => `<option value="${escapeAttr(category)}" ${category === action.category ? "selected" : ""}>${escapeHtml(t(category))}</option>`).join("")}
-      </select>
-      <input data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="key" list="playbookStateKeyOptions" value="${escapeAttr(action.key)}" placeholder="${escapeAttr(t("State key"))}" spellcheck="false">
-      <input data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="value" list="playbookValueOptions" value="${escapeAttr(action.value)}" placeholder="${escapeAttr(t("True"))}" spellcheck="false">
-      <label class="playbook-append-toggle" title="${escapeAttr(t("Append instead of replacing"))}">
-        <input type="checkbox" data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="append" ${action.append ? "checked" : ""}>
-        <span>${t("Append")}</span>
-      </label>
-      <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete script line"))}" data-action="delete-playbook-action" data-playbook-action-id="${escapeAttr(action.id)}">x</button>
+      <div class="playbook-state-key-cell">
+        ${renderPlaybookActionVariableKeyControl(action, variableInfo)}
+        <small class="playbook-state-key-preview">
+          <span>${escapeHtml(t(variableInfo.hasVariable ? "Writes" : "Missing variable"))}</span>
+          ${variableInfo.stateKey ? `<code>${escapeHtml(variableInfo.stateKey)}</code>` : ""}
+        </small>
+      </div>
+      ${renderPlaybookActionOperationControl(action, variableInfo)}
+      ${renderPlaybookActionValueControl(action, variableInfo, valueDisabled)}
+      ${renderPlaybookJsonButton(getPlaybookJsonPairToken("id", action.id))}
+      <div class="playbook-action-controls">
+        <button class="icon-button danger-button playbook-action-delete" type="button" title="${escapeAttr(t("Delete action"))}" aria-label="${escapeAttr(t("Delete action"))}" data-action="delete-playbook-action" data-playbook-action-id="${escapeAttr(action.id)}">x</button>
+      </div>
     </div>
+  `;
+}
+
+function getPlaybookActionDraftModel(keys = Object.keys(normalizeVariablesObject(state.project.variables)).sort((a, b) => a.localeCompare(b))) {
+  const source = state.playbookActionDraft && typeof state.playbookActionDraft === "object" && !Array.isArray(state.playbookActionDraft)
+    ? state.playbookActionDraft
+    : {};
+  const key = source.key && keys.includes(source.key) ? source.key : getPreferredVariableKeyForPlaybookAction(keys);
+  const variableInfo = getPlaybookActionVariableInfo({ category: "Variable", key });
+  const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
+  const requestedOp = normalizePlaybookActionOperation(source.op || "set");
+  const op = allowedOperations.some((option) => option.value === requestedOp) ? requestedOp : (allowedOperations[0]?.value || "set");
+  const value = Object.prototype.hasOwnProperty.call(source, "value")
+    ? normalizeOptionalString(source.value)
+    : getDefaultPlaybookActionValueForVariableInfo(variableInfo);
+  return {
+    trigger: normalizePlaybookActionTrigger(source.trigger || "manual"),
+    target: normalizeOptionalString(source.target).trim(),
+    key,
+    op,
+    value,
+    variableInfo,
+    allowedOperations
+  };
+}
+
+function syncPlaybookActionDraftFromRow(row) {
+  if (!row) return;
+  const next = { ...(state.playbookActionDraft || {}) };
+  ["trigger", "target", "key", "op", "value"].forEach((field) => {
+    const control = row.querySelector(`[data-draft-field="${CSS.escape(field)}"]`);
+    if (!control || control.disabled) return;
+    next[field] = getPlaybookActionInputValue(control);
+  });
+  state.playbookActionDraft = next;
+}
+
+function normalizePlaybookActionDraft({ resetValue = false, coerceValue = true } = {}) {
+  const draft = getPlaybookActionDraftModel();
+  const action = {
+    id: "draft",
+    trigger: draft.trigger,
+    target: draft.target,
+    op: draft.op,
+    category: "Variable",
+    key: draft.key,
+    value: resetValue ? getDefaultPlaybookActionValueForVariableInfo(draft.variableInfo) : draft.value
+  };
+  normalizePlaybookActionForVariableSchema(action, { coerceValue });
+  state.playbookActionDraft = {
+    trigger: action.trigger,
+    target: action.target,
+    key: action.key,
+    op: action.op,
+    value: action.value
+  };
+  return getPlaybookActionDraftModel();
+}
+
+function renderPlaybookActionDraftRow() {
+  if (!state.playbookActionDraftOpen) return "";
+  const variables = normalizeVariablesObject(state.project.variables);
+  const keys = Object.keys(variables).sort((a, b) => a.localeCompare(b));
+  if (!keys.length) {
+    return `<div class="nc-empty-state">${t("Add a variable definition before adding a variable action.")}</div>`;
+  }
+  const draft = getPlaybookActionDraftModel(keys);
+  return `
+    <div class="playbook-action-row playbook-action-draft-row" data-draft-id="playbook-action">
+      <select data-draft-field="trigger">
+        ${renderPlaybookOptionList(PLAYBOOK_VARIABLE_ACTION_TRIGGERS, draft.trigger)}
+      </select>
+      <div class="script-node-target">
+        ${renderTargetSelect({
+          attributes: `data-draft-field="target"`,
+          selected: draft.target,
+          placeholder: "Any node"
+        })}
+      </div>
+      <div class="playbook-state-key-cell">
+        ${renderStateKeySelect({
+          attributes: `data-draft-field="key"`,
+          selected: draft.key,
+          placeholder: "Variable"
+        })}
+      </div>
+      <select data-draft-field="op" ${draft.allowedOperations.length ? "" : "disabled"}>
+        ${renderPlaybookOptionList(draft.allowedOperations, draft.op)}
+      </select>
+      ${renderPlaybookActionValueField({
+        attributes: `data-draft-field="value"`,
+        value: draft.value,
+        variableInfo: draft.variableInfo,
+        op: draft.op,
+        disabled: !draft.allowedOperations.length
+      })}
+      <span></span>
+      <div class="playbook-action-controls">
+        <button class="small-button" type="button" data-action="commit-playbook-action-draft">${t("Add")}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPlaybookActionValueControl(action, variableInfo, valueDisabled) {
+  return renderPlaybookActionValueField({
+    attributes: `data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="value"`,
+    value: action.value,
+    variableInfo,
+    op: action.op,
+    disabled: valueDisabled
+  });
+}
+
+function renderPlaybookActionVariableKeyControl(action, variableInfo) {
+  const variables = normalizeVariablesObject(state.project.variables);
+  const keys = Object.keys(variables).sort((a, b) => a.localeCompare(b));
+  const selected = variableInfo.hasVariable ? variableInfo.stateKey : "";
+  const missing = variableInfo.stateKey && !variableInfo.hasVariable ? variableInfo.stateKey : "";
+  return `
+    <select data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="key" ${keys.length ? "" : "disabled"}>
+      <option value="">${escapeHtml(t(keys.length ? "Variable" : "No variables yet."))}</option>
+      ${missing ? `<option value="${escapeAttr(missing)}" selected>${escapeHtml(`${missing} (${t("Missing variable")})`)}</option>` : ""}
+      ${keys.map((key) => {
+        const typeLabel = getActionVariableTypeLabel(getActionVariableType(variables[key]));
+        return `<option value="${escapeAttr(key)}" ${key === selected ? "selected" : ""}>${escapeHtml(`${key} (${t(typeLabel)})`)}</option>`;
+      }).join("")}
+    </select>
+  `;
+}
+
+function renderStateKeySelect({ attributes = "", selected = "", placeholder = "State key" } = {}) {
+  const variables = normalizeVariablesObject(state.project.variables);
+  const keys = Object.keys(variables).sort((a, b) => a.localeCompare(b));
+  const selectedValue = normalizeOptionalString(selected).trim();
+  const hasSelected = selectedValue && keys.includes(selectedValue);
+  const missing = selectedValue && !hasSelected ? selectedValue : "";
+  return `
+    <select ${attributes} ${keys.length || missing ? "" : "disabled"}>
+      <option value="" ${selectedValue ? "" : "selected"}>${escapeHtml(t(keys.length || missing ? placeholder : "No variables yet."))}</option>
+      ${missing ? `<option value="${escapeAttr(missing)}" selected>${escapeHtml(`${missing} (${t("Missing variable")})`)}</option>` : ""}
+      ${keys.map((key) => {
+        const typeLabel = getActionVariableTypeLabel(getActionVariableType(variables[key]));
+        return `<option value="${escapeAttr(key)}" ${key === selectedValue ? "selected" : ""}>${escapeHtml(`${key} (${t(typeLabel)})`)}</option>`;
+      }).join("")}
+    </select>
+  `;
+}
+
+function renderTargetSelect({ attributes = "", selected = "", placeholder = "Exact node title" } = {}) {
+  const entries = getPlaybookTargetEntries();
+  const selectedValue = normalizeOptionalString(selected).trim();
+  const hasSelected = selectedValue && entries.some((entry) => entry.value === selectedValue);
+  const missing = selectedValue && !hasSelected ? selectedValue : "";
+  return `
+    <select ${attributes} ${entries.length || missing ? "" : "disabled"}>
+      <option value="" ${selectedValue ? "" : "selected"}>${escapeHtml(t(placeholder))}</option>
+      ${missing ? `<option value="${escapeAttr(missing)}" selected>${escapeHtml(`${missing} (${t("No matching node, type, or ID.")})`)}</option>` : ""}
+      ${entries.map((entry) => {
+        const label = [entry.label, entry.hint].filter(Boolean).join(" ");
+        return `<option value="${escapeAttr(entry.value)}" ${entry.value === selectedValue ? "selected" : ""}>${escapeHtml(label || entry.value)}</option>`;
+      }).join("")}
+    </select>
+  `;
+}
+
+function renderPlaybookActionTriggerControl(action) {
+  if (action.trigger === "gate") {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("This old gate trigger is handled in Choice Conditions."))}">
+        <strong>${escapeHtml(t("Legacy gate trigger"))}</strong>
+        <small>${escapeHtml(t("Choice Conditions"))}</small>
+      </div>
+    `;
+  }
+  if (action.trigger === "onChoose") {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("This old global on-choose trigger is still loaded for compatibility. New choice changes belong in each option's On choose effects."))}">
+        <strong>${escapeHtml(t("Legacy global choose trigger"))}</strong>
+        <small>${escapeHtml(t("Use Choice Effects"))}</small>
+      </div>
+    `;
+  }
+  return `
+    <select data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="trigger">
+      ${renderPlaybookOptionList(PLAYBOOK_VARIABLE_ACTION_TRIGGERS, action.trigger)}
+    </select>
+  `;
+}
+
+function renderPlaybookActionOperationControl(action, variableInfo = getPlaybookActionVariableInfo(action)) {
+  if (action.op === "if") {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("The old gate + if action is still loaded for compatibility. Edit node Requirements in Script Builder; edit choice Requirements in Choice Conditions or the Choice panel."))}">
+        <strong>${escapeHtml(t("Legacy condition gate"))}</strong>
+        <small>${escapeHtml(t("Conditions are not actions."))}</small>
+      </div>
+    `;
+  }
+  if (!PLAYBOOK_ACTION_OPERATIONS.some((option) => option.value === action.op)) {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("This old action is kept for compatibility. New actions should use state operations."))}">
+        <strong>${escapeHtml(t("Legacy runtime-only action"))}</strong>
+        <small>${escapeHtml(action.op || "")}</small>
+      </div>
+    `;
+  }
+  const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
+  if (!allowedOperations.length) {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("Define this key in Variables before this action can run."))}">
+        <strong>${escapeHtml(t("Missing variable"))}</strong>
+        <small>${escapeHtml(t("Operation"))}</small>
+      </div>
+    `;
+  }
+  if (!allowedOperations.some((option) => option.value === action.op)) {
+    return `
+      <div class="playbook-action-fixed-op" title="${escapeAttr(t("Operation not available for this variable type."))}">
+        <strong>${escapeHtml(t("Operation not available for this variable type."))}</strong>
+        <small>${escapeHtml(action.op || "")}</small>
+      </div>
+    `;
+  }
+  return `
+    <select data-playbook-action-id="${escapeAttr(action.id)}" data-playbook-action-field="op">
+      ${renderPlaybookOptionList(allowedOperations, action.op)}
+    </select>
   `;
 }
 
 function renderPlaybookOptionList(options, selectedValue) {
   return options.map((option) => `<option value="${escapeAttr(option.value)}" ${option.value === selectedValue ? "selected" : ""}>${escapeHtml(t(option.label))}</option>`).join("");
+}
+
+function renderPlaybookJsonButton(token) {
+  if (!token) return `<span></span>`;
+  return `<button class="small-button playbook-json-row-button" type="button" data-action="focus-playbook-json" data-playbook-token="${escapeAttr(token)}">${t("JSON")}</button>`;
+}
+
+function getPlaybookJsonPropertyToken(key) {
+  return `${JSON.stringify(String(key || ""))}:`;
+}
+
+function getPlaybookJsonPairToken(key, value) {
+  return `${JSON.stringify(String(key || ""))}: ${JSON.stringify(String(value || ""))}`;
 }
 
 function getPlaybookStateKeySuggestions() {
@@ -2915,18 +6159,32 @@ function renderTargetResolutionStatus(value, options = {}) {
 }
 
 function renderPlaybookRuleCard(card) {
+  const locked = Boolean(card.locked);
+  const toggleDisabled = card.required || locked ? "disabled" : "";
+  const toggleTitle = card.required ? t("System rule") : locked ? t("Enable Debug Mode before Visit Tracking.") : (card.enabled ? t("Enabled") : t("Disabled"));
+  const help = card.help || t("This Play preview rule controls how the Play dialog behaves.");
+  const helpOpen = state.playbookRuleHelpOpenIds.has(card.id);
   return `
-    <article class="playbook-rule-card">
+    <article class="playbook-rule-card${card.enabled ? "" : " is-disabled"}" data-rule-enabled="${card.enabled}">
       <header>
-        <div>
+        <div class="playbook-rule-heading">
           <span class="playbook-rule-kind">${escapeHtml(t(card.kind))}</span>
-          <h4>${escapeHtml(t(card.title))}</h4>
+          <div class="playbook-rule-title-line">
+            <h4>${escapeHtml(t(card.title))}</h4>
+            <button class="help-button playbook-rule-help${helpOpen ? " active" : ""}" type="button" data-action="toggle-playbook-rule-help" data-playbook-rule-help="${escapeAttr(card.id)}" title="${escapeAttr(help)}" aria-label="${escapeAttr(t("What does this rule do?"))}" aria-expanded="${helpOpen}">?</button>
+          </div>
         </div>
         <div class="playbook-rule-card-actions">
-          <button class="small-button" type="button" data-action="focus-playbook-json" data-playbook-token="${escapeAttr(JSON.stringify(card.jsonToken))}">JSON</button>
-          ${card.required ? "" : `<button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete play rule"))}" data-action="delete-playbook-rule" data-playbook-rule-target="${escapeAttr(card.id)}">x</button>`}
+          <label class="playbook-rule-toggle${card.enabled ? " is-enabled" : ""}" title="${escapeAttr(toggleTitle)}" aria-label="${escapeAttr(toggleTitle)}">
+            <input type="checkbox" data-runner-rule-enabled="${escapeAttr(card.id)}" aria-label="${escapeAttr(toggleTitle)}" ${card.enabled ? "checked" : ""} ${toggleDisabled}>
+            <span class="playbook-rule-switch-track" aria-hidden="true">
+              <span class="playbook-rule-switch-thumb"></span>
+            </span>
+          </label>
+          ${renderPlaybookJsonButton(getPlaybookJsonPropertyToken(card.jsonToken))}
         </div>
       </header>
+      ${helpOpen ? `<p class="playbook-rule-help-note">${escapeHtml(help)}</p>` : ""}
       ${card.body}
     </article>
   `;
@@ -2942,59 +6200,86 @@ function formatPlaybookRuleKindLabel(kind) {
 function getPlaybookRuleCards() {
   const rules = getRunnerRules();
   return Object.entries(rules)
-    .filter(([, rule]) => rule.enabled)
-    .map(([id, rule]) => renderRunnerRuleCardModel(id, rule));
+    .filter(([id]) => id !== "visitTracking")
+    .map(([id, rule]) => renderRunnerRuleCardModel(id, rule, rules));
 }
 
-function renderRunnerRuleCardModel(id, rule) {
+function isDebugModeRuleEnabled(rules = getRunnerRules()) {
+  return Boolean(rules.debugMode?.enabled && rules.debugMode.value);
+}
+
+function renderRunnerRuleCardModel(id, rule, rules = getRunnerRules()) {
+  const required = id === "startNode";
+  const lockedByDebug = id === "visitTracking" && !isDebugModeRuleEnabled(rules);
+  const enabled = lockedByDebug ? false : required || Boolean(rule.enabled);
+  const disabledAttr = enabled ? "" : " disabled";
+  const debugModeEnabled = isDebugModeRuleEnabled(rules);
+  const visitRule = rules.visitTracking || getDefaultRunnerRules().visitTracking;
+  const visitTrackingEnabled = Boolean(debugModeEnabled && visitRule.enabled && visitRule.value);
+  const visitTrackingToggleTitle = debugModeEnabled
+    ? (visitTrackingEnabled ? t("Enabled") : t("Disabled"))
+    : t("Enable Debug Mode before Visit Tracking.");
   const bodyById = {
     startNode: `
       <label class="field">
         <span>${t("Exact node title")}</span>
-        <input data-runner-rule-field="startNode" list="playbookTargetOptions" value="${escapeAttr(rule.value || "")}" placeholder="Start" spellcheck="false">
-      </label>
-    `,
-    choiceDisplay: `
-      <label class="field">
-        <span>${t("Choice Display")}</span>
-        <select data-runner-rule-field="choiceDisplay">
-          ${renderPlaybookOptionList(PLAYBOOK_CHOICE_DISPLAY_OPTIONS, rule.value || "hideUnavailable")}
-        </select>
+        <input data-runner-rule-field="startNode" list="playbookTargetOptions" value="${escapeAttr(rule.value || "")}" placeholder="${escapeAttr(t("Exact node title"))}" spellcheck="false"${disabledAttr}>
       </label>
     `,
     endCondition: `
       <label class="field">
         <span>${t("End Condition")}</span>
-        <input data-runner-rule-field="endCondition" value="${escapeAttr(rule.value || "")}" placeholder="ending_reached == true" spellcheck="false">
+        <input data-runner-rule-field="endCondition" value="${escapeAttr(rule.value || "")}" placeholder="${escapeAttr(t("Condition expression"))}" spellcheck="false"${disabledAttr}>
         <small class="play-rule-status play-rule-status-${getEndConditionStatus(rule.value).status}" data-end-condition-status>${escapeHtml(formatEndConditionStatusLabel(getEndConditionStatus(rule.value)))}</small>
       </label>
     `,
     visitTracking: `
-      <label class="nc-checkbox-field">
-        <input type="checkbox" data-runner-rule-field="visitTracking" ${rule.value ? "checked" : ""}>
-        <span>${t("Record visited node titles")}</span>
-      </label>
+      <p class="playbook-rule-note">
+        <span>${t(lockedByDebug ? "Enable Debug Mode before Visit Tracking." : "Record visited node titles")}</span>
+      </p>
     `,
     debugMode: `
-      <label class="nc-checkbox-field">
-        <input type="checkbox" data-runner-rule-field="debugMode" ${rule.value ? "checked" : ""}>
-        <span>${t("Show variables and gate checks in Play")}</span>
-      </label>
+      <p class="playbook-rule-note">
+        <span>${t("Show state and condition details in Play preview.")}</span>
+      </p>
+      <div class="playbook-rule-nested${visitTrackingEnabled ? "" : " is-disabled"}">
+        <div class="playbook-rule-nested-copy">
+          <strong>${escapeHtml(t("Visit Tracking"))}</strong>
+          <span>${escapeHtml(t("Record visited nodes while Debug Mode is enabled. The list is discarded when Play preview closes."))}</span>
+        </div>
+        <div class="playbook-rule-nested-actions">
+          <label class="playbook-rule-toggle${visitTrackingEnabled ? " is-enabled" : ""}" title="${escapeAttr(visitTrackingToggleTitle)}" aria-label="${escapeAttr(visitTrackingToggleTitle)}">
+            <input type="checkbox" data-runner-rule-enabled="visitTracking" aria-label="${escapeAttr(visitTrackingToggleTitle)}" ${visitTrackingEnabled ? "checked" : ""} ${debugModeEnabled ? "" : "disabled"}>
+            <span class="playbook-rule-switch-track" aria-hidden="true">
+              <span class="playbook-rule-switch-thumb"></span>
+            </span>
+          </label>
+          ${renderPlaybookJsonButton(getPlaybookJsonPropertyToken("visitTracking"))}
+        </div>
+      </div>
     `
   };
   const titles = {
     startNode: "Start Node",
-    choiceDisplay: "Choice Display",
     endCondition: "End Condition",
     visitTracking: "Visit Tracking",
     debugMode: "Debug Mode"
   };
+  const helpById = {
+    startNode: ["Choose the exact node title where Play preview starts. This does not change canvas links or layout."],
+    endCondition: ["End Play preview when this condition becomes true. Route checks such as route == ending work well here."],
+    visitTracking: ["Record visited nodes while Debug Mode is enabled. The list is discarded when Play preview closes."],
+    debugMode: ["Show state values and condition results in Play preview, so it is easier to see why a choice appears or disappears."]
+  };
   return {
     id,
-    kind: "Runner rule",
+    kind: "Play preview rule",
     title: titles[id] || id,
     jsonToken: id,
-    required: id === "startNode" || id === "choiceDisplay",
+    required,
+    locked: lockedByDebug,
+    enabled,
+    help: (helpById[id] || []).map((item) => t(item)).join(" "),
     body: bodyById[id] || `<p>${escapeHtml(String(rule.value ?? ""))}</p>`
   };
 }
@@ -3046,14 +6331,17 @@ function focusPlaybookJsonToken(token, textarea = dom.variablesPanel?.querySelec
   const lineStart = value.lastIndexOf("\n", index - 1) + 1;
   const nextLine = value.indexOf("\n", index);
   const lineEnd = nextLine < 0 ? value.length : nextLine;
-  scrollPlaybookJsonLineIntoView(textarea, lineIndex);
   setTextareaSelection(textarea, lineStart, lineEnd);
   try {
-    textarea.focus({ preventScroll: true });
+    textarea.focus();
   } catch (error) {
     textarea.focus();
   }
-  requestAnimationFrame(() => setTextareaSelection(textarea, lineStart, lineEnd));
+  scrollPlaybookJsonLineIntoView(textarea, lineIndex);
+  requestAnimationFrame(() => {
+    setTextareaSelection(textarea, lineStart, lineEnd);
+    scrollPlaybookJsonLineIntoView(textarea, lineIndex);
+  });
   return true;
 }
 
@@ -3066,22 +6354,55 @@ function setTextareaSelection(textarea, start, end) {
 }
 
 function scrollPlaybookJsonLineIntoView(textarea, lineIndex) {
-  const panel = dom.variablesPanel;
+  const panel = getPlaybookJsonScrollContainer(textarea);
   if (!panel) {
     textarea.scrollIntoView({ block: "center", behavior: "smooth" });
     return;
   }
+  const lineHeight = getTextareaLineHeight(textarea);
+  textarea.scrollTop = Math.max(0, lineHeight * Math.max(0, lineIndex) - textarea.clientHeight * 0.35);
+  const textareaRect = textarea.getBoundingClientRect();
+  const lineTop = textareaRect.top + (lineHeight * Math.max(0, lineIndex)) - textarea.scrollTop;
+  const lineBottom = lineTop + lineHeight;
+  const isDocumentScroller = panel === document.scrollingElement || panel === document.documentElement || panel === document.body;
+  const panelRect = isDocumentScroller
+    ? { top: 0, bottom: window.innerHeight || document.documentElement.clientHeight, height: window.innerHeight || document.documentElement.clientHeight }
+    : panel.getBoundingClientRect();
+  const margin = Math.max(32, Math.min(120, panelRect.height * 0.28));
+  let delta = 0;
+  if (lineTop < panelRect.top + margin) delta = lineTop - (panelRect.top + margin);
+  else if (lineBottom > panelRect.bottom - margin) delta = lineBottom - (panelRect.bottom - margin);
+  if (!delta) return;
+  const top = isDocumentScroller
+    ? (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0) + delta
+    : panel.scrollTop + delta;
+  try {
+    if (isDocumentScroller) window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    else panel.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  } catch (error) {
+    if (isDocumentScroller) window.scrollTo(0, Math.max(0, top));
+    else panel.scrollTop = Math.max(0, top);
+  }
+}
+
+function getTextareaLineHeight(textarea) {
   const styles = window.getComputedStyle ? window.getComputedStyle(textarea) : null;
   const parsedLineHeight = Number.parseFloat(styles?.lineHeight || "");
   const fontSize = Number.parseFloat(styles?.fontSize || "");
-  const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : Math.max(18, (Number.isFinite(fontSize) ? fontSize * 1.35 : 18));
-  const targetTop = textarea.offsetTop + lineHeight * Math.max(0, lineIndex) - panel.clientHeight * 0.45;
-  const top = Math.max(0, targetTop);
-  try {
-    panel.scrollTo({ top, behavior: "smooth" });
-  } catch (error) {
-    panel.scrollTop = top;
+  return Number.isFinite(parsedLineHeight)
+    ? parsedLineHeight
+    : Math.max(18, (Number.isFinite(fontSize) ? fontSize * 1.35 : 18));
+}
+
+function getPlaybookJsonScrollContainer(textarea) {
+  let element = textarea?.parentElement;
+  while (element && element !== document.body) {
+    const styles = window.getComputedStyle ? window.getComputedStyle(element) : null;
+    const overflowY = styles?.overflowY || styles?.overflow || "";
+    if (/(auto|scroll)/.test(overflowY) && element.scrollHeight > element.clientHeight) return element;
+    element = element.parentElement;
   }
+  return dom.variablesPanel || document.scrollingElement || document.documentElement;
 }
 
 function renderEventsSheetPage() {
@@ -3292,7 +6613,7 @@ function renderEventSheetGroup(group) {
             <tr>
               <th aria-hidden="true"></th>
               <th class="event-node-heading">${t("Node")}</th>
-              ${columns.map((column) => renderEventColumnHeader(column)).join("")}
+              ${columns.map((column) => renderEventColumnHeader(column, group.type)).join("")}
               <th>${t("Hidden")}</th>
             </tr>
           </thead>
@@ -3305,14 +6626,14 @@ function renderEventSheetGroup(group) {
   `;
 }
 
-function renderEventColumnHeader(column) {
+function renderEventColumnHeader(column, eventType = null) {
   const columnName = column.custom ? `${column.label} field` : `${column.label} column`;
   return `
     <th style="${eventColumnWidthStyle(column.width)}" data-event-column-key="${escapeAttr(column.key)}">
       <div class="event-column-header">
         <span class="event-column-name">${escapeHtml(column.label)}</span>
         <span class="event-column-actions" aria-label="${escapeAttr(column.label)} column actions">
-          <button class="event-column-button" type="button" aria-label="${escapeAttr(`${t("Rename")} ${columnName}`)}" data-action="rename-event-column" data-event-column-key="${escapeAttr(column.key)}">${t("Rename")}</button>
+          <button class="event-column-button" type="button" aria-label="${escapeAttr(`${t("Rename")} ${columnName}`)}" data-action="rename-event-column" data-event-column-key="${escapeAttr(column.key)}" data-event-type="${escapeAttr(eventType || "")}">${t("Rename")}</button>
           <button class="event-column-button" type="button" aria-label="${escapeAttr(`${t("Hide")} ${columnName}`)}" data-action="hide-event-column" data-event-column-key="${escapeAttr(column.key)}">${t("Hide")}</button>
           <button class="event-column-button danger" type="button" aria-label="${escapeAttr(`${t("Delete")} ${columnName}`)}" data-action="delete-event-column" data-event-column-key="${escapeAttr(column.key)}">${t("Delete")}</button>
         </span>
@@ -3390,12 +6711,12 @@ function renderEventElementsCell(node) {
 }
 
 function getEventSheetColumns(eventType = null) {
+  if (eventType) return getEventSheetColumnsForType(eventType);
   const hidden = getHiddenEventSheetColumns();
   const columns = getProjectEventSheetColumns().filter((column) => !hidden.has(column.key));
   const seen = new Set(columns.map((column) => column.key));
   getProjectNodeTypes()
     .filter(isEventSheetTypeDef)
-    .filter((typeDef) => !eventType || typeDef.type === eventType)
     .flatMap((typeDef) => typeDef.fields || [])
     .forEach((field) => {
       if (!field?.key || seen.has(field.key)) return;
@@ -3411,6 +6732,47 @@ function getEventSheetColumns(eventType = null) {
   return columns;
 }
 
+// Columns for one frame type: the canonical built-in columns this type still keeps
+// (per-type deletions removed), followed by the type's own custom fields. The same
+// list drives the node inspector and that type's Events Sheet group, so the property
+// count stays in sync between the two surfaces.
+function getEventSheetColumnsForType(eventType) {
+  const hidden = getHiddenEventSheetColumns();
+  const typeDef = getProjectNodeTypes().find((item) => item.type === eventType);
+  const eventColumnLabels = normalizeEventColumnLabels(typeDef?.eventColumnLabels);
+  const removed = new Set(getTypeRemovedColumns(typeDef));
+  const projectColumns = new Map(getProjectEventSheetColumns().map((column) => [column.key, column]));
+  const columns = [];
+  const seen = new Set();
+  CORE_EVENT_COLUMN_KEYS.forEach((key) => {
+    if (removed.has(key) || hidden.has(key)) return;
+    const base = projectColumns.get(key) || eventSheetColumns.find((column) => column.key === key);
+    if (!base) return;
+    seen.add(key);
+    columns.push(normalizeEventSheetColumn({
+      ...base,
+      label: eventColumnLabels[key] || base.label,
+      custom: false
+    }));
+  });
+  (typeDef?.fields || []).forEach((field) => {
+    if (!field?.key || seen.has(field.key) || removed.has(field.key) || hidden.has(field.key)) return;
+    seen.add(field.key);
+    const stored = projectColumns.get(field.key);
+    columns.push({
+      key: field.key,
+      label: field.label || stored?.label || field.key,
+      width: normalizeEventColumnWidth(stored?.width || "180px"),
+      custom: true
+    });
+  });
+  return columns;
+}
+
+function getTypeRemovedColumns(typeDef) {
+  return Array.isArray(typeDef?.removedColumns) ? typeDef.removedColumns : [];
+}
+
 function getHiddenEventSheetColumns() {
   const eventSheet = getProjectEventSheet();
   return new Set(eventSheet.hiddenColumns);
@@ -3418,6 +6780,8 @@ function getHiddenEventSheetColumns() {
 
 function getHiddenEventSheetColumnDefs(eventType = null) {
   const hidden = getHiddenEventSheetColumns();
+  const typeDef = eventType ? getProjectNodeTypes().find((item) => item.type === eventType) : null;
+  const eventColumnLabels = normalizeEventColumnLabels(typeDef?.eventColumnLabels);
   const defs = new Map();
   eventSheetColumns.forEach((column) => defs.set(column.key, column));
   getProjectEventSheetColumns().forEach((column) => defs.set(column.key, column));
@@ -3436,6 +6800,12 @@ function getHiddenEventSheetColumnDefs(eventType = null) {
     });
   return [...hidden]
     .map((key) => defs.get(key) || { key, label: key, width: "180px", custom: true })
+    .map((column) => {
+      if (!column || !eventType) return column;
+      const labelOverride = eventColumnLabels[column.key];
+      if (!labelOverride) return column;
+      return { ...column, label: labelOverride };
+    })
     .filter((column) => column.key !== EVENT_ELEMENTS_COLUMN_KEY);
 }
 
@@ -3508,8 +6878,8 @@ function normalizeEventSheetHiddenColumns(hiddenColumns, legacyHiddenColumns) {
   return Array.isArray(values) ? [...new Set(values.map(String).filter((key) => key && key !== EVENT_ELEMENTS_COLUMN_KEY))] : [];
 }
 
-function renameEventColumn(key) {
-  const column = getEventColumnByKey(key);
+function renameEventColumn(key, eventType = null) {
+  const column = getEventColumnByKey(key, eventType);
   if (!column) return;
   showGenericTextInput({
     kicker: "Events Sheet",
@@ -3519,12 +6889,12 @@ function renameEventColumn(key) {
     maxLength: 60,
     confirmLabel: "Rename",
     recordHistory: true,
-    onConfirm: (nextLabel) => applyEventColumnRename(key, nextLabel)
+    onConfirm: (nextLabel) => applyEventColumnRename(key, nextLabel, eventType)
   });
 }
 
-function applyEventColumnRename(key, nextLabel) {
-  const column = getEventColumnByKey(key);
+function applyEventColumnRename(key, nextLabel, eventType = null) {
+  const column = getEventColumnByKey(key, eventType);
   if (!column) return false;
   const label = String(nextLabel).trim().slice(0, 60);
   if (!label) {
@@ -3532,18 +6902,41 @@ function applyEventColumnRename(key, nextLabel) {
     return false;
   }
 
-  setEventColumnLabel(key, label, column);
-  markProjectStructureChanged({ nodeTypes: Boolean(column.custom) });
+  const result = setEventColumnLabel(key, label, column, eventType);
+  markProjectStructureChanged({ nodeTypes: Boolean(result?.nodeTypes) });
   renderEventSheetSchemaSurfaces();
   setStatus(`${column.label} renamed to ${label}.`);
   return true;
 }
 
-function setEventColumnLabel(key, label, column = getEventColumnByKey(key)) {
+function setEventColumnLabel(key, label, column = getEventColumnByKey(key), eventType = null) {
+  const eventSheetKey = String(key || "").trim();
+  if (!eventSheetKey) return { nodeTypes: false };
   const eventSheet = getProjectEventSheet();
-  let schemaColumn = eventSheet.columns.find((item) => item.key === key);
+  const typeDef = eventType ? getProjectNodeTypes().find((item) => item.type === eventType && isEventSheetTypeDef(item)) : null;
+  if (column?.custom && typeDef) {
+    let updated = false;
+    (typeDef.fields || [])
+      .filter((field) => field.key === eventSheetKey)
+      .forEach((field) => {
+        field.label = label;
+        updated = true;
+      });
+    return { nodeTypes: updated };
+  }
+  if (!column?.custom && typeDef) {
+    const labels = normalizeEventColumnLabels(typeDef.eventColumnLabels);
+    const base = eventSheet.columns.find((item) => item.key === eventSheetKey)
+      || eventSheetColumns.find((item) => item.key === eventSheetKey);
+    if (!base || base.label !== label) labels[eventSheetKey] = label;
+    else delete labels[eventSheetKey];
+    typeDef.eventColumnLabels = labels;
+    return { nodeTypes: true };
+  }
+
+  let schemaColumn = eventSheet.columns.find((item) => item.key === eventSheetKey);
   if (!schemaColumn && !column?.custom) {
-    const defaultColumn = eventSheetColumns.find((item) => item.key === key);
+    const defaultColumn = eventSheetColumns.find((item) => item.key === eventSheetKey);
     if (defaultColumn) {
       schemaColumn = normalizeEventSheetColumn(defaultColumn);
       eventSheet.columns.push(schemaColumn);
@@ -3556,12 +6949,25 @@ function setEventColumnLabel(key, label, column = getEventColumnByKey(key)) {
       .filter(isEventSheetTypeDef)
       .forEach((typeDef) => {
         (typeDef.fields || [])
-          .filter((field) => field.key === key)
+          .filter((field) => field.key === eventSheetKey)
           .forEach((field) => {
             field.label = label;
           });
       });
   }
+  return { nodeTypes: Boolean(column?.custom) };
+}
+
+function normalizeEventColumnLabels(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const labels = {};
+  Object.entries(value).forEach(([rawKey, rawLabel]) => {
+    const key = String(rawKey || "").trim();
+    const label = String(rawLabel || "").trim().slice(0, 60);
+    if (!key || !label) return;
+    labels[key] = label;
+  });
+  return labels;
 }
 
 function hideEventColumn(key) {
@@ -3591,14 +6997,42 @@ function showEventColumn(key) {
   setStatus(`${column?.label || key} column shown.`);
 }
 
-function deleteEventColumn(key) {
-  const column = getEventColumnByKey(key);
+// Deleting a column only affects the one frame type it was deleted from. A custom
+// column drops the type's field; a built-in column is recorded in that type's
+// removedColumns. Stored values are cleared on that type's nodes only, so other
+// frame types and their new default nodes keep the column.
+function deleteEventColumn(key, eventType = null) {
+  const typeDef = eventType ? getProjectNodeTypes().find((item) => item.type === eventType) : null;
+  if (!typeDef) {
+    deleteEventColumnGlobally(key);
+    return;
+  }
+  const column = getEventColumnByKey(key, eventType);
   if (!column) return;
 
+  if (column.custom) {
+    typeDef.fields = (typeDef.fields || []).filter((field) => field.key !== key);
+  } else {
+    const removed = new Set(getTypeRemovedColumns(typeDef));
+    removed.add(key);
+    typeDef.removedColumns = [...removed];
+  }
+
+  state.project.nodes
+    .filter((node) => node.type === eventType)
+    .forEach((node) => deleteNodeFieldValue(node, key));
+
+  markProjectStructureChanged({ nodeTypes: true });
+  renderEventSheetSchemaSurfaces();
+  setStatus(`${column.label} column deleted from ${typeDef.label || eventType}.`);
+}
+
+function deleteEventColumnGlobally(key) {
+  const column = getEventColumnByKey(key);
+  if (!column) return;
   const eventSheet = getProjectEventSheet();
   eventSheet.columns = eventSheet.columns.filter((item) => item.key !== key);
   eventSheet.hiddenColumns = eventSheet.hiddenColumns.filter((item) => item !== key);
-
   if (column.custom) {
     getProjectNodeTypes()
       .filter(isEventSheetTypeDef)
@@ -3606,11 +7040,9 @@ function deleteEventColumn(key) {
         typeDef.fields = (typeDef.fields || []).filter((field) => field.key !== key);
       });
   }
-
   state.project.nodes
     .filter((node) => isEventSheetNode(node))
     .forEach((node) => deleteNodeFieldValue(node, key));
-
   markProjectStructureChanged({ nodeTypes: Boolean(column.custom) });
   renderEventSheetSchemaSurfaces();
   setStatus(`${column.label} column deleted.`);
@@ -3653,9 +7085,18 @@ function showGenericConfirm(options) {
 }
 
 function handleGenericConfirmClose() {
+  resolveGenericConfirm(dom.genericConfirmDialog.returnValue);
+}
+
+function closeGenericConfirmDialog(returnValue) {
+  dom.genericConfirmDialog.returnValue = returnValue;
+  resolveGenericConfirm(returnValue);
+  if (dom.genericConfirmDialog.open) dom.genericConfirmDialog.close(returnValue);
+}
+
+function resolveGenericConfirm(returnValue) {
   const pending = state.genericConfirmAction;
   state.genericConfirmAction = null;
-  const returnValue = dom.genericConfirmDialog.returnValue;
   const callback = returnValue === "confirm"
     ? pending?.onConfirm
     : (returnValue === "secondary" ? pending?.onSecondary : null);
@@ -3709,14 +7150,16 @@ function handleGenericTextClose() {
   if (historyBefore && changed) commitHistoryFromSnapshot(historyBefore);
 }
 
-function showEventColumnDeleteConfirm(key) {
-  const column = getEventColumnByKey(key);
+function showEventColumnDeleteConfirm(key, eventType = null) {
+  const column = getEventColumnByKey(key, eventType);
   if (!column) return;
   state.eventColumnDeleteKey = key;
-  const deleteImpact = column.custom
-    ? `Delete removes "${column.label}" from all Events Sheet frame type definitions and clears that value from existing frame nodes.`
-    : `Delete removes "${column.label}" from the Events Sheet schema and clears that value from existing frame nodes.`;
-  const message = `Hide only hides the column and keeps data. ${deleteImpact}`;
+  state.eventColumnDeleteType = eventType;
+  const typeLabel = eventType
+    ? (getProjectNodeTypes().find((item) => item.type === eventType)?.label || eventType)
+    : "";
+  const scope = typeLabel ? `the "${typeLabel}" frame type` : "the Events Sheet schema";
+  const message = `Hide only hides the column and keeps data. Delete removes "${column.label}" from ${scope} and clears that value from its frame nodes. Other frame types keep the column.`;
   const title = `Delete ${column.label} column?`;
 
   if (dom.eventColumnDeleteDialog?.showModal) {
@@ -3734,13 +7177,16 @@ function showEventColumnDeleteConfirm(key) {
     confirmLabel: "Delete",
     danger: true,
     recordHistory: true,
-    onConfirm: () => deleteEventColumn(key)
+    onConfirm: () => deleteEventColumn(key, eventType)
   });
   state.eventColumnDeleteKey = null;
+  state.eventColumnDeleteType = null;
 }
 
-function getEventColumnByKey(key) {
-  return getEventSheetColumns().find((item) => item.key === key)
+function getEventColumnByKey(key, eventType = null) {
+  const typed = eventType ? getEventSheetColumnsForType(eventType).find((item) => item.key === key) : null;
+  return typed
+    || getEventSheetColumns().find((item) => item.key === key)
     || eventSheetColumns.find((item) => item.key === key)
     || getAllCustomEventColumns().find((item) => item.key === key);
 }
@@ -3777,6 +7223,13 @@ function deleteNodeFieldValue(node, key) {
 
 function resetEventColumns() {
   state.project.eventSheet = normalizeEventSheetConfig(null);
+  getProjectNodeTypes()
+    .filter((typeDef) => isFrameKind(typeDef.kind))
+    .forEach((typeDef) => {
+      typeDef.removedColumns = [];
+      typeDef.eventColumnLabels = {};
+    });
+  markProjectStructureChanged({ nodeTypes: true });
   renderAll();
   setStatus("Events Sheet columns restored.");
 }
@@ -3799,6 +7252,52 @@ function showResetEventColumnsConfirm() {
   });
 }
 
+function renderVariableRows(entries, emptyLabel = "No variables yet.") {
+  if (!entries.length) return `<div class="nc-empty-state">${t(emptyLabel)}</div>`;
+  return getGroupedVariableEntries(entries)
+    .map((group) => `
+      <div class="variable-group-heading" data-variable-group="${escapeAttr(group.key)}">
+        <span>${escapeHtml(group.label)}</span>
+        <small>${t("{count} variables", { count: group.entries.length })}</small>
+      </div>
+      ${group.entries.map(([key, value]) => renderVariableRow(key, value)).join("")}
+    `)
+    .join("");
+}
+
+function getGroupedVariableEntries(entries) {
+  const groups = new Map();
+  entries.forEach(([key, value]) => {
+    const groupKey = getVariableGroupKey(key);
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        key: groupKey,
+        label: formatVariableGroupLabel(groupKey),
+        entries: []
+      });
+    }
+    groups.get(groupKey).entries.push([key, value]);
+  });
+  return [...groups.values()];
+}
+
+function getVariableGroupKey(key) {
+  const normalized = String(key || "").trim();
+  if (!normalized) return "other";
+  const splitIndexes = [normalized.indexOf("_"), normalized.indexOf(".")].filter((index) => index > 0);
+  if (!splitIndexes.length) return "other";
+  return normalized.slice(0, Math.min(...splitIndexes)).toLowerCase();
+}
+
+function formatVariableGroupLabel(groupKey) {
+  if (groupKey === "other") return t("Other");
+  return String(groupKey)
+    .split(/[-\s]+/)
+    .filter(Boolean)
+    .map(titleCase)
+    .join(" ");
+}
+
 function renderVariableRow(key, value) {
   const type = variableType(value);
   return `
@@ -3807,8 +7306,9 @@ function renderVariableRow(key, value) {
       <select data-variable-key="${escapeAttr(key)}" data-variable-field="type">
         ${["string", "number", "boolean", "json"].map((option) => `<option value="${option}" ${option === type ? "selected" : ""}>${option}</option>`).join("")}
       </select>
-      <input data-variable-key="${escapeAttr(key)}" data-variable-field="value" value="${escapeAttr(formatVariableValue(value))}">
-      <button class="icon-button danger-button" type="button" title="Delete variable" data-action="delete-variable" data-variable-key="${escapeAttr(key)}">x</button>
+      <textarea class="variable-value-input" data-variable-key="${escapeAttr(key)}" data-variable-field="value" rows="1" spellcheck="false">${escapeHtml(formatVariableValue(value))}</textarea>
+      ${renderPlaybookJsonButton(getPlaybookJsonPropertyToken(key))}
+      <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete variable"))}" aria-label="${escapeAttr(t("Delete variable"))}" data-action="delete-variable" data-variable-key="${escapeAttr(key)}">x</button>
     </div>
   `;
 }
@@ -3818,24 +7318,24 @@ function renderPalette() {
   const visibleRows = entries.length ? entries
     .map(([type, meta]) => {
       const deleteControl = meta.system
-        ? `<button class="icon-button palette-delete-button system-lock-button" type="button" disabled title="${escapeAttr(t("This is a system type. Delete is disabled to keep Play working."))}" aria-label="${escapeAttr(t("System type"))}">lock</button>`
-        : `<button class="icon-button danger-button palette-delete-button" aria-label="Delete node type" data-action="delete-custom-node-type" data-custom-node-type="${escapeAttr(type)}">x</button>`;
+        ? `<button class="icon-button palette-delete-button system-lock-button" type="button" title="${escapeAttr(t("Delete node type"))}" aria-label="${escapeAttr(t("Delete node type"))}" data-action="delete-custom-node-type" data-custom-node-type="${escapeAttr(type)}">lock</button>`
+        : `<button class="icon-button danger-button palette-delete-button" aria-label="${escapeAttr(t("Delete node type"))}" title="${escapeAttr(t("Delete node type"))}" data-action="delete-custom-node-type" data-custom-node-type="${escapeAttr(type)}">x</button>`;
       return `
         <div class="palette-row">
-          <button class="palette-badge" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(type)}" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}" title="Edit icon for ${escapeAttr(getNodeTypeLabel(type))}" aria-label="Edit icon for ${escapeAttr(getNodeTypeLabel(type))}">${escapeHtml(meta.badge)}</button>
+          <button class="palette-badge" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(type)}" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}" title="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(type) }))}" aria-label="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(type) }))}">${escapeHtml(meta.badge)}</button>
           <button class="palette-item" data-action="add-node" data-type="${escapeAttr(type)}">
             <span class="palette-label">${escapeHtml(getNodeTypeLabel(type))}</span>
           </button>
-          <button class="icon-button palette-settings-button" aria-label="Edit node type" data-action="edit-node-type" data-node-type="${escapeAttr(type)}">...</button>
-          <button class="icon-button palette-hide-button" aria-label="Hide node type" data-action="hide-node-type" data-node-type="${escapeAttr(type)}">-</button>
+          <button class="icon-button palette-settings-button" aria-label="${escapeAttr(t("Edit node type"))}" title="${escapeAttr(t("Edit node type"))}" data-action="edit-node-type" data-node-type="${escapeAttr(type)}">...</button>
+          <button class="icon-button palette-hide-button" aria-label="${escapeAttr(t("Hide node type"))}" title="${escapeAttr(t("Hide node type"))}" data-action="hide-node-type" data-node-type="${escapeAttr(type)}">-</button>
           ${deleteControl}
         </div>
       `;
     })
-    .join("") : `<div class="custom-node-empty">No visible node types.</div>`;
+    .join("") : `<div class="custom-node-empty">${t("No visible node types.")}</div>`;
   dom.palette.innerHTML = `
     <div class="palette-tools">
-      <button class="small-button" data-action="restore-default-node-types" type="button">Restore default types</button>
+      <button class="small-button" data-action="restore-default-node-types" type="button">${t("Restore default types")}</button>
     </div>
     ${renderHiddenNodeTypeSection()}
     ${visibleRows}
@@ -3847,7 +7347,7 @@ function renderHiddenNodeTypeSection() {
   return `
     <details class="hidden-node-types" ${hiddenEntries.length ? "open" : "data-empty=\"true\""}>
       <summary>
-        <span>Hidden</span>
+        <span>${t("Hidden")}</span>
         <span class="hidden-node-count">${hiddenEntries.length}</span>
       </summary>
       <div class="hidden-node-list">
@@ -3855,10 +7355,10 @@ function renderHiddenNodeTypeSection() {
           <div class="hidden-node-row">
             <span class="palette-badge hidden-node-badge" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}">${escapeHtml(meta.badge)}</span>
             <span class="palette-label">${escapeHtml(getNodeTypeLabel(type))}</span>
-            <button class="icon-button palette-settings-button" title="Edit node type" data-action="edit-node-type" data-node-type="${escapeAttr(type)}">...</button>
-            <button class="small-button restore-node-type-button" title="Restore node type" data-action="restore-node-type" data-node-type="${escapeAttr(type)}">Show</button>
+            <button class="icon-button palette-settings-button" title="${escapeAttr(t("Edit node type"))}" aria-label="${escapeAttr(t("Edit node type"))}" data-action="edit-node-type" data-node-type="${escapeAttr(type)}">...</button>
+            <button class="small-button restore-node-type-button" title="${escapeAttr(t("Restore node type"))}" data-action="restore-node-type" data-node-type="${escapeAttr(type)}">${t("Show")}</button>
           </div>
-        `).join("") : `<div class="custom-node-empty">No hidden node types.</div>`}
+        `).join("") : `<div class="custom-node-empty">${t("No hidden node types.")}</div>`}
       </div>
     </details>
   `;
@@ -3988,23 +7488,23 @@ function renderCanvasNodeMarkup(node, query, focusedCharacterId, layerOrder = ge
     <div class="node-stack" data-node-stack-id="${escapeAttr(node.id)}" style="left:${node.x}px; top:${node.y}px; width:${width}px; height:${height}px; --node-layer-order:${Number(layerOrder) || 0};">
       <article class="${nodeClasses}" data-node-id="${escapeAttr(node.id)}" style="left:0; top:0; width:${width}px; height:${height}px; --node-color:${meta.color}; ${match ? "outline:1px solid var(--accent-orange);" : ""}">
         <div class="node-header" data-drag-handle="true" data-node-id="${escapeAttr(node.id)}">
-          <button class="node-icon" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(node.type)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" data-icon-size="${getNodeIconSize(icon)}" title="Edit ${escapeAttr(getNodeTypeLabel(node.type))} icon" aria-label="Edit icon for all ${escapeAttr(getNodeTypeLabel(node.type))} nodes">${escapeHtml(icon)}</button>
+          <button class="node-icon" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(node.type)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" data-icon-size="${getNodeIconSize(icon)}" title="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(node.type) }))}" aria-label="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(node.type) }))}">${escapeHtml(icon)}</button>
           <span class="node-type">${escapeHtml(getNodeTypeLabel(node.type))}</span>
-          <span class="node-id">${escapeHtml(getNodeDisplayId(node))}</span>
+            <span class="node-id">${escapeHtml(node.id || getNodeDisplayId(node))}</span>
           ${isFrame ? `<button class="frame-collapse-button" type="button" data-action="toggle-frame-collapse" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" title="${escapeAttr(isFrameCollapsed(node) ? t("Expand frame") : t("Collapse frame"))}" aria-label="${escapeAttr(isFrameCollapsed(node) ? t("Expand frame") : t("Collapse frame"))}">${isFrameCollapsed(node) ? "+" : "-"}</button>` : ""}
         </div>
         <div class="node-body">
           ${renderNodeTitle(node, inlineEditField)}
           ${renderNodeCastChips(node)}
           ${renderNodeText(node, inlineEditField)}
-          ${hasNodeChoices(node) ? `<div class="node-meta">${node.choices.length} choices</div>` : ""}
+          ${hasNodeChoices(node) ? `<div class="node-meta">${t("{count} choices", { count: node.choices.length })}</div>` : ""}
         </div>
-        <button class="node-resize-handle right" data-resize-handle="e" data-node-id="${escapeAttr(node.id)}" title="Resize width" aria-label="Resize width"></button>
-        <button class="node-resize-handle bottom" data-resize-handle="s" data-node-id="${escapeAttr(node.id)}" title="Resize height" aria-label="Resize height"></button>
-        <button class="node-resize-handle corner" data-resize-handle="se" data-node-id="${escapeAttr(node.id)}" title="Resize node" aria-label="Resize node"></button>
+        <button class="node-resize-handle right" data-resize-handle="e" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize width"))}" aria-label="${escapeAttr(t("Resize width"))}"></button>
+        <button class="node-resize-handle bottom" data-resize-handle="s" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize height"))}" aria-label="${escapeAttr(t("Resize height"))}"></button>
+        <button class="node-resize-handle corner" data-resize-handle="se" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize node"))}" aria-label="${escapeAttr(t("Resize node"))}"></button>
       </article>
-      <button class="port input" style="${inputPortStyle}" data-port="input" data-node-id="${escapeAttr(node.id)}" title="Input" aria-label="Input port"></button>
-      <button class="port output ${node.id === state.connectingFrom ? "active" : ""}" style="${outputPortStyle}" data-port="output" data-node-id="${escapeAttr(node.id)}" title="Output" aria-label="Output port"></button>
+      <button class="port input" style="${inputPortStyle}" data-port="input" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Input"))}" aria-label="${escapeAttr(t("Input port"))}"></button>
+      <button class="port output ${node.id === state.connectingFrom ? "active" : ""}" style="${outputPortStyle}" data-port="output" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Output"))}" aria-label="${escapeAttr(t("Output port"))}"></button>
     </div>
   `;
 }
@@ -4124,11 +7624,13 @@ function shouldKeepInlineNodeEditOnFocusOut(nodeId, relatedTarget) {
 }
 
 function getCanvasRenderContext(query = state.search.trim().toLowerCase()) {
+  const matchNodeIds = query ? getCanvasSearchMatchIdSet(query) : null;
   return {
     query,
-    visibleNodeIds: getCanvasVisibleNodeIds(query),
+    matchNodeIds,
+    visibleNodeIds: getCanvasVisibleNodeIds(query, matchNodeIds),
     nodeMap: getNodeIndex(),
-    matchCount: query ? state.project.nodes.filter((node) => nodeMatches(node, query)).length : 0
+    matchCount: matchNodeIds ? matchNodeIds.size : 0
   };
 }
 
@@ -4165,11 +7667,11 @@ function getCanvasViewportBounds(padding = CANVAS_RENDER_PADDING) {
   };
 }
 
-function shouldForceCanvasNodeRender(node, query) {
+function shouldForceCanvasNodeRender(node, query, matchNodeIds = null) {
   if (!node) return false;
   if (node.id === state.selectedNodeId || state.selectedNodeIds.includes(node.id)) return true;
   if (node.id === state.connectingFrom || node.id === state.contextNodeId) return true;
-  if (query && nodeMatches(node, query)) return true;
+  if (query && matchNodeIds?.has(node.id)) return true;
   return false;
 }
 
@@ -4177,12 +7679,12 @@ function boundsIntersect(a, b) {
   return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
 }
 
-function getCanvasVisibleNodeIds(query = state.search.trim().toLowerCase()) {
+function getCanvasVisibleNodeIds(query = state.search.trim().toLowerCase(), matchNodeIds = null) {
   const bounds = getCanvasViewportBounds();
   const ids = new Set();
   state.project.nodes.forEach((node) => {
     if (isNodeHiddenByCollapsedFrame(node)) return;
-    if (shouldForceCanvasNodeRender(node, query) || boundsIntersect(getNodeBounds(node), bounds)) {
+    if (shouldForceCanvasNodeRender(node, query, matchNodeIds) || boundsIntersect(getNodeBounds(node), bounds)) {
       ids.add(node.id);
     }
   });
@@ -4234,15 +7736,17 @@ function getNodeTypeLabel(type) {
 
 function getNodeDisplayTitle(node, fallback = "Untitled") {
   const title = node?.title || fallback;
-  if (!node || !isEventSheetNode(node)) return title;
+  if (!node || !isFrameNode(node)) return title;
   const prefix = getEventFrameTitlePrefix(node);
   return prefix ? `${prefix} ${title}` : title;
 }
 
 function getEventFrameTitlePrefix(node) {
-  if (!isEventSheetNode(node)) return "";
-  const act = String(node.act || "").trim();
-  const chapter = String(node.chapter || "").trim();
+  if (!isFrameNode(node)) return "";
+  const typeDef = getProjectNodeTypes().find((item) => item.type === node.type);
+  const removedColumns = new Set(getTypeRemovedColumns(typeDef));
+  const act = removedColumns.has("act") ? "" : String(getNodeEventValue(node, "act") || "").trim();
+  const chapter = removedColumns.has("chapter") ? "" : String(getNodeEventValue(node, "chapter") || "").trim();
   const parts = [];
   if (act) parts.push(`Act ${act}`);
   if (chapter) parts.push(`Ch. ${chapter}`);
@@ -4295,7 +7799,7 @@ function getFallbackNodeMeta(type) {
 }
 
 function defaultNodeTypeList() {
-  return Object.entries(nodeTypes).map(([type, meta]) => ({
+  const builtIns = Object.entries(nodeTypes).map(([type, meta]) => ({
     type,
     label: getDefaultNodeTypeLabel(type),
     badge: getDefaultNodeTypeBadge(getDefaultNodeTypeLabel(type)),
@@ -4309,6 +7813,46 @@ function defaultNodeTypeList() {
     system: Boolean(meta.system),
     legacy: Boolean(meta.legacy)
   }));
+  const advanced = defaultAdvancedNodeTypes.map((typeDef) => ({
+    type: typeDef.type,
+    label: typeDef.label,
+    badge: getNormalizedNodeTypeBadge(typeDef.badge),
+    color: normalizeNodeTypeColor(typeDef.type, typeDef.kind, typeDef.color),
+    width: clamp(Number(typeDef.width) || (isFrameKind(typeDef.kind) ? 540 : 240), 160, isFrameKind(typeDef.kind) ? 860 : 420),
+    custom: false,
+    badgeCustom: Boolean(typeDef.badgeCustom),
+    kind: isFrameKind(typeDef.kind) ? "frame" : "node",
+    fields: normalizeNodeTypeFields(typeDef.fields),
+    hidden: Boolean(typeDef.hidden),
+    eventSheetHidden: isFrameKind(typeDef.kind) ? Boolean(typeDef.eventSheetHidden) : false,
+    system: true,
+    legacy: false
+  }));
+  const builtInTypes = new Map([...builtIns, ...advanced].map((typeDef) => [typeDef.type, typeDef]));
+  SPECIAL_EDITOR_NODE_TYPES.forEach((type) => {
+    if (builtInTypes.has(type)) return;
+    const meta = nodeTypes[type];
+    if (!meta) return;
+    builtInTypes.set(type, {
+      type,
+      label: getDefaultNodeTypeLabel(type),
+      badge: getDefaultNodeTypeBadge(getDefaultNodeTypeLabel(type)),
+      color: meta.color,
+      width: meta.width,
+      custom: false,
+      kind: type === "Event" ? "frame" : "node",
+      fields: [],
+      hidden: Boolean(meta.legacy),
+      eventSheetHidden: false,
+      system: Boolean(meta.system),
+      legacy: Boolean(meta.legacy)
+    });
+  });
+  return [...builtInTypes.values()];
+}
+
+function visibleDefaultNodeTypeList() {
+  return defaultNodeTypeList().map((typeDef) => ({ ...typeDef, hidden: false }));
 }
 
 function getDefaultNodeTypeLabel(type) {
@@ -4412,6 +7956,47 @@ function renderInspectorTabs() {
   });
 }
 
+function renderProjectExportControls() {
+  const actions = [
+    { action: "export-json", label: "Project .json", title: "Export editable project file (.json)" },
+    { action: "export-story-md", label: "Story .md", title: "Export readable story text (.md)" },
+    { action: "export-story-layout", label: "Layout .json", title: "Export canvas layout sidecar (.json)" },
+    { action: "export-state-schema", label: "State .json", title: "Export state definitions and initial values (.json)" },
+    { action: "export-profile", label: "Profile .json", title: "Export file manifest and format profile (.json)" },
+    { action: "export-runtime-json", label: "Runtime .json", title: "Export engine runtime data (.json)" },
+    { action: "export-yarn", label: "Yarn .yarn", title: "Export Yarn Spinner script" },
+    { action: "export-ink", label: "Ink .ink", title: "Export ink script" },
+    { action: "export-twee", label: "Twee .twee", title: "Export Twee / Twine script" },
+    { action: "import-story-md", label: "Import story .md", title: "Import Story Markdown and replace this project" },
+    { action: "import-story-layout", label: "Import layout .json", title: "Import Story Markdown layout sidecar" },
+    { action: "import-state-schema", label: "Import state .json", title: "Import state schema sidecar and replace variables" }
+  ];
+  const sections = [
+    {
+      key: "project-io",
+      items: actions
+    }
+  ];
+  return `
+    <div class="project-export-controls">
+      ${sections.map((section) => `
+        <section class="project-control-group" role="group">
+          <div class="project-control-grid">
+            ${section.items.map((item) => `
+              <button
+                class="small-button"
+                type="button"
+                data-action="${escapeAttr(item.action)}"
+                title="${escapeAttr(t(item.title))}"
+              >${escapeHtml(t(item.label))}</button>
+            `).join("")}
+          </div>
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderProjectPanel() {
   const links = state.project.links.length;
   const nodeCount = state.project.nodes.length;
@@ -4426,14 +8011,23 @@ function renderProjectPanel() {
         <span>${t("Project notes")}</span>
         <textarea data-project-field="notes" spellcheck="false" placeholder="${escapeAttr(t("Project notes"))}">${escapeHtml(state.project.notes || "")}</textarea>
       </label>
+      <section class="project-file-box">
+        <div class="project-file-box-header">
+          <div class="project-file-box-title">
+            <span>${t("Export project files")}</span>
+            <span class="project-feature-badge" title="${escapeAttr(t("Experimental feature"))}">Beta</span>
+          </div>
+          <div class="project-file-box-actions">
+            <button class="small-button" type="button" data-action="export-all">${t("Export all")}</button>
+          </div>
+        </div>
+        ${renderProjectExportControls()}
+      </section>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-label">${t("Nodes")}</div><div class="stat-value">${nodeCount}</div></div>
         <div class="stat-card"><div class="stat-label">${t("Links")}</div><div class="stat-value">${links}</div></div>
         <div class="stat-card"><div class="stat-label">${t("Variables")}</div><div class="stat-value">${variableCount}</div></div>
         <div class="stat-card"><div class="stat-label">${t("Zoom")}</div><div class="stat-value">${Math.round(state.view.scale * 100)}%</div></div>
-      </div>
-      <div class="button-row">
-        <button class="small-button" data-action="export-all">${t("Export all")}</button>
       </div>
     </div>
   `;
@@ -4463,17 +8057,18 @@ function renderNodePanel(node) {
           ${getNodeTypeEntries(node.type).map(([type, m]) => `<option value="${escapeAttr(type)}" ${node.type === type ? "selected" : ""}>${escapeHtml(getNodeTypeLabel(type))}${m.legacy ? " (legacy)" : ""}${m.hidden && !m.legacy ? " (hidden)" : ""}${m.removed ? " (removed)" : ""}</option>`).join("")}
         </select>
       </label>
-      <label class="field">
-        <span>${escapeHtml(getNodeTitleLabel(node))}</span>
-        <input data-node-field="title" value="${escapeAttr(node.title || "")}">
-      </label>
-      ${renderNodeBodyField(node)}
-      ${node.type === "Dialog" ? renderNodeDialogTurnsField(node) : ""}
-      ${isEventSheetNode(node) ? "" : renderNodeCastFields(node)}
-      ${!isFrameNode(node) ? renderNodeStateLogicFields(node) : ""}
-      ${renderTypeFields(node)}
-      ${renderCustomFields(node)}
-      ${isEventSheetNode(node) ? renderEventFields(node) : ""}
+      ${isEventSheetNode(node) ? renderEventFrameFields(node) : `
+        <label class="field">
+          <span>${escapeHtml(getNodeTitleLabel(node))}</span>
+          <input data-node-field="title" value="${escapeAttr(node.title || "")}">
+        </label>
+        ${renderNodeBodyField(node)}
+        ${node.type === "Dialog" ? renderNodeDialogTurnsField(node) : ""}
+        ${renderNodeCastFields(node)}
+        ${!isFrameNode(node) ? renderNodeStateLogicFields(node) : ""}
+        ${renderTypeFields(node)}
+        ${renderCustomFields(node)}
+      `}
       <div class="button-row">
         <button class="small-button" data-action="duplicate-node">${t("Duplicate")}</button>
         <button class="small-button danger-button" data-action="delete-node">${t("Delete node")}</button>
@@ -4552,27 +8147,47 @@ function renderNodeBodyField(node) {
   `;
 }
 
+function isNodeSectionExpanded(sectionKey) {
+  if (!sectionKey) return false;
+  const set = state.nodeSectionExpandedIds;
+  return set instanceof Set && set.has(sectionKey);
+}
+
+function setNodeSectionExpanded(sectionKey, open) {
+  if (!sectionKey) return;
+  if (!(state.nodeSectionExpandedIds instanceof Set)) state.nodeSectionExpandedIds = new Set();
+  const set = state.nodeSectionExpandedIds;
+  if (open) set.add(sectionKey);
+  else set.delete(sectionKey);
+}
+
+function toggleNodeSection(sectionKey) {
+  if (!sectionKey) return;
+  setNodeSectionExpanded(sectionKey, !isNodeSectionExpanded(sectionKey));
+  const node = getNode(state.selectedNodeId);
+  if (node) renderNodePanel(node);
+}
+
+function renderNodeSectionToggle(sectionKey, label, expanded) {
+  return `
+    <button class="nc-section-toggle" type="button" data-action="toggle-node-section" data-node-section="${escapeAttr(sectionKey)}" aria-expanded="${expanded ? "true" : "false"}">
+      <span class="nc-section-caret" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+      <span class="nc-section-title">${escapeHtml(label)}</span>
+    </button>
+  `;
+}
+
 function renderNodeCastFields(node) {
   const characters = getCharacters();
   const cast = normalizeNodeCast(node.cast);
   const autoLinks = getNodeCharacterLinks(node, { includeCast: false, includeEventAggregate: false });
-  if (!characters.length) {
-    return `
-      <section class="cast-editor">
-        <div class="cast-editor-header">
-          <h3>Cast</h3>
-          <span>${t("No characters yet")}</span>
-        </div>
-        <button class="small-button" data-action="add-character">${t("Add character")}</button>
-      </section>
-    `;
-  }
-  return `
-    <section class="cast-editor">
-      <div class="cast-editor-header">
-          <h3>Cast</h3>
-        <span>${cast.length} ${t("manual")}, ${autoLinks.length} ${t("auto")}</span>
-      </div>
+  const expanded = isNodeSectionExpanded("cast");
+  const summary = characters.length
+    ? `${cast.length} ${t("manual")}, ${autoLinks.length} ${t("auto")}`
+    : t("No characters yet");
+  const body = !characters.length
+    ? `<button class="small-button" data-action="add-character">${t("Add character")}</button>`
+    : `
       <div class="cast-row-list">
         ${cast.map((entry, index) => renderNodeCastRow(entry, index)).join("") || `<div class="cast-empty">${t("No manual cast links.")}</div>`}
       </div>
@@ -4593,6 +8208,14 @@ function renderNodeCastFields(node) {
           </div>
         </div>
       ` : ""}
+    `;
+  return `
+    <section class="cast-editor nc-collapsible${expanded ? " expanded" : ""}">
+      <div class="cast-editor-header nc-collapsible-header">
+        ${renderNodeSectionToggle("cast", t("Cast"), expanded)}
+        <span>${escapeHtml(summary)}</span>
+      </div>
+      ${expanded ? body : ""}
     </section>
   `;
 }
@@ -4600,18 +8223,27 @@ function renderNodeCastFields(node) {
 function renderNodeStateLogicFields(node) {
   const logic = normalizeNodeStateLogic(node.stateLogic);
   const routing = normalizeNodeRouting(node.routing);
+  const expanded = isNodeSectionExpanded("stateLogic");
   return `
-    <section class="node-logic-box">
-      <header>
-        <span>${t("State Logic")}</span>
-        <button class="small-button" type="button" data-action="add-node-effect">${t("Add effect")}</button>
+    <section class="node-logic-box nc-collapsible${expanded ? " expanded" : ""}">
+      <header class="nc-collapsible-header">
+        ${renderNodeSectionToggle("stateLogic", t("State Logic"), expanded)}
       </header>
-      <label class="field">
-        <span>${t("Requirements")}</span>
-        <textarea data-node-logic-field="requirements" spellcheck="false" placeholder="trust_level >= 2">${escapeHtml(logic.requirements)}</textarea>
-      </label>
-      <div class="node-effect-list">
-        ${logic.effects.length ? logic.effects.map((effect, index) => renderNodeEffectRow(effect, index)).join("") : `<div class="nc-empty-state">${t("No effects yet.")}</div>`}
+      ${expanded ? `
+      <div class="logic-editor-block">
+        <div class="logic-editor-head">
+          <span>${t("Condition")}</span>
+          <button class="small-button" type="button" data-action="show-node-condition-draft">${t("Add condition")}</button>
+        </div>
+        ${renderNodeConditionControl(node, logic)}
+      </div>
+      <div class="logic-editor-block">
+        <div class="logic-editor-head">
+          <span>${t("Effects")}</span>
+          <button class="small-button" type="button" data-action="show-node-effect-draft">${t("Add effect")}</button>
+        </div>
+        ${renderNodeEffectDraft(node)}
+        <textarea data-node-logic-field="effects" spellcheck="false" placeholder="${escapeAttr(t("Effect lines"))}">${escapeHtml(formatNodeEffectsText(node))}</textarea>
       </div>
       <div class="node-routing-grid">
         <label class="field">
@@ -4622,7 +8254,405 @@ function renderNodeStateLogicFields(node) {
         </label>
         ${renderNodeRoutingTargetSlot(routing)}
       </div>
+      ` : ""}
     </section>
+  `;
+}
+
+function renderNodeConditionControl(node, logic) {
+  const groupMode = getConditionGroupModeForExpression(logic.requirements, logic.requirementsMode);
+  const status = getConditionEvaluationStatus(logic.requirements, state.project.variables);
+  return `
+    <label class="condition-relation-field">
+      <span>${t("Condition relation")}</span>
+      <select data-node-condition-field="mode">
+        ${renderConditionGroupModeOptions(groupMode)}
+      </select>
+    </label>
+    ${renderNodeConditionDraft(node)}
+    <textarea class="playbook-code-editor playbook-condition-code-editor" data-node-logic-field="requirements" spellcheck="false" placeholder="${escapeAttr(t("Condition expression"))}">${escapeHtml(logic.requirements || "")}</textarea>
+    ${renderPlaybookCodeStatus(status)}
+  `;
+}
+
+function renderNodeConditionDraft(node) {
+  if (state.nodeConditionDraftNodeId !== node?.id) return "";
+  return renderConditionDraftRow({
+    action: "commit-node-condition-draft",
+    conditionId: "node"
+  });
+}
+
+function renderNodeEffectDraft(node) {
+  if (state.nodeEffectDraftNodeId !== node?.id) return "";
+  return renderEffectDraftRow({
+    action: "commit-node-effect-draft",
+    defaultTrigger: "onVisit",
+    includeTrigger: false,
+    effectId: "node"
+  });
+}
+
+function renderConditionDraftRow({ action, conditionId = "" } = {}) {
+  const defaultKey = getDefaultConditionKey();
+  const defaultOp = normalizeConditionOperatorForKey(defaultKey, "===");
+  const canCommit = Boolean(defaultKey);
+  const hasValue = canCommit && conditionOperatorNeedsValue(defaultOp);
+  return `
+    <div class="logic-draft-row condition-draft-row${hasValue ? "" : " no-condition-value"}" data-draft-id="${escapeAttr(conditionId)}">
+      ${renderConditionBuilderFields({
+        keyAttributes: `data-draft-field="key"`,
+        opAttributes: `data-draft-field="op"`,
+        valueAttributes: `data-draft-field="value"`,
+        selectedKey: defaultKey,
+        selectedOp: defaultOp,
+        selectedValue: getDefaultConditionValue(defaultKey, defaultOp)
+      })}
+      <button class="small-button" type="button" data-action="${escapeAttr(action)}" ${canCommit ? "" : "disabled"}>${t("Add")}</button>
+    </div>
+  `;
+}
+
+function renderConditionBuilderFields({
+  keyAttributes = "",
+  opAttributes = "",
+  valueAttributes = "",
+  selectedKey = "",
+  selectedOp = "===",
+  selectedValue = ""
+} = {}) {
+  const op = normalizeConditionOperator(selectedOp);
+  const needsValue = conditionOperatorNeedsValue(op);
+  const hasKey = Boolean(normalizeOptionalString(selectedKey).trim());
+  const valueVisible = hasKey && needsValue;
+  let operators = hasKey ? getAllowedConditionOperatorsForKey(selectedKey) : CONDITION_OPERATORS;
+  // Keep an already-stored operator the key's type would otherwise exclude (legacy or
+  // imported expressions) so the control reflects the saved value; new clauses are clamped
+  // to a valid operator before reaching here, so excluded operators never appear unprompted.
+  if (hasKey && !operators.some((option) => option.value === op)) {
+    const current = CONDITION_OPERATORS.find((option) => option.value === op);
+    if (current) operators = [...operators, current];
+  }
+  return `
+    ${renderStateKeySelect({
+      attributes: keyAttributes,
+      selected: selectedKey,
+      placeholder: "State key"
+    })}
+    <select ${opAttributes} ${hasKey ? "" : "disabled"}>
+      ${renderPlaybookOptionList(operators, op)}
+    </select>
+    <input class="condition-value-input" ${valueAttributes} list="playbookValueOptions" value="${escapeAttr(valueVisible ? selectedValue : "")}" placeholder="${escapeAttr(t("Value"))}" spellcheck="false" ${valueVisible ? "" : "hidden disabled"}>
+  `;
+}
+
+function renderConditionBuilderControl({
+  expression = "",
+  mode = "",
+  keyAttributes = "",
+  opAttributes = "",
+  valueAttributes = "",
+  connectorAttributes = "",
+  modeAttributes = "",
+  customAttributes = "",
+  className = "",
+  addAction = "",
+  addAttributes = "",
+  deleteAction = "",
+  deleteAttributes = ""
+} = {}) {
+  const model = parseConditionBuilderExpression(expression);
+  const custom = model.custom && normalizeOptionalString(expression).trim();
+  const groupMode = getConditionGroupModeForExpression(expression, mode);
+  const canAdd = Boolean(getDefaultConditionKey()) && !custom;
+  const canDelete = Boolean(deleteAction) && model.clauses.length > 1 && !custom;
+  return `
+    <div class="condition-builder-list ${className}">
+      <div class="condition-builder-toolbar">
+        <label class="condition-builder-mode">
+          <span>${t("Condition relation")}</span>
+          <select ${modeAttributes} ${custom ? "disabled" : ""}>
+            ${renderConditionGroupModeOptions(groupMode)}
+          </select>
+        </label>
+        ${addAction ? `<button class="small-button" type="button" data-action="${escapeAttr(addAction)}" ${addAttributes} ${canAdd ? "" : "disabled"}>${t("Add condition")}</button>` : ""}
+      </div>
+      ${model.clauses.map((clause, index) => {
+        const hasValue = Boolean(clause.key && conditionOperatorNeedsValue(clause.op));
+        const hasDelete = canDelete;
+        return `
+        <div class="condition-builder-row condition-clause-row${index ? " has-connector" : ""}${hasValue ? "" : " no-condition-value"}${hasDelete ? " has-delete" : ""}">
+          ${index ? `
+            <select ${connectorAttributes} data-condition-index="${index}">
+              ${renderPlaybookOptionList(CONDITION_CONNECTORS, normalizeConditionConnector(clause.connector))}
+            </select>
+          ` : ""}
+          ${renderConditionBuilderFields({
+            keyAttributes: `${keyAttributes} data-condition-index="${index}"`,
+            opAttributes: `${opAttributes} data-condition-index="${index}"`,
+            valueAttributes: `${valueAttributes} data-condition-index="${index}"`,
+            selectedKey: clause.key,
+            selectedOp: clause.op,
+            selectedValue: clause.value
+          })}
+          ${hasDelete ? `<button class="icon-button danger-button condition-clause-delete" type="button" title="${escapeAttr(t("Delete condition"))}" data-action="${escapeAttr(deleteAction)}" ${deleteAttributes} data-condition-index="${index}">x</button>` : ""}
+        </div>
+      `; }).join("")}
+    </div>
+    ${custom ? `
+      <textarea class="condition-custom-expression" ${customAttributes} spellcheck="false" placeholder="${escapeAttr(t("Condition expression"))}">${escapeHtml(expression)}</textarea>
+    ` : ""}
+  `;
+}
+
+function getDefaultConditionKey() {
+  const variables = normalizeVariablesObject(state.project.variables);
+  return Object.keys(variables).sort((a, b) => a.localeCompare(b))[0] || "";
+}
+
+function getDefaultConditionValue(key, op = "===") {
+  if (!normalizeOptionalString(key).trim() || !conditionOperatorNeedsValue(op)) return "";
+  const variables = normalizeVariablesObject(state.project.variables);
+  const value = variables[key];
+  if (typeof value === "number") return "0";
+  if (typeof value === "boolean") return "true";
+  if (Array.isArray(value)) return "";
+  if (value && typeof value === "object") return "{}";
+  return "true";
+}
+
+function normalizeConditionOperator(value) {
+  const op = normalizeOptionalString(value).trim();
+  if (op === "==") return "===";
+  if (op === "!=") return "!==";
+  if (op === "has") return "contains";
+  return CONDITION_OPERATOR_VALUES.has(op) ? op : "===";
+}
+
+function getConditionKeyVariableType(key) {
+  const stateKey = normalizeOptionalString(key).trim();
+  if (!stateKey) return null;
+  const variables = normalizeVariablesObject(state.project.variables);
+  if (!Object.prototype.hasOwnProperty.call(variables, stateKey)) return null;
+  return getActionVariableType(variables[stateKey]);
+}
+
+function getAllowedConditionOperatorsForKey(key) {
+  const type = getConditionKeyVariableType(key);
+  const allowed = type && CONDITION_OPERATORS_BY_TYPE[type];
+  if (!allowed) return CONDITION_OPERATORS;
+  return CONDITION_OPERATORS.filter((option) => allowed.includes(option.value));
+}
+
+function normalizeConditionOperatorForKey(key, value) {
+  const op = normalizeConditionOperator(value);
+  const allowed = getAllowedConditionOperatorsForKey(key);
+  if (allowed.some((option) => option.value === op)) return op;
+  if (allowed.some((option) => option.value === "===")) return "===";
+  return allowed[0]?.value || "===";
+}
+
+function normalizeConditionConnector(value) {
+  const connector = normalizeOptionalString(value).trim();
+  return CONDITION_CONNECTOR_VALUES.has(connector) ? connector : "&&";
+}
+
+function normalizeStoredConditionGroupMode(value) {
+  const mode = normalizeOptionalString(value).trim();
+  return mode === "any" ? "any" : "all";
+}
+
+function normalizeConditionGroupMode(value) {
+  const mode = normalizeOptionalString(value).trim();
+  if (mode === "mixed") return "mixed";
+  return CONDITION_GROUP_MODE_VALUES.has(mode) ? mode : "all";
+}
+
+function getConditionConnectorForMode(mode) {
+  return normalizeStoredConditionGroupMode(mode) === "any" ? "||" : "&&";
+}
+
+function getConditionModeForConnector(connector) {
+  return normalizeConditionConnector(connector) === "||" ? "any" : "all";
+}
+
+function renderConditionGroupModeOptions(selectedMode) {
+  const mode = normalizeConditionGroupMode(selectedMode);
+  const mixedOption = mode === "mixed"
+    ? `<option value="mixed" selected disabled>${escapeHtml(t("Mixed conditions"))}</option>`
+    : "";
+  return mixedOption + CONDITION_GROUP_MODES.map((option) => `
+    <option value="${escapeAttr(option.value)}" ${mode === option.value ? "selected" : ""}>${escapeHtml(t(option.label))}</option>
+  `).join("");
+}
+
+function getConditionGroupModeForExpression(expression, explicitMode = "") {
+  const model = parseConditionBuilderExpression(expression);
+  if (model.custom) return normalizeStoredConditionGroupMode(explicitMode);
+  const clauses = model.clauses.filter((clause) => buildConditionExpressionFromParts(clause));
+  if (clauses.length <= 1) return normalizeStoredConditionGroupMode(explicitMode);
+  const connectors = clauses.slice(1).map((clause) => normalizeConditionConnector(clause.connector));
+  const hasAnd = connectors.includes("&&");
+  const hasOr = connectors.includes("||");
+  if (hasOr && !hasAnd) return "any";
+  if (hasAnd && !hasOr) return "all";
+  return "mixed";
+}
+
+function getStoredConditionModeForExpression(expression, fallbackMode = "all") {
+  const mode = getConditionGroupModeForExpression(expression, fallbackMode);
+  if (mode === "all" || mode === "any") return mode;
+  return normalizeStoredConditionGroupMode(fallbackMode);
+}
+
+function conditionOperatorNeedsValue(op) {
+  return !["truthy", "falsy"].includes(normalizeConditionOperator(op));
+}
+
+function parseConditionBuilderExpression(expression) {
+  const source = normalizeOptionalString(expression).trim();
+  if (!source) return { custom: false, clauses: [{ key: "", op: "===", value: "true", connector: "&&" }] };
+  const parts = source.split(/\s+(&&|\|\|)\s+/);
+  const clauses = [];
+  for (let index = 0; index < parts.length; index += 2) {
+    const connector = index ? parts[index - 1] : "&&";
+    const parsed = parseSimpleConditionExpression(parts[index]);
+    if (parsed.custom) return { custom: true, clauses: [{ key: "", op: "===", value: source, connector: "&&" }] };
+    clauses.push({ ...parsed, connector: normalizeConditionConnector(connector) });
+  }
+  return { custom: false, clauses: clauses.length ? clauses : [{ key: "", op: "===", value: "true", connector: "&&" }] };
+}
+
+function parseSimpleConditionExpression(expression) {
+  const source = normalizeOptionalString(expression).trim();
+  if (!source) return { key: "", op: "===", value: "true", custom: false };
+  const notMatch = source.match(/^!\s*([a-zA-Z_][\w.-]*)$/);
+  if (notMatch) return { key: notMatch[1], op: "falsy", value: "", custom: false };
+  const bareMatch = source.match(/^([a-zA-Z_][\w.-]*)$/);
+  if (bareMatch) return { key: bareMatch[1], op: "truthy", value: "", custom: false };
+  const includesMatch = source.match(/^([a-zA-Z_][\w.-]*)\.includes\s*\(([\s\S]*)\)$/);
+  if (includesMatch) {
+    return {
+      key: includesMatch[1],
+      op: "contains",
+      value: includesMatch[2].trim(),
+      custom: false
+    };
+  }
+  const legacyMembershipMatch = source.match(/^(has|contains)\s*\(\s*([a-zA-Z_][\w.-]*)\s*,\s*([\s\S]*)\)$/i);
+  if (legacyMembershipMatch) {
+    return {
+      key: legacyMembershipMatch[2],
+      op: "contains",
+      value: legacyMembershipMatch[3].trim(),
+      custom: false
+    };
+  }
+  const compareMatch = source.match(/^([a-zA-Z_][\w.-]*)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+)$/i);
+  if (compareMatch) {
+    return {
+      key: compareMatch[1],
+      op: normalizeConditionOperator(compareMatch[2].toLowerCase()),
+      value: compareMatch[3].trim(),
+      custom: false
+    };
+  }
+  return { key: "", op: "===", value: source, custom: true };
+}
+
+function buildConditionExpressionFromParts(parts = {}) {
+  const key = normalizeOptionalString(parts.key).trim();
+  const op = normalizeConditionOperator(parts.op);
+  const value = normalizeOptionalString(parts.value).trim();
+  if (!key) return "";
+  if (op === "truthy") return key;
+  if (op === "falsy") return `!${key}`;
+  if (!value) return "";
+  if (op === "has" || op === "contains") return `${key}.includes(${value})`;
+  return `${key} ${op} ${value}`;
+}
+
+function buildConditionExpressionFromClauses(clauses = []) {
+  return clauses
+    .map((clause, clauseIndex) => {
+      const condition = buildConditionExpressionFromParts(clause);
+      if (!condition) return "";
+      return clauseIndex ? `${normalizeConditionConnector(clause.connector)} ${condition}` : condition;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function createDefaultConditionClause(mode = "all") {
+  const key = getDefaultConditionKey();
+  const op = normalizeConditionOperatorForKey(key, "===");
+  return {
+    key,
+    op,
+    value: getDefaultConditionValue(key, op),
+    connector: getConditionConnectorForMode(mode)
+  };
+}
+
+function setConditionExpressionGroupMode(expression, mode) {
+  const source = normalizeOptionalString(expression).trim();
+  const model = parseConditionBuilderExpression(source);
+  if (model.custom) return source;
+  const connector = getConditionConnectorForMode(mode);
+  return buildConditionExpressionFromClauses(model.clauses.map((clause, index) => ({
+    ...clause,
+    connector: index ? connector : "&&"
+  })));
+}
+
+function addConditionExpressionClause(expression, mode = "all") {
+  const source = setConditionExpressionGroupMode(expression, mode);
+  const addition = buildConditionExpressionFromParts(createDefaultConditionClause(mode));
+  return appendConditionExpression(source, addition, mode);
+}
+
+function deleteConditionExpressionClause(expression, conditionIndex = 0) {
+  const source = normalizeOptionalString(expression).trim();
+  const model = parseConditionBuilderExpression(source);
+  if (model.custom) return source;
+  const index = Number.isInteger(conditionIndex) ? conditionIndex : 0;
+  const clauses = model.clauses.filter((_, clauseIndex) => clauseIndex !== index);
+  if (!clauses.length) return "";
+  clauses[0].connector = "&&";
+  return buildConditionExpressionFromClauses(clauses);
+}
+
+function renderEffectDraftRow({ action, defaultTrigger = "onVisit", includeTrigger = false, effectId = "", defaultKey = "" } = {}) {
+  const triggers = PLAYBOOK_ACTION_TRIGGERS.filter((option) => option.value !== "gate" && option.value !== "manual");
+  const variables = normalizeVariablesObject(state.project.variables);
+  const keys = Object.keys(variables).sort((a, b) => a.localeCompare(b));
+  const selectedKey = defaultKey || keys[0] || "";
+  const { variableInfo, allowedOperations, op } = getEffectOperationOptions(selectedKey, "set");
+  const value = getDefaultPlaybookActionValueForVariableInfo(variableInfo);
+  return `
+    <div class="logic-draft-row effect-draft-row${includeTrigger ? "" : " no-trigger"}" data-draft-id="${escapeAttr(effectId)}">
+      ${includeTrigger ? `
+        <select data-draft-field="trigger">
+          ${renderPlaybookOptionList(triggers, defaultTrigger)}
+        </select>
+      ` : ""}
+      ${renderStateKeySelect({
+        attributes: `data-draft-field="key"`,
+        selected: selectedKey,
+        placeholder: "State key"
+      })}
+      <select data-draft-field="op" ${allowedOperations.length ? "" : "disabled"}>
+        ${renderEffectOperationOptions(selectedKey, op)}
+      </select>
+      ${renderPlaybookActionValueField({
+        attributes: `data-draft-field="value"`,
+        value,
+        variableInfo,
+        op,
+        disabled: !allowedOperations.length
+      })}
+      <button class="small-button" type="button" data-action="${escapeAttr(action)}" ${selectedKey && allowedOperations.length ? "" : "disabled"}>${t("Add")}</button>
+    </div>
   `;
 }
 
@@ -4631,7 +8661,11 @@ function renderNodeRoutingTargetSlot(routing) {
     return `
       <label class="field">
         <span>${t("Go to title")}</span>
-        <input data-node-routing-field="target" list="playbookTargetOptions" value="${escapeAttr(routing.target)}" placeholder="${escapeAttr(t("Exact node title"))}" spellcheck="false">
+        ${renderTargetSelect({
+          attributes: `data-node-routing-field="target"`,
+          selected: routing.target,
+          placeholder: "Exact node title"
+        })}
       </label>
     `;
   }
@@ -4647,16 +8681,20 @@ function renderNodeRoutingTargetSlot(routing) {
 }
 
 function renderNodeEffectRow(effect, index) {
+  const trigger = normalizePlaybookActionTrigger(effect.trigger || "onVisit");
   return `
     <div class="node-effect-row">
-      <select data-node-effect-index="${index}" data-node-effect-field="trigger">
-        ${renderPlaybookOptionList(PLAYBOOK_ACTION_TRIGGERS.filter((option) => option.value !== "gate" && option.value !== "manual"), effect.trigger)}
-      </select>
-      <select data-node-effect-index="${index}" data-node-effect-field="op">
-        ${renderPlaybookOptionList(PLAYBOOK_ACTION_OPERATIONS, effect.op)}
-      </select>
-      <input data-node-effect-index="${index}" data-node-effect-field="key" value="${escapeAttr(effect.key)}" placeholder="${escapeAttr(t("State key"))}" spellcheck="false">
-      <input data-node-effect-index="${index}" data-node-effect-field="value" value="${escapeAttr(effect.value)}" placeholder="${escapeAttr(t("Value"))}" spellcheck="false">
+      <div class="playbook-action-fixed-op node-effect-fixed-trigger" title="${escapeAttr(trigger === "onChoose" ? t("Move this into a Choice option effect.") : t("On visit"))}">
+        <strong>${escapeHtml(t(trigger === "onChoose" ? "Legacy node choose trigger" : "On visit"))}</strong>
+        <small>${escapeHtml(t(trigger === "onChoose" ? "Use Choice Effects" : "Node effects"))}</small>
+      </div>
+      ${renderStateKeySelect({
+        attributes: `data-node-effect-index="${index}" data-node-effect-field="key"`,
+        selected: effect.key,
+        placeholder: "State key"
+      })}
+      ${renderStateEffectOperationControl(effect, `data-node-effect-index="${index}" data-node-effect-field="op"`)}
+      ${renderStateEffectValueControl(effect, `data-node-effect-index="${index}" data-node-effect-field="value"`)}
       <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete effect"))}" data-action="delete-node-effect" data-node-effect-index="${index}">x</button>
     </div>
   `;
@@ -4688,8 +8726,13 @@ function renderCastCharacterOptions(selectedId, options = {}) {
 function renderCastRelationOptions(selectedRole) {
   const role = normalizeCastRole(selectedRole);
   return CAST_RELATIONS.map((relation) => `
-    <option value="${escapeAttr(relation)}" ${relation === role ? "selected" : ""}>${escapeHtml(CAST_RELATION_LABELS[relation])}</option>
+    <option value="${escapeAttr(relation)}" ${relation === role ? "selected" : ""}>${escapeHtml(getCastRelationLabel(relation))}</option>
   `).join("");
+}
+
+function getCastRelationLabel(role) {
+  const normalizedRole = normalizeCastRole(role);
+  return t(CAST_RELATION_LABELS[normalizedRole] || CAST_RELATION_LABELS.Present);
 }
 
 function renderNodeCastChips(node) {
@@ -4707,21 +8750,48 @@ function renderNodeCastChips(node) {
 
 function renderCastChip(link) {
   const characterName = link.character?.name || getCharacterName(link.characterId) || "Character";
-  const role = CAST_RELATION_LABELS[normalizeCastRole(link.role)] || "Present";
+  const role = getCastRelationLabel(link.role);
   return `<span class="node-cast-chip" title="${escapeAttr(characterName)} · ${escapeAttr(role)}">${escapeHtml(characterName)} · ${escapeHtml(role)}</span>`;
 }
 
-function renderEventFields(node) {
-  const columns = getProjectEventSheetColumns().filter(
-    (column) => !column.readonly && !column.custom && column.key !== "characterEncountered"
-  );
-  if (!columns.length) return "";
-  return `
-    <section class="event-fields">
-      <h3>${t("Event Sheet")}</h3>
-      ${columns.map((column) => renderEventInspectorField(node, column)).join("")}
-    </section>
-  `;
+// Frame node properties render inline at the same level as every other property,
+// in the default order Act / Chapter / Title / Event Type / Beat / Description /
+// Content / (other type fields). The frame's own columns drive which event fields
+// appear, so the inspector and the Events Sheet always show the same property set.
+function renderEventFrameFields(node) {
+  const columns = getEventSheetColumns(node.type);
+  const byKey = new Map(columns.map((column) => [column.key, column]));
+  const rendered = new Set();
+  const parts = [];
+  const pushEventField = (key) => {
+    const column = byKey.get(key);
+    if (!column || column.readonly || column.custom || rendered.has(key)) return;
+    rendered.add(key);
+    parts.push(renderEventInspectorField(node, column));
+  };
+  const pushIntrinsic = (key, markup) => {
+    rendered.add(key);
+    parts.push(markup);
+  };
+  pushEventField("act");
+  pushEventField("chapter");
+  pushIntrinsic("title", `
+    <label class="field">
+      <span>${escapeHtml(getNodeTitleLabel(node))}</span>
+      <input data-node-field="title" value="${escapeAttr(node.title || "")}">
+    </label>
+  `);
+  pushEventField("eventType");
+  pushEventField("beatList");
+  pushEventField("eventDescription");
+  pushIntrinsic("body", renderNodeBodyField(node));
+  columns.forEach((column) => {
+    if (rendered.has(column.key) || column.readonly || column.custom || column.key === "characterEncountered") return;
+    rendered.add(column.key);
+    parts.push(renderEventInspectorField(node, column));
+  });
+  parts.push(renderCustomFields(node));
+  return parts.join("");
 }
 
 function renderEventInspectorField(node, column) {
@@ -4744,7 +8814,11 @@ function renderTypeFields(node) {
   if (node.type === "Set") {
     return `
       <div class="field-row">
-        <label class="field"><span>${t("Variable")}</span><input data-node-field="variable" value="${escapeAttr(node.variable || "")}"></label>
+        <label class="field"><span>${t("Variable")}</span>${renderStateKeySelect({
+          attributes: `data-node-field="variable"`,
+          selected: node.variable || "",
+          placeholder: "Variable"
+        })}</label>
         <label class="field"><span>${t("Value")}</span><input data-node-field="value" value="${escapeAttr(node.value || "")}"></label>
       </div>
     `;
@@ -4753,32 +8827,53 @@ function renderTypeFields(node) {
     return `
       <label class="field">
         <span>${t("Condition")}</span>
-        <input data-node-field="condition" value="${escapeAttr(node.condition || "")}" placeholder="trust == high">
+        ${renderDirectNodeConditionControl(node)}
       </label>
     `;
   }
   return "";
 }
 
+function renderDirectNodeConditionControl(node) {
+  return renderConditionBuilderControl({
+    expression: node.condition || "",
+    mode: node.conditionMode,
+    className: "direct-node-condition-builder",
+    keyAttributes: `data-direct-node-condition-field="key"`,
+    opAttributes: `data-direct-node-condition-field="op"`,
+    valueAttributes: `data-direct-node-condition-field="value"`,
+    connectorAttributes: `data-direct-node-condition-field="connector"`,
+    modeAttributes: `data-direct-node-condition-field="mode"`,
+    customAttributes: `data-node-field="condition"`,
+    addAction: "add-direct-node-condition",
+    deleteAction: "delete-direct-node-condition"
+  });
+}
+
 function renderChoiceOptionsField(node) {
   const options = Array.isArray(node.choiceOptions) ? node.choiceOptions : [];
   const revealMode = normalizeChoiceRevealMode(node.choiceRevealMode || node.revealMode);
+  const expanded = isNodeSectionExpanded("choices");
   return `
-    <section class="choice-options-editor">
-      <header>
-        <span>${t("Choices")}</span>
-        <button class="small-button" type="button" data-action="add-choice-option">${t("Add choice")}</button>
+    <section class="choice-options-editor nc-collapsible${expanded ? " expanded" : ""}">
+      <header class="nc-collapsible-header">
+        ${renderNodeSectionToggle("choices", t("Choices"), expanded)}
+        ${expanded
+          ? `<button class="small-button" type="button" data-action="add-choice-option">${t("Add choice")}</button>`
+          : `<span class="nc-section-count">${options.length}</span>`}
       </header>
+      ${expanded ? `
       <label class="field">
         <span>${t("Unavailable choices")}</span>
         <select data-node-field="choiceRevealMode">
           ${renderPlaybookOptionList(CHOICE_REVEAL_MODES, revealMode)}
         </select>
       </label>
-      <div class="choice-options-hint">${escapeHtml(t("Each option: visible only when Requires passes; selected option runs its Effects. Empty Requires = always visible."))}</div>
+      <div class="choice-options-hint">${escapeHtml(t("Each option is available when its condition is met; selecting it runs its Effects. Empty Requires = always available."))}</div>
       <div class="choice-options-list">
         ${options.length === 0 ? `<div class="nc-empty-state">${t("No choices yet.")}</div>` : options.map((opt, index) => renderChoiceOptionCard(opt, index)).join("")}
       </div>
+      ` : ""}
     </section>
   `;
 }
@@ -4787,6 +8882,8 @@ function renderChoiceOptionCard(option, index) {
   const optionId = option.id || "";
   const effects = Array.isArray(option.effects) ? option.effects : [];
   const expanded = isChoiceOptionExpanded(optionId, effects.length);
+  const conditionExpanded = isChoiceOptionConditionExpanded(optionId);
+  const conditionCount = getChoiceOptionConditionCount(option.requires || "");
   return `
     <article class="choice-option-card" data-choice-option-id="${escapeAttr(optionId)}">
       <header class="choice-option-head">
@@ -4796,10 +8893,18 @@ function renderChoiceOptionCard(option, index) {
         <button class="icon-button" type="button" title="${escapeAttr(t("Move down"))}" data-action="move-choice-option-down" data-choice-option-id="${escapeAttr(optionId)}">&#8595;</button>
         <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete choice"))}" data-action="delete-choice-option" data-choice-option-id="${escapeAttr(optionId)}">x</button>
       </header>
-      <label class="field">
-        <span>${t("Requires")}</span>
-        <input data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-field="requires" value="${escapeAttr(option.requires || "")}" placeholder="trust_level >= 2" spellcheck="false">
-      </label>
+      <section class="choice-option-condition${conditionExpanded ? " expanded" : ""}" data-choice-option-id="${escapeAttr(optionId)}">
+        <header class="choice-option-condition-head">
+          <button class="choice-option-condition-toggle" type="button" data-action="toggle-choice-option-condition-expanded" data-choice-option-id="${escapeAttr(optionId)}" aria-expanded="${conditionExpanded ? "true" : "false"}">
+            <span class="choice-option-condition-caret" aria-hidden="true">${conditionExpanded ? "▾" : "▸"}</span>
+            <span>${t("Choice requirements")} (${conditionCount})</span>
+          </button>
+          <button class="small-button" type="button" data-action="add-choice-option-condition" data-choice-option-id="${escapeAttr(optionId)}">${t("Add condition")}</button>
+        </header>
+        ${conditionExpanded
+          ? `<div class="choice-option-condition-body">${renderChoiceOptionConditionControl(optionId, option.requires || "", option.requiresMode)}</div>`
+          : ""}
+      </section>
       <section class="choice-option-effects${expanded ? " expanded" : ""}" data-choice-option-id="${escapeAttr(optionId)}">
         <header class="choice-option-effects-head">
           <button class="choice-option-effects-toggle" type="button" data-action="toggle-choice-option-expanded" data-choice-option-id="${escapeAttr(optionId)}" aria-expanded="${expanded ? "true" : "false"}">
@@ -4809,18 +8914,77 @@ function renderChoiceOptionCard(option, index) {
           <button class="small-button" type="button" data-action="add-choice-option-effect" data-choice-option-id="${escapeAttr(optionId)}">${t("Add effect")}</button>
         </header>
         ${expanded ? `<div class="choice-option-effect-list">
-          ${effects.length === 0 ? `<div class="nc-empty-state">${t("No effects.")}</div>` : effects.map((effect, effectIndex) => renderChoiceOptionEffectRow(effect, optionId, effectIndex)).join("")}
+          ${renderChoiceOptionEffectDraft(optionId)}
+          ${renderPlaybookEffectsCodeCell({
+            value: formatChoiceOptionEffectsText(option),
+            attributes: `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-field="effects"`,
+            defaultTrigger: "onChoose"
+          })}
         </div>` : ""}
       </section>
     </article>
   `;
 }
 
-function isChoiceOptionExpanded(optionId, effectsCount) {
-  if (!optionId) return effectsCount > 0;
+function renderChoiceOptionConditionControl(optionId, expression, mode = "all") {
+  const groupMode = getConditionGroupModeForExpression(expression, mode);
+  const status = getConditionEvaluationStatus(expression, state.project.variables);
+  return `
+    <label class="condition-relation-field">
+      <span>${t("Condition relation")}</span>
+      <select data-choice-option-id="${escapeAttr(optionId)}" data-choice-condition-field="mode">
+        ${renderConditionGroupModeOptions(groupMode)}
+      </select>
+    </label>
+    ${renderChoiceOptionConditionDraft(optionId)}
+    <div class="playbook-code-cell">
+      <textarea class="playbook-code-editor playbook-condition-code-editor" data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-field="requires" spellcheck="false" placeholder="${escapeAttr(t("Condition expression"))}">${escapeHtml(expression || "")}</textarea>
+      ${renderPlaybookCodeStatus(status)}
+    </div>
+  `;
+}
+
+function renderChoiceOptionConditionDraft(optionId) {
+  if (!(state.choiceConditionDraftIds instanceof Set) || !state.choiceConditionDraftIds.has(optionId)) return "";
+  return renderConditionDraftRow({
+    action: "commit-choice-option-condition-draft",
+    conditionId: optionId
+  });
+}
+
+function getChoiceOptionConditionCount(expression) {
+  const text = normalizeOptionalString(expression).trim();
+  if (!text) return 0;
+  const model = parseConditionBuilderExpression(text);
+  return model.custom ? 1 : model.clauses.length;
+}
+
+function isChoiceOptionConditionExpanded(optionId) {
+  if (!optionId) return false;
+  if (state.choiceConditionDraftIds instanceof Set && state.choiceConditionDraftIds.has(optionId)) return true;
+  const set = state.choiceOptionConditionExpandedIds;
+  return set instanceof Set && set.has(optionId);
+}
+
+function setChoiceOptionConditionExpanded(optionId, open) {
+  if (!optionId) return;
+  if (!(state.choiceOptionConditionExpandedIds instanceof Set)) state.choiceOptionConditionExpandedIds = new Set();
+  const set = state.choiceOptionConditionExpandedIds;
+  if (open) set.add(optionId);
+  else set.delete(optionId);
+}
+
+function toggleChoiceOptionConditionExpanded(optionId) {
+  if (!optionId) return;
+  setChoiceOptionConditionExpanded(optionId, !isChoiceOptionConditionExpanded(optionId));
+  const node = getSelectedChoiceNode();
+  if (node) renderNodePanel(node);
+}
+
+function isChoiceOptionExpanded(optionId, _effectsCount) {
+  if (!optionId) return false;
   const set = state.choiceOptionExpandedIds;
-  if (set instanceof Set && set.has(optionId)) return true;
-  return effectsCount > 0 && !(set instanceof Set && set.has(`~${optionId}`));
+  return set instanceof Set && set.has(optionId);
 }
 
 function setChoiceOptionExpanded(optionId, open) {
@@ -4829,10 +8993,8 @@ function setChoiceOptionExpanded(optionId, open) {
   const set = state.choiceOptionExpandedIds;
   if (open) {
     set.add(optionId);
-    set.delete(`~${optionId}`);
   } else {
     set.delete(optionId);
-    set.add(`~${optionId}`);
   }
 }
 
@@ -4846,14 +9008,26 @@ function toggleChoiceOptionExpanded(optionId) {
   if (node) renderNodePanel(node);
 }
 
+function renderChoiceOptionEffectDraft(optionId) {
+  if (!(state.choiceEffectDraftIds instanceof Set) || !state.choiceEffectDraftIds.has(optionId)) return "";
+  return renderEffectDraftRow({
+    action: "commit-choice-option-effect-draft",
+    defaultTrigger: "onChoose",
+    includeTrigger: false,
+    effectId: optionId
+  });
+}
+
 function renderChoiceOptionEffectRow(effect, optionId, effectIndex) {
   return `
-    <div class="node-effect-row">
-      <select data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="op">
-        ${renderPlaybookOptionList(PLAYBOOK_ACTION_OPERATIONS, effect.op)}
-      </select>
-      <input data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="key" value="${escapeAttr(effect.key || "")}" placeholder="${escapeAttr(t("State key"))}" spellcheck="false">
-      <input data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="value" value="${escapeAttr(effect.value || "")}" placeholder="${escapeAttr(t("Value"))}" spellcheck="false">
+    <div class="node-effect-row no-trigger">
+      ${renderStateKeySelect({
+        attributes: `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="key"`,
+        selected: effect.key || "",
+        placeholder: "State key"
+      })}
+      ${renderStateEffectOperationControl(effect, `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="op"`)}
+      ${renderStateEffectValueControl(effect, `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="value"`)}
       <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete effect"))}" data-action="delete-choice-option-effect" data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}">x</button>
     </div>
   `;
@@ -4903,7 +9077,7 @@ function renderStoryList(entries, parentId, depth, sequenceMap) {
     <div class="${listClass}" data-story-parent-id="${escapeAttr(parentId)}">
       ${entries.length
         ? entries.map((entry) => renderStoryEntry(entry, parentId, depth, sequenceMap)).join("")
-        : (depth ? `<div class="story-empty-drop">Drop nodes here</div>` : `<div class="nc-empty-state">No entry path found.</div>`)}
+        : (depth ? `<div class="story-empty-drop">${t("Drop nodes here")}</div>` : `<div class="nc-empty-state">${t("No entry path found.")}</div>`)}
     </div>
   `;
 }
@@ -4934,10 +9108,10 @@ function renderStoryEntry(entry, parentId, depth, sequenceMap) {
       <span class="story-drag-handle" aria-hidden="true">::</span>
       <div class="story-item-main">
         <span class="story-item-title">${escapeHtml(formatStoryIndex(sequence))} ${escapeHtml(getNodeDisplayTitle(node, label))}</span>
-        <span class="story-item-meta">${escapeHtml(label)} ${escapeHtml(getNodeDisplayId(node))}${entry.children.length ? ` - ${entry.children.length} inside` : ""}</span>
+        <span class="story-item-meta">${escapeHtml(label)} ${escapeHtml(getNodeDisplayId(node))}${entry.children.length ? ` - ${escapeHtml(t("{count} inside", { count: entry.children.length }))}` : ""}</span>
       </div>
       ${isFrameNode(node) ? `<button class="story-collapse-button" data-action="toggle-frame-collapse" data-node-id="${escapeAttr(node.id)}">${collapsed ? "+" : "-"}</button>` : ""}
-      <button class="story-focus-button" data-action="focus-canvas-node" data-node-id="${escapeAttr(node.id)}">Focus</button>
+      <button class="story-focus-button" data-action="focus-canvas-node" data-node-id="${escapeAttr(node.id)}">${t("Focus")}</button>
     </div>
   `;
 
@@ -5152,9 +9326,22 @@ function handleDocumentClick(event) {
   handleDocumentClickEvent(event);
 }
 
+function handlePlayDebugToggle(event) {
+  const details = event.target;
+  if (!(details instanceof HTMLDetailsElement) || !details.classList.contains("play-debug")) return;
+  state.playDebugOpen = details.open;
+}
+
 function handleDocumentClickEvent(event, retarget = null) {
   const target = retarget || getCanvasCoveredFrameTarget(event) || event.target;
   if (!isNarrativeCanvasTarget(target)) return;
+  const nodeId = getCanvasNodeIdFromTargetForClick(target, event);
+  if (state.ignoreNextCanvasClick) {
+    const shouldIgnore = state.ignoreNextCanvasClickTargetId == null || state.ignoreNextCanvasClickTargetId === nodeId;
+    state.ignoreNextCanvasClick = false;
+    state.ignoreNextCanvasClickTargetId = null;
+    if (shouldIgnore) return true;
+  }
 
   const mentionOption = target.closest("[data-mention-index]");
   if (mentionOption && state.mention) {
@@ -5179,7 +9366,8 @@ function handleDocumentClickEvent(event, retarget = null) {
   const port = target.closest("[data-port]");
   const link = target.closest("[data-link-id]");
   const node = target.closest("[data-node-id]");
-  const canvasNode = target.closest(".node[data-node-id]");
+  const canvasNode = target.closest(".node[data-node-id]") || (nodeId ? getNodeElementById(nodeId) : null);
+  const canvasNodeData = nodeId ? getNode(nodeId) : null;
 
   if (shouldKeepInlineNodeEditForTarget(target)) {
     state.lastNodeClick = { id: null, time: 0 };
@@ -5256,12 +9444,12 @@ function handleDocumentClickEvent(event, retarget = null) {
     return true;
   }
 
-  if (node) {
+  if (nodeId) {
     if (event.shiftKey || event.ctrlKey || event.metaKey) {
-      toggleNodeSelection(node.dataset.nodeId);
+      toggleNodeSelection(nodeId);
       return true;
     }
-    focusCanvasNode(node.dataset.nodeId);
+    focusCanvasNode(nodeId);
     return true;
   } else {
     state.lastNodeClick = { id: null, time: 0 };
@@ -5527,6 +9715,14 @@ function handleAction(target) {
   if (action === "show-more-document") showMoreDocument(target.dataset.documentId);
   if (action === "add-node-cast") addNodeCast();
   if (action === "delete-node-cast") deleteNodeCast(Number(target.dataset.nodeCastIndex));
+  if (action === "show-node-condition-draft") showNodeConditionDraft();
+  if (action === "commit-node-condition-draft") commitNodeConditionDraft(target);
+  if (action === "add-node-condition-clause") addNodeConditionClause();
+  if (action === "delete-node-condition-clause") deleteNodeConditionClause(Number(target.dataset.conditionIndex));
+  if (action === "add-direct-node-condition") addDirectNodeCondition();
+  if (action === "delete-direct-node-condition") deleteDirectNodeCondition(Number(target.dataset.conditionIndex));
+  if (action === "show-node-effect-draft") showNodeEffectDraft();
+  if (action === "commit-node-effect-draft") commitNodeEffectDraft(target);
   if (action === "add-node-effect") addNodeEffect();
   if (action === "delete-node-effect") deleteNodeEffect(Number(target.dataset.nodeEffectIndex));
   if (action === "add-choice-option") addChoiceOption();
@@ -5534,8 +9730,14 @@ function handleAction(target) {
   if (action === "move-choice-option-up") moveChoiceOption(target.dataset.choiceOptionId, -1);
   if (action === "move-choice-option-down") moveChoiceOption(target.dataset.choiceOptionId, 1);
   if (action === "add-choice-option-effect") addChoiceOptionEffect(target.dataset.choiceOptionId);
+  if (action === "commit-choice-option-condition-draft") commitChoiceOptionConditionDraft(target);
+  if (action === "commit-choice-option-effect-draft") commitChoiceOptionEffectDraft(target);
   if (action === "delete-choice-option-effect") deleteChoiceOptionEffect(target.dataset.choiceOptionId, Number(target.dataset.choiceOptionEffectIndex));
+  if (action === "add-choice-option-condition") addChoiceOptionCondition(target.dataset.choiceOptionId);
+  if (action === "delete-choice-option-condition") deleteChoiceOptionCondition(target.dataset.choiceOptionId, Number(target.dataset.conditionIndex));
+  if (action === "toggle-choice-option-condition-expanded") toggleChoiceOptionConditionExpanded(target.dataset.choiceOptionId);
   if (action === "toggle-choice-option-expanded") toggleChoiceOptionExpanded(target.dataset.choiceOptionId);
+  if (action === "toggle-node-section") toggleNodeSection(target.dataset.nodeSection);
   if (action === "add-dialog-turn") addDialogTurn();
   if (action === "delete-dialog-turn") deleteDialogTurn(Number(target.dataset.dialogTurnIndex));
   if (action === "copy-dialog-turn") copyDialogTurn(Number(target.dataset.dialogTurnIndex));
@@ -5543,20 +9745,33 @@ function handleAction(target) {
   if (action === "move-dialog-turn-down") moveDialogTurn(Number(target.dataset.dialogTurnIndex), 1);
   if (action === "convert-legacy-node") convertLegacyNode(state.selectedNodeId);
   if (action === "add-variable") addVariable();
-  if (action === "add-playbook-action") addPlaybookAction();
+  if (action === "show-playbook-action-draft") showPlaybookActionDraft();
+  if (action === "commit-playbook-action-draft") commitPlaybookActionDraft(target);
   if (action === "add-play-rule") showPlayRuleDialog();
   if (action === "create-play-rule") addPlaybookRule(target.dataset.playbookRuleKind);
   if (action === "toggle-playbook-json") togglePlaybookJson();
   if (action === "select-playbook-tab") selectPlaybookTab(target.dataset.playbookTab);
   if (action === "filter-playbook-category") filterPlaybookCategory(target.dataset.playbookCategory);
   if (action === "focus-playbook-json") showPlaybookJsonAtToken(target.dataset.playbookToken);
+  if (action === "show-playbook-choice-effect-draft") showPlaybookChoiceEffectDraft(target.dataset.gateId);
+  if (action === "commit-playbook-choice-effect-draft") commitPlaybookChoiceEffectDraft(target);
+  if (action === "delete-playbook-choice-effect") deletePlaybookChoiceEffect(target.dataset.gateId, Number(target.dataset.gateEffectIndex));
+  if (action === "add-gate-condition") addGateCondition(target.dataset.gateId);
+  if (action === "delete-gate-condition") deleteGateCondition(target.dataset.gateId, Number(target.dataset.conditionIndex));
+  if (action === "add-script-node-condition") addScriptNodeCondition(target.dataset.scriptNodeId);
+  if (action === "delete-script-node-condition") deleteScriptNodeCondition(target.dataset.scriptNodeId, Number(target.dataset.conditionIndex));
   if (action === "delete-playbook-rule") deletePlaybookRule(target.dataset.playbookRuleTarget);
   if (action === "add-playbook-node-rule") addPlaybookNodeRule();
   if (action === "add-playbook-choice-rule") addPlaybookChoiceRule();
   if (action === "add-playbook-state-rules") addPlaybookStateRules();
+  if (action === "playbook-help-prev") setPlaybookHelpPage(state.playbookHelpPage - 1);
+  if (action === "playbook-help-next") setPlaybookHelpPage(state.playbookHelpPage + 1);
+  if (action === "playbook-help-page") setPlaybookHelpPage(Number(target.dataset.playbookHelpPage));
+  if (action === "migrate-legacy-gate") migrateLegacyGateAction(target.dataset.playbookActionId);
   if (action === "delete-playbook-action") deletePlaybookAction(target.dataset.playbookActionId);
   if (action === "delete-variable") deleteVariable(target.dataset.variableKey);
   if (action === "show-playbook-help") showPlaybookHelp();
+  if (action === "toggle-playbook-rule-help") togglePlaybookRuleHelp(target.dataset.playbookRuleHelp);
   if (action === "auto-layout") autoLayoutCanvas(target.dataset.layoutOrientation);
   if (action === "zoom-in") setZoom(state.view.scale + 0.1);
   if (action === "zoom-out") setZoom(state.view.scale - 0.1);
@@ -5565,17 +9780,30 @@ function handleAction(target) {
   if (action === "center-view") centerView();
   if (action === "export-all") exportAll();
   if (action === "export-json") exportJson();
+  if (action === "export-story-md") exportStoryMarkdown();
+  if (action === "import-story-md") importStoryMarkdownFromUi();
+  if (action === "export-story-layout") exportStoryLayoutJson();
+  if (action === "import-story-layout") importStoryLayoutFromUi();
+  if (action === "export-state-schema") exportStateSchemaJson();
+  if (action === "import-state-schema") importStateSchemaFromUi();
+  if (action === "export-profile") exportProfileJson();
+  if (action === "export-runtime-json") exportRuntimeJson();
+  if (action === "export-yarn") exportYarn();
+  if (action === "export-ink") exportInk();
+  if (action === "export-twee") exportTwee();
   if (action === "export-characters-md") exportCharactersMarkdown();
   if (action === "export-characters-json") exportCharactersJson();
   if (action === "export-image") exportImage();
-  if (action === "export-html") exportHtml();
   if (action === "export-variables-json") exportVariablesJson();
   if (action === "export-event-sheet") exportEventSheetCsv();
   if (action === "export-event-sheet-json") exportEventSheetJson();
   if (action === "clear-event-search") clearEventSearch();
-  if (action === "rename-event-column") renameEventColumn(target.dataset.eventColumnKey);
+  if (action === "rename-event-column") renameEventColumn(
+    target.dataset.eventColumnKey,
+    target.closest("[data-event-group-type]")?.dataset.eventGroupType || target.dataset.eventType || null
+  );
   if (action === "hide-event-column") hideEventColumn(target.dataset.eventColumnKey);
-  if (action === "delete-event-column") showEventColumnDeleteConfirm(target.dataset.eventColumnKey);
+  if (action === "delete-event-column") showEventColumnDeleteConfirm(target.dataset.eventColumnKey, target.closest("[data-event-group-type]")?.dataset.eventGroupType || null);
   if (action === "show-event-column") showEventColumn(target.dataset.eventColumnKey);
   if (action === "reset-event-columns") showResetEventColumnsConfirm();
   if (action === "hide-event-frame-type") hideEventFrameType(target.dataset.eventFrameType);
@@ -5602,6 +9830,7 @@ function handleAction(target) {
   if (action === "play-dialog-next") advanceDialogTurn(1);
   if (action === "play-dialog-prev") advanceDialogTurn(-1);
   if (action === "play-prev") previousPreview();
+  if (action === "play-manual") executePreviewManualAction(target.dataset.nodeId, target.dataset.playbookActionId);
   if (action === "restart-play") openPreview();
   commitHistoryFromSnapshot(historyBefore);
 }
@@ -5623,6 +9852,59 @@ async function openProjectFileFromUiConfirmed() {
     }
     return;
   }
+  state.pendingImportKind = "json";
+  if (dom.fileInput) dom.fileInput.accept = "application/json,.json,.ncanvas,.narrativecanvas";
+  dom.fileInput?.click();
+}
+
+function importStoryMarkdownFromUi() {
+  showGenericConfirm({
+    kicker: "Import MD",
+    title: "Import Story Markdown?",
+    message: "Choose a Story Markdown file and replace the current canvas project. This does not watch files, merge external edits, or preserve canvas-only fields unless you also keep the layout sidecar.",
+    confirmLabel: "Import MD",
+    danger: true,
+    onConfirm: () => importStoryMarkdownFromUiConfirmed()
+  });
+}
+
+function importStoryMarkdownFromUiConfirmed() {
+  state.pendingImportKind = "story-md";
+  if (dom.fileInput) dom.fileInput.accept = "text/markdown,.md,.markdown";
+  dom.fileInput?.click();
+}
+
+function importStoryLayoutFromUi() {
+  showGenericConfirm({
+    kicker: "Import Layout",
+    title: "Import Story Layout?",
+    message: "Choose a Layout JSON sidecar and apply canvas positions, frame membership, ports, collapsed state, and matching link metadata. Story nodes are not created or deleted.",
+    confirmLabel: "Import Layout",
+    danger: true,
+    onConfirm: () => importStoryLayoutFromUiConfirmed()
+  });
+}
+
+function importStoryLayoutFromUiConfirmed() {
+  state.pendingImportKind = "story-layout";
+  if (dom.fileInput) dom.fileInput.accept = "application/json,.json";
+  dom.fileInput?.click();
+}
+
+function importStateSchemaFromUi() {
+  showGenericConfirm({
+    kicker: "Import State",
+    title: "Import State Schema?",
+    message: "Choose a State Schema JSON file and replace current project variables with its initial values. Nodes and links stay unchanged.",
+    confirmLabel: "Import State",
+    danger: true,
+    onConfirm: () => importStateSchemaFromUiConfirmed()
+  });
+}
+
+function importStateSchemaFromUiConfirmed() {
+  state.pendingImportKind = "state-schema";
+  if (dom.fileInput) dom.fileInput.accept = "application/json,.json,.schema.json";
   dom.fileInput?.click();
 }
 
@@ -5693,11 +9975,19 @@ function confirmDiscardUnsavedProject(message, onConfirm) {
 }
 
 function showPlaybookHelp() {
+  renderPlaybookHelpDialog();
   if (dom.playbookHelpDialog?.showModal) {
     if (!dom.playbookHelpDialog.open) dom.playbookHelpDialog.showModal();
     return;
   }
-  window.alert?.(t(`${PLAYBOOK_FILE_NAME} stores variables, node logic, and demo runner rules. Variables define state. Script Builder batch-edits node Requirements, Effects, and Routing. Play Rules only control the sample runner: start node, choice display, end condition, visit tracking, and debug mode. It does not run JavaScript or replace a game engine.`));
+  window.alert?.(t(`${PLAYBOOK_FILE_NAME} stores runtime variable definitions, node logic rows, Variable Actions, and Play preview rules. Variable Definitions define state. Script Builder edits node Requirements, Effects, and Routing. Variable Actions keep manual or imported state writes outside node rows. Preview rules only control the Play dialog: start node, end condition, debug details, and temporary visit tracking. Validation checks keys and export risks before you ship files.`));
+}
+
+function setPlaybookHelpPage(page) {
+  const pages = getPlaybookHelpPages();
+  const maxPage = Math.max(0, pages.length - 1);
+  state.playbookHelpPage = Math.min(Math.max(Number.isFinite(page) ? page : 0, 0), maxPage);
+  renderPlaybookHelpDialog();
 }
 
 function showPlayRuleDialog() {
@@ -5712,7 +10002,7 @@ function showPlayRuleDialog() {
 
 function getFirstDisabledPlayRuleKind() {
   const rules = getRunnerRules();
-  return ["startNode", "choiceDisplay", "endCondition", "visitTracking", "debugMode"]
+  return ["startNode", "endCondition", "debugMode"]
     .find((key) => !rules[key]?.enabled) || "";
 }
 
@@ -5724,14 +10014,17 @@ function refreshPlayRuleDialogAvailability() {
   dialog.querySelectorAll("[data-playbook-rule-kind]").forEach((button) => {
     const kind = button.dataset.playbookRuleKind;
     const enabled = Boolean(rules[kind]?.enabled);
+    const locked = false;
     button.hidden = enabled;
-    button.disabled = enabled;
+    button.disabled = enabled || locked;
+    if (locked) button.setAttribute("title", t("Enable Debug Mode before Visit Tracking."));
+    else button.removeAttribute("title");
     if (!enabled) remaining += 1;
   });
   const allSetMessage = dialog.querySelector("[data-playbook-rule-allset]");
   if (allSetMessage) {
     allSetMessage.hidden = remaining > 0;
-    allSetMessage.textContent = t("All play rules already enabled.");
+    allSetMessage.textContent = t("All preview rules already enabled.");
   }
 }
 
@@ -6024,10 +10317,10 @@ function getEditableHistoryKey(target) {
   if (!target?.dataset) return "";
   if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
   const parts = [];
-  ["projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "playbookActionField", "scriptNodeField", "runnerRuleField"].forEach((name) => {
+  ["projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionEffectField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
-  ["nodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "nodeEffectIndex", "playbookActionId", "scriptNodeId"].forEach((name) => {
+  ["nodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
   return parts.join("|");
@@ -6071,9 +10364,11 @@ function commitFocusedEdit(target) {
 
 function handleInput(event) {
   const target = event.target;
-  if (!isNarrativeCanvasTarget(target)) return;
-
-  updateMentionFromTarget(target);
+  const isMentionTarget = isMentionField(target);
+  if (isMentionTarget) {
+    updateMentionFromTarget(target);
+  }
+  if (!isMentionTarget && !isNarrativeCanvasTarget(target)) return;
 
   if (target === dom.queryInput) {
     state.search = target.value;
@@ -6133,6 +10428,21 @@ function handleInput(event) {
     return;
   }
 
+  if (target.dataset.draftField && target.closest(".playbook-action-draft-row")) {
+    syncPlaybookActionDraftFromRow(target.closest(".playbook-action-draft-row"));
+    return;
+  }
+
+  if (target.dataset.draftField && target.closest(".effect-draft-row")) {
+    syncEffectDraftRow(target.closest(".effect-draft-row"), target.dataset.draftField);
+    return;
+  }
+
+  if (target.dataset.draftField && target.closest(".condition-draft-row")) {
+    syncConditionDraftRow(target.closest(".condition-draft-row"), target.dataset.draftField);
+    return;
+  }
+
   if (target.dataset.eventField) {
     setEventField(target.dataset.eventNodeId, target.dataset.eventField, target.value, false);
     return;
@@ -6140,6 +10450,14 @@ function handleInput(event) {
 
   if (target.dataset.nodeCastField) {
     setNodeCastField(Number(target.dataset.nodeCastIndex), target.dataset.nodeCastField, target.value, false);
+    return;
+  }
+  if (target.dataset.nodeConditionField) {
+    setNodeConditionPart(target.dataset.nodeConditionField, target.value, Number(target.dataset.conditionIndex), false);
+    return;
+  }
+  if (target.dataset.directNodeConditionField) {
+    setDirectNodeConditionPart(target.dataset.directNodeConditionField, target.value, Number(target.dataset.conditionIndex), false);
     return;
   }
   if (target.dataset.nodeLogicField) {
@@ -6156,6 +10474,11 @@ function handleInput(event) {
   }
   if (target.dataset.choiceOptionField) {
     setChoiceOptionField(target.dataset.choiceOptionId, target.dataset.choiceOptionField, target.value, false);
+    updatePlaybookCodeStatusForControl(target);
+    return;
+  }
+  if (target.dataset.choiceConditionField) {
+    setChoiceOptionConditionPart(target.dataset.choiceOptionId, target.dataset.choiceConditionField, target.value, Number(target.dataset.conditionIndex), false);
     return;
   }
   if (target.dataset.choiceOptionEffectField) {
@@ -6166,8 +10489,26 @@ function handleInput(event) {
     setDialogTurnField(Number(target.dataset.dialogTurnIndex), target.dataset.dialogTurnField, target.value, false);
     return;
   }
+  if (target.dataset.scriptConditionField) {
+    setScriptNodeConditionPart(target.dataset.scriptNodeId, target.dataset.scriptConditionField, target.value, Number(target.dataset.conditionIndex), false);
+    return;
+  }
   if (target.dataset.scriptNodeField) {
     setScriptNodeField(target.dataset.scriptNodeId, target.dataset.scriptNodeField, target.value, false);
+    updatePlaybookCodeStatusForControl(target);
+    return;
+  }
+  if (target.dataset.gateField) {
+    setGateField(target.dataset.gateId, target.dataset.gateField, target.value, false);
+    updatePlaybookCodeStatusForControl(target);
+    return;
+  }
+  if (target.dataset.gateConditionField) {
+    setGateConditionPart(target.dataset.gateId, target.dataset.gateConditionField, target.value, Number(target.dataset.conditionIndex), false);
+    return;
+  }
+  if (target.dataset.gateEffectField) {
+    setChoiceOptionEffectByGateId(target.dataset.gateEffectId, Number(target.dataset.gateEffectIndex), target.dataset.gateEffectField, target.value, false);
     return;
   }
   if (target.dataset.runnerRuleField) {
@@ -6231,6 +10572,26 @@ function handleChange(event) {
     commitFocusedEdit(target);
     return;
   }
+  if (target.dataset.draftField && target.closest(".playbook-action-draft-row")) {
+    const row = target.closest(".playbook-action-draft-row");
+    syncPlaybookActionDraftFromRow(row);
+    if (target.dataset.draftField === "key" || target.dataset.draftField === "op") {
+      normalizePlaybookActionDraft({ resetValue: target.dataset.draftField === "key", coerceValue: target.dataset.draftField === "op" });
+      renderPlaybookSurfaces();
+    }
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.draftField && target.closest(".effect-draft-row")) {
+    syncEffectDraftRow(target.closest(".effect-draft-row"), target.dataset.draftField);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.draftField && target.closest(".condition-draft-row")) {
+    syncConditionDraftRow(target.closest(".condition-draft-row"), target.dataset.draftField);
+    commitFocusedEdit(target);
+    return;
+  }
   if (target.dataset.eventField) {
     setEventField(target.dataset.eventNodeId, target.dataset.eventField, target.value, true);
     commitFocusedEdit(target);
@@ -6238,6 +10599,16 @@ function handleChange(event) {
   }
   if (target.dataset.nodeCastField) {
     setNodeCastField(Number(target.dataset.nodeCastIndex), target.dataset.nodeCastField, target.value, true);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.nodeConditionField) {
+    setNodeConditionPart(target.dataset.nodeConditionField, target.value, Number(target.dataset.conditionIndex), true);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.directNodeConditionField) {
+    setDirectNodeConditionPart(target.dataset.directNodeConditionField, target.value, Number(target.dataset.conditionIndex), true);
     commitFocusedEdit(target);
     return;
   }
@@ -6258,6 +10629,12 @@ function handleChange(event) {
   }
   if (target.dataset.choiceOptionField) {
     setChoiceOptionField(target.dataset.choiceOptionId, target.dataset.choiceOptionField, target.value, true);
+    updatePlaybookCodeStatusForControl(target);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.choiceConditionField) {
+    setChoiceOptionConditionPart(target.dataset.choiceOptionId, target.dataset.choiceConditionField, target.value, Number(target.dataset.conditionIndex), true);
     commitFocusedEdit(target);
     return;
   }
@@ -6272,13 +10649,41 @@ function handleChange(event) {
     commitFocusedEdit(target);
     return;
   }
+  if (target.dataset.scriptConditionField) {
+    setScriptNodeConditionPart(target.dataset.scriptNodeId, target.dataset.scriptConditionField, target.value, Number(target.dataset.conditionIndex), true);
+    commitFocusedEdit(target);
+    return;
+  }
   if (target.dataset.scriptNodeField) {
     setScriptNodeField(target.dataset.scriptNodeId, target.dataset.scriptNodeField, target.value, true);
+    updatePlaybookCodeStatusForControl(target);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.gateField) {
+    setGateField(target.dataset.gateId, target.dataset.gateField, target.value, true);
+    updatePlaybookCodeStatusForControl(target);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.gateConditionField) {
+    setGateConditionPart(target.dataset.gateId, target.dataset.gateConditionField, target.value, Number(target.dataset.conditionIndex), true);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.gateEffectField) {
+    const rerender = target.dataset.gateEffectField !== "value";
+    setChoiceOptionEffectByGateId(target.dataset.gateEffectId, Number(target.dataset.gateEffectIndex), target.dataset.gateEffectField, target.value, rerender);
     commitFocusedEdit(target);
     return;
   }
   if (target.dataset.runnerRuleField) {
     setRunnerRuleField(target.dataset.runnerRuleField, getRunnerRuleInputValue(target), true);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.runnerRuleEnabled) {
+    setRunnerRuleEnabled(target.dataset.runnerRuleEnabled, Boolean(target.checked), true);
     commitFocusedEdit(target);
     return;
   }
@@ -6793,6 +11198,7 @@ function isNarrativeCanvasTarget(target) {
     || dom.nodeIconDialog?.contains(target)
     || dom.nodeTypeDialog?.contains(target)
     || dom.playDialog?.contains(target)
+    || dom.exportReportDialog?.contains(target)
     || dom.confirmDialog?.contains(target)
     || dom.eventColumnDeleteDialog?.contains(target)
     || dom.eventColumnsResetDialog?.contains(target)
@@ -6806,7 +11212,7 @@ function isNarrativeCanvasTarget(target) {
 
 function isNarrativeCanvasClickDelegateTarget(target) {
   if (!target?.closest) return false;
-  const actionable = target.closest("[data-mention-index], [data-layer-action], [data-sidebar-toggle], [data-action], [data-file-id], [data-panel], [data-port], [data-link-id], [data-node-id], .node[data-node-id]");
+  const actionable = target.closest("[data-mention-index], [data-layer-action], [data-sidebar-toggle], [data-action], [data-file-id], [data-panel], [data-port], [data-link-id], [data-node-id], .node[data-node-id], .node-stack[data-node-stack-id]");
   return Boolean(actionable && getNarrativeCanvasScopeForTarget(target));
 }
 
@@ -6815,8 +11221,26 @@ function getCanvasCoveredFrameTarget(event) {
   const stack = document.elementsFromPoint(event.clientX, event.clientY);
   return stack.find((element) => {
     if (!dom.frameLayer?.contains(element)) return false;
-    return Boolean(element.closest?.("[data-action], [data-drag-handle], [data-resize-handle], [data-port], .node[data-node-id]"));
+    return Boolean(element.closest?.("[data-action], [data-drag-handle], [data-resize-handle], [data-port], .node[data-node-id], .node-stack[data-node-stack-id]"));
   }) || null;
+}
+
+function getCanvasNodeIdFromTargetForClick(target, event = null) {
+  const directNodeId = target?.closest?.("[data-node-id]")?.dataset?.nodeId;
+  if (directNodeId && getNode(directNodeId)) return directNodeId;
+
+  const directStackId = target?.closest?.(".node-stack[data-node-stack-id]")?.dataset?.nodeStackId;
+  if (directStackId && getNode(directStackId)) return directStackId;
+
+  if (!event || typeof event.clientX !== "number" || typeof document.elementsFromPoint !== "function") return null;
+  const stack = document.elementsFromPoint(event.clientX, event.clientY);
+  const found = stack.find((element) => {
+    const stackTarget = element?.closest?.(".node-stack[data-node-stack-id]");
+    if (!stackTarget) return false;
+    const candidateNodeId = stackTarget.dataset?.nodeStackId;
+    return Boolean(candidateNodeId && getNode(candidateNodeId));
+  });
+  return found?.closest?.(".node-stack[data-node-stack-id]")?.dataset?.nodeStackId || null;
 }
 
 function getNarrativeCanvasScopeForTarget(target) {
@@ -6883,7 +11307,9 @@ function handleViewportPointerDown(event) {
     if (!node) return;
     const size = nodeSize(node);
     beginGeometryHistoryCapture(node);
-    selectNode(node.id, false);
+    if (!isFrameNode(node)) {
+      selectNode(node.id, false);
+    }
     // Cache the element + incident link elements AFTER selectNode re-rendered, so
     // the move handler can patch them in place without re-querying or re-rendering.
     state.resizingNode = {
@@ -6891,11 +11317,14 @@ function handleViewportPointerDown(event) {
       handle: resizeHandle.dataset.resizeHandle,
       startX: event.clientX,
       startY: event.clientY,
+      didMove: false,
       width: size.width,
       height: size.height,
       element: getNodeElementById(node.id),
       ports: getNodePortElementsById(node.id),
-      linkRefs: collectLinkElementRefs(getIncidentLinks(node.id))
+      linkRefs: collectLinkElementRefs(getIncidentLinks(node.id)),
+      frameContainmentBeforeFrameId: isFrameNode(node) ? node.id : null,
+      frameContainmentBefore: isFrameNode(node) ? getFrameVisualContainedNodeIds(node) : null
     };
     safeSetPointerCapture(dom.viewport, event.pointerId);
     event.preventDefault();
@@ -6911,7 +11340,7 @@ function handleViewportPointerDown(event) {
     const dragNodeIds = getDragNodeIdsForDrag(node);
     const dragNodes = dragNodeIds.map(getNode).filter(Boolean);
     beginGeometryHistoryCapture(dragNodes);
-    if (!collectSelectedIds().includes(node.id)) {
+    if (isFrameNode(node) || !selected.includes(node.id)) {
       selectNode(node.id, false);
     }
     state.draggingNode = {
@@ -6921,11 +11350,14 @@ function handleViewportPointerDown(event) {
       nodePositions: dragNodes.map((item) => ({ id: item.id, x: item.x, y: item.y })),
       startX: event.clientX,
       startY: event.clientY,
+      didMove: false,
       nodeX: node.x,
       nodeY: node.y,
       element: dragNodeIds.length === 1 ? getNodeElementById(node.id) : null,
       ports: dragNodeIds.length === 1 ? getNodePortElementsById(node.id) : null,
-      linkRefs: collectLinkElementRefs(getIncidentLinksForNodes(dragNodeIds))
+      linkRefs: collectLinkElementRefs(getIncidentLinksForNodes(dragNodeIds)),
+      frameContainmentBeforeFrameId: baseNodeIds.length === 1 && isFrameNode(node) ? node.id : null,
+      frameContainmentBefore: baseNodeIds.length === 1 && isFrameNode(node) ? getFrameVisualContainedNodeIds(node) : null
     };
     safeSetPointerCapture(dom.viewport, event.pointerId);
     return;
@@ -7013,39 +11445,104 @@ function syncFrameMembershipAfterCanvasDrag(drag) {
   sanitizeFrameMembership(state.project);
 }
 
-function getFrameCaptureCandidates(frame) {
+function getFrameVisualContainedNodeIds(frame) {
   if (!frame || !isFrameNode(frame)) return [];
-  return state.project.nodes.filter((node) => {
-    if (!node || node.id === frame.id) return false;
-    if (normalizeOptionalString(node.frameId).trim() === frame.id) return false;
-    if (isFrameDescendantOf(node, frame.id)) return false;
-    if (isFrameNode(node) && wouldCreateFrameCycle(node.id, frame.id)) return false;
+  return state.project.nodes
+    .filter((node) => {
+      if (!node || node.id === frame.id) return false;
+      if (isFrameNode(node) && wouldCreateFrameCycle(node.id, frame.id)) return false;
+      return frameContainsNodeCenter(frame, node);
+    })
+    .map((node) => node.id);
+}
+
+function getFrameContainmentChange(frame, beforeIds) {
+  if (!Array.isArray(beforeIds)) return null;
+  const beforeList = beforeIds.filter((id) => getNode(id));
+  const afterList = getFrameVisualContainedNodeIds(frame);
+  const before = new Set(beforeList);
+  const after = new Set(afterList);
+  return {
+    beforeIds: beforeList,
+    afterIds: afterList,
+    addedIds: afterList.filter((id) => !before.has(id)),
+    removedIds: beforeList.filter((id) => !after.has(id))
+  };
+}
+
+function formatFrameContainmentSummary(change) {
+  const parts = [];
+  if (change.addedIds.length) parts.push(t("{count} entered", { count: change.addedIds.length }));
+  if (change.removedIds.length) parts.push(t("{count} left", { count: change.removedIds.length }));
+  return parts.join(", ");
+}
+
+function canCaptureNodeInFrame(frame, node) {
+  if (!frame || !isFrameNode(frame)) return false;
+  if (!node || node.id === frame.id) return false;
+  if (normalizeOptionalString(node.frameId).trim() === frame.id) return false;
+  if (isFrameDescendantOf(node, frame.id)) return false;
+  if (isFrameNode(node) && wouldCreateFrameCycle(node.id, frame.id)) return false;
+  return true;
+}
+
+function getFrameCaptureCandidates(frame, candidateIds = null) {
+  const nodes = Array.isArray(candidateIds) ? candidateIds.map(getNode).filter(Boolean) : state.project.nodes;
+  return nodes.filter((node) => {
+    if (!canCaptureNodeInFrame(frame, node)) return false;
     return frameContainsNodeCenter(frame, node);
   });
 }
 
-function maybePromptFrameCapture(frameId) {
+function getFrameEnteredCaptureCandidates(frame, enteredIds) {
+  return enteredIds
+    .map(getNode)
+    .filter((node) => canCaptureNodeInFrame(frame, node));
+}
+
+function maybePromptFrameCapture(frameId, beforeContainmentIds = null) {
   const frame = getNode(frameId);
   if (!frame || !isFrameNode(frame)) return;
-  const candidates = getFrameCaptureCandidates(frame);
-  if (!candidates.length) return;
-  const names = candidates.slice(0, 5).map((node) => node.title || getNodeDisplayId(node)).join(", ");
-  const more = candidates.length > 5 ? `, +${candidates.length - 5} more` : "";
+  const change = getFrameContainmentChange(frame, beforeContainmentIds);
+  if (!change || (!change.addedIds.length && !change.removedIds.length)) return;
+  const candidates = getFrameEnteredCaptureCandidates(frame, change.addedIds);
+  const removedMembers = change.removedIds
+    .map(getNode)
+    .filter((node) => normalizeOptionalString(node?.frameId).trim() === frame.id);
+  const summary = formatFrameContainmentSummary(change);
+  const frameName = frame.title || getNodeDisplayId(frame);
+  const hasWritableChanges = Boolean(candidates.length || removedMembers.length);
   showGenericConfirm({
     kicker: "Frame membership",
-    title: `Capture ${candidates.length} overlapping node${candidates.length === 1 ? "" : "s"}?`,
-    message: `"${frame.title || getNodeDisplayId(frame)}" now covers ${names}${more}. Capture them into this frame? Cancel leaves their frameId unchanged.`,
-    confirmLabel: "Capture nodes",
+    title: "Update frame membership?",
+    message: t("\"{frame}\" changed canvas containment: {summary}. Apply the current containment as this frame's membership?", { frame: frameName, summary }),
+    confirmLabel: "Update membership",
     danger: false,
-    recordHistory: true,
+    recordHistory: hasWritableChanges,
     onConfirm: () => {
+      let changed = false;
       candidates.forEach((node) => {
-        node.frameId = frame.id;
+        if (normalizeOptionalString(node.frameId).trim() !== frame.id) {
+          node.frameId = frame.id;
+          changed = true;
+        }
       });
-      sanitizeFrameMembership(state.project);
-      markProjectStructureChanged();
-      renderAll();
-      setStatus(`${candidates.length} node${candidates.length === 1 ? "" : "s"} captured into frame.`);
+      removedMembers.forEach((node) => {
+        const nextParent = getCanvasDropFrameForNode(node);
+        const nextFrameId = nextParent && nextParent.id !== frame.id ? nextParent.id : "";
+        if (normalizeOptionalString(node.frameId).trim() === frame.id && node.frameId !== nextFrameId) {
+          node.frameId = nextFrameId;
+          changed = true;
+        }
+      });
+      if (changed) {
+        sanitizeFrameMembership(state.project);
+        markProjectStructureChanged();
+        renderAll();
+        setStatus(t("Frame membership updated."));
+      } else {
+        setStatus(t("Frame membership already matches current canvas."));
+      }
     }
   });
 }
@@ -7239,6 +11736,13 @@ function handleViewportPointerMove(event) {
     return;
   }
   if (state.resizingNode) {
+    const resizeMoveX = event.clientX - state.resizingNode.startX;
+    const resizeMoveY = event.clientY - state.resizingNode.startY;
+    if (!state.resizingNode.didMove && (Math.abs(resizeMoveX) > 3 || Math.abs(resizeMoveY) > 3)) {
+      state.resizingNode.didMove = true;
+      state.ignoreNextCanvasClick = true;
+    }
+    if (!state.resizingNode.didMove) return;
     const node = getNode(state.resizingNode.id);
     if (!node) return;
     const handle = state.resizingNode.handle;
@@ -7265,8 +11769,15 @@ function handleViewportPointerMove(event) {
       renderLinks(context);
     }
   } else if (state.draggingNode) {
-    const deltaX = (event.clientX - state.draggingNode.startX) / state.view.scale;
-    const deltaY = (event.clientY - state.draggingNode.startY) / state.view.scale;
+    const moveX = event.clientX - state.draggingNode.startX;
+    const moveY = event.clientY - state.draggingNode.startY;
+    if (!state.draggingNode.didMove && (Math.abs(moveX) > 3 || Math.abs(moveY) > 3)) {
+      state.draggingNode.didMove = true;
+      state.ignoreNextCanvasClick = true;
+    }
+    if (!state.draggingNode.didMove) return;
+    const deltaX = moveX / state.view.scale;
+    const deltaY = moveY / state.view.scale;
     const positions = state.draggingNode.nodePositions || [];
     positions.forEach((position) => {
       const item = getNode(position.id);
@@ -7300,13 +11811,19 @@ function setNodePortFromBoardPoint(node, kind, point) {
   const size = nodeLayoutSize(node);
   const relX = clamp((point.x - node.x) / Math.max(1, size.width), 0, 1);
   const relY = clamp((point.y - node.y) / Math.max(1, size.height), 0, 1);
-  const distances = [
+  const outsideDistances = [
+    { side: "top", value: node.y - point.y, t: relX },
+    { side: "right", value: point.x - (node.x + size.width), t: relY },
+    { side: "bottom", value: point.y - (node.y + size.height), t: relX },
+    { side: "left", value: node.x - point.x, t: relY }
+  ].filter((item) => item.value > 0);
+  const distances = outsideDistances.length ? outsideDistances : [
     { side: "top", value: Math.abs(point.y - node.y), t: relX },
     { side: "right", value: Math.abs(point.x - (node.x + size.width)), t: relY },
     { side: "bottom", value: Math.abs(point.y - (node.y + size.height)), t: relX },
     { side: "left", value: Math.abs(point.x - node.x), t: relY }
   ];
-  const next = distances.sort((a, b) => a.value - b.value)[0];
+  const next = distances.sort((a, b) => outsideDistances.length ? b.value - a.value : a.value - b.value)[0];
   node.ports = normalizeNodePorts(node.ports, node);
   node.ports[kind] = { side: next.side, t: clamp(next.t, 0, 1) };
   setProjectDirty(true);
@@ -7333,12 +11850,19 @@ function endPointerActions(event) {
   }
   const shouldCommitHistory = Boolean(state.draggingNode || state.resizingNode);
   const interactionNodeId = state.draggingNode?.nodeIds?.length > 1 ? null : (state.draggingNode?.id || state.resizingNode?.id || null);
+  const suppressNodeClickAfterRelease = Boolean(state.draggingNode?.didMove || state.resizingNode?.didMove);
   const captureFrameId = (() => {
     const candidateId = state.draggingNode?.baseNodeIds?.length === 1
       ? state.draggingNode.baseNodeIds[0]
       : interactionNodeId;
     const candidate = getNode(candidateId);
     return candidate && isFrameNode(candidate) ? candidate.id : null;
+  })();
+  const captureFrameContainmentBefore = (() => {
+    const interaction = state.draggingNode || state.resizingNode;
+    return captureFrameId && interaction?.frameContainmentBeforeFrameId === captureFrameId
+      ? interaction.frameContainmentBefore
+      : null;
   })();
   if (state.draggingNode || state.resizingNode || state.panning) {
     safeReleasePointerCapture(dom.viewport, event.pointerId);
@@ -7347,13 +11871,15 @@ function endPointerActions(event) {
   state.draggingNode = null;
   state.resizingNode = null;
   state.panning = null;
+  state.ignoreNextCanvasClick = suppressNodeClickAfterRelease;
+  state.ignoreNextCanvasClickTargetId = suppressNodeClickAfterRelease ? interactionNodeId : null;
   if (shouldCommitHistory) {
     commitGeometryHistoryCapture();
     // The interaction patched the canvas in place; refresh visible DOM once and
     // update only the affected minimap marker/geometry fields.
     resyncCanvasAfterInteraction(interactionNodeId);
     if (captureFrameId) {
-      requestAnimationFrame(() => maybePromptFrameCapture(captureFrameId));
+      requestAnimationFrame(() => maybePromptFrameCapture(captureFrameId, captureFrameContainmentBefore));
     }
   }
 }
@@ -7476,10 +12002,10 @@ function addNode(type) {
   };
   if (type === "Choice") node.choices = ["Continue", "Turn back"];
   if (type === "Set") {
-    node.variable = "flag";
-    node.value = "true";
+    node.variable = "";
+    node.value = "";
   }
-  if (type === "Condition") node.condition = "flag == true";
+  if (type === "Condition") node.condition = "";
   applyNodeTypeDefaults(node);
   node.x = Math.round(center.x - nodeLayoutSize(node).width / 2);
   node.frameId = getCanvasDropFrameForNode(node)?.id || "";
@@ -7537,19 +12063,32 @@ function deleteCustomNodeType(type) {
   if (!type) return;
   const typeDef = getProjectNodeTypes().find((item) => item.type === type);
   if (!typeDef) return;
-  if (typeDef.system) {
-    setStatus(`${typeDef.label || type} is a system type and cannot be deleted.`);
+  const label = typeDef.label || type;
+  const nodesInUse = state.project.nodes.filter((node) => node.type === type).length;
+  if (nodesInUse) {
+    showNodeTypeInUseDialog(typeDef, nodesInUse);
     return;
   }
-  const label = typeDef.label || type;
-  const hasNodes = state.project.nodes.some((node) => node.type === type);
+  if (typeDef.system) {
+    showGenericConfirm({
+      kicker: "Node Library",
+      title: t("Cannot delete {label}", { label }),
+      message: t("Default node type \"{label}\" cannot be deleted. Hide it from the Node Library if you do not need it right now.", { label }),
+      confirmLabel: "Hide node type",
+      danger: false,
+      recordHistory: true,
+      onConfirm: () => hideNodeType(type)
+    });
+    return;
+  }
   const isDefault = Boolean(nodeTypes[type]);
-  const message = hasNodes
-    ? `Delete "${label}" from the Node Library schema? Existing canvas nodes stay in the project with their current data, but this type's field definition is removed.`
-    : `Delete "${label}" from the Node Library schema? ${isDefault ? "Restore default types can bring this template back." : "Custom deleted types can only come back by importing or recreating them."}`;
+  const message = t("Delete \"{label}\" from the Node Library schema? {recovery}", {
+    label,
+    recovery: t(isDefault ? "Restore default types can bring this template back." : "Custom deleted types can only come back by importing or recreating them.")
+  });
   showGenericConfirm({
     kicker: "Node Library",
-    title: `Delete ${label}?`,
+    title: t("Delete {label}?", { label }),
     message,
     confirmLabel: "Delete",
     danger: true,
@@ -7558,14 +12097,33 @@ function deleteCustomNodeType(type) {
   });
 }
 
+function showNodeTypeInUseDialog(typeDef, nodesInUse) {
+  const type = typeDef.type;
+  const label = typeDef.label || type;
+  showGenericConfirm({
+    kicker: "Node Library",
+    title: t("Cannot delete {label}", { label }),
+    message: t("\"{label}\" is still used by {count} canvas nodes, so it cannot be deleted. Hide it from the Node Library instead, or change those nodes to another type first.", { label, count: nodesInUse }),
+    confirmLabel: "Hide node type",
+    danger: false,
+    recordHistory: true,
+    onConfirm: () => hideNodeType(type)
+  });
+}
+
 function deleteCustomNodeTypeConfirmed(type) {
   const typeDef = getProjectNodeTypes().find((item) => item.type === type);
   if (!typeDef) return;
+  const label = typeDef.label || type;
+  const nodesInUse = state.project.nodes.filter((node) => node.type === type).length;
+  if (nodesInUse) {
+    showNodeTypeInUseDialog(typeDef, nodesInUse);
+    return;
+  }
   if (typeDef.system) {
     setStatus(`${typeDef.label || type} is a system type and cannot be deleted.`);
     return;
   }
-  const label = typeDef.label || type;
   state.project.nodeTypes = getProjectNodeTypes().filter((item) => item.type !== type);
   markProjectStructureChanged({ nodeTypes: true });
   renderPalette();
@@ -7642,7 +12200,7 @@ function defaultBody(type) {
 function applyNodeTypeDefaults(node) {
   const meta = getNodeMeta(node.type);
   ensureCustomFieldDefaults(node);
-  if (isEventSheetNode(node)) ensureEventDefaults(node);
+  if (isEventSheetNode(node)) ensureEventDefaults(node, getEventSheetColumnsForType(node.type));
   if (isFrameNode(node)) {
     node.width = node.width || meta.width || 420;
     node.height = node.height || defaultNodeHeight(node, node.width);
@@ -7651,6 +12209,7 @@ function applyNodeTypeDefaults(node) {
 
 function addCharacter() {
   const characters = getCharacters();
+  const wasEmpty = characters.length === 0;
   const nextNumber = characters.length + 1;
   const character = {
     id: nextId("c", characters),
@@ -7662,9 +12221,27 @@ function addCharacter() {
   characters.push(character);
   state.project.characters = characters;
   invalidateCharacterRenderContext();
+  if (wasEmpty) {
+    state.characterSearch = "";
+    resetDocumentRenderLimit("characters");
+  }
+  const shouldSwitchToCharacters = state.activeFileId !== "characters";
   state.activeFileId = "characters";
-  renderCharacterListSurfaces();
+  setProjectDirty(true);
+  if (shouldSwitchToCharacters) renderDocumentFileSwitch();
+  else renderCharacterListSurfaces();
+  revealCharacterCard(character.id);
   setStatus("Character added.");
+}
+
+function revealCharacterCard(id) {
+  requestAnimationFrame(() => {
+    const card = dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+    card.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    const nameInput = card.querySelector("[data-character-field='name']");
+    nameInput?.focus?.({ preventScroll: true });
+  });
 }
 
 function deleteCharacter(id) {
@@ -7678,7 +12255,12 @@ function deleteCharacter(id) {
   });
   if (state.characterFocusId === id || !getCharacterById(state.characterFocusId)) state.characterFocusId = null;
   state.characterBacklinkExpandedIds?.delete(id);
+  if (!state.project.characters.length) {
+    state.characterSearch = "";
+    resetDocumentRenderLimit("characters");
+  }
   state.activeFileId = "characters";
+  setProjectDirty(true);
   renderCharacterListSurfaces();
   setStatus(character ? `${character.name} deleted.` : "Character deleted.");
 }
@@ -7761,6 +12343,7 @@ function focusCharacter(id) {
   const character = getCharacters().find((item) => item.id === id);
   if (!character) return;
   state.characterFocusId = id;
+  invalidateDocumentSurfaces("characters");
   state.activeFileId = "adventure";
   state.panel = "story";
   renderAll();
@@ -7769,6 +12352,7 @@ function focusCharacter(id) {
 
 function clearCharacterFocus() {
   state.characterFocusId = null;
+  invalidateDocumentSurfaces("characters");
   renderAll();
   setStatus("Character focus cleared.");
 }
@@ -8006,11 +12590,278 @@ function setNodeLogicField(field, value, rerender) {
   const node = getNode(state.selectedNodeId);
   const logic = getEditableNodeStateLogic(node);
   if (!node || !logic || isFrameNode(node)) return;
-  if (field === "requirements") logic.requirements = normalizeOptionalString(value).trim();
+  if (field === "requirements") {
+    logic.requirements = normalizeOptionalString(value).trim();
+    logic.requirementsMode = getStoredConditionModeForExpression(logic.requirements, logic.requirementsMode);
+  }
+  if (field === "effects") logic.effects = parseNodeEffectsText(value);
   cleanupNodeStateLogic(node);
   setProjectDirty(true);
   updateStatus();
   if (rerender) renderNodePanel(node);
+}
+
+function setNodeConditionPart(field, value, conditionIndex, rerender) {
+  const node = getNode(state.selectedNodeId);
+  const logic = getEditableNodeStateLogic(node);
+  if (!node || !logic || isFrameNode(node)) return;
+  if (field === "mode") {
+    const mode = normalizeStoredConditionGroupMode(value);
+    logic.requirementsMode = mode;
+    logic.requirements = setConditionExpressionGroupMode(logic.requirements, mode);
+  } else {
+    logic.requirements = updateConditionExpressionPart(logic.requirements, field, value, conditionIndex);
+    logic.requirementsMode = getStoredConditionModeForExpression(logic.requirements, logic.requirementsMode);
+  }
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  updateStatus();
+  renderPlaybookSurfaces();
+  if (rerender) renderNodePanel(node);
+}
+
+function addNodeConditionClause() {
+  const node = getNode(state.selectedNodeId);
+  const logic = getEditableNodeStateLogic(node);
+  if (!node || !logic || isFrameNode(node)) return;
+  if (!getDefaultConditionKey()) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  logic.requirements = addConditionExpressionClause(logic.requirements, logic.requirementsMode);
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  renderNodePanel(node);
+  renderPlaybookSurfaces();
+  updateStatus();
+  setStatus(t("Condition added."));
+}
+
+function deleteNodeConditionClause(conditionIndex) {
+  const node = getNode(state.selectedNodeId);
+  const logic = getEditableNodeStateLogic(node);
+  if (!node || !logic || isFrameNode(node)) return;
+  logic.requirements = deleteConditionExpressionClause(logic.requirements, conditionIndex);
+  logic.requirementsMode = getStoredConditionModeForExpression(logic.requirements, logic.requirementsMode);
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  renderNodePanel(node);
+  renderPlaybookSurfaces();
+  updateStatus();
+  setStatus(t("Condition deleted."));
+}
+
+function setDirectNodeConditionPart(field, value, conditionIndex, rerender) {
+  const node = getNode(state.selectedNodeId);
+  if (!node || isFrameNode(node)) return;
+  const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
+  if (field === "mode") {
+    node.conditionMode = normalizeStoredConditionGroupMode(value);
+    node.condition = setConditionExpressionGroupMode(node.condition || "", node.conditionMode);
+  } else {
+    node.condition = updateConditionExpressionPart(node.condition || "", field, value, conditionIndex);
+    node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
+  }
+  if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
+  setProjectDirty(true);
+  renderNodes();
+  renderLinks();
+  renderPlaybookSurfaces();
+  scheduleStoryPanelRender();
+  updateStatus();
+  if (rerender) renderNodePanel(node);
+}
+
+function addDirectNodeCondition() {
+  const node = getNode(state.selectedNodeId);
+  if (!node || isFrameNode(node)) return;
+  if (!getDefaultConditionKey()) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
+  node.conditionMode = normalizeStoredConditionGroupMode(node.conditionMode);
+  node.condition = addConditionExpressionClause(node.condition || "", node.conditionMode);
+  if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
+  setProjectDirty(true);
+  renderNodePanel(node);
+  renderNodes();
+  renderLinks();
+  renderPlaybookSurfaces();
+  scheduleStoryPanelRender();
+  updateStatus();
+  setStatus(t("Condition added."));
+}
+
+function deleteDirectNodeCondition(conditionIndex) {
+  const node = getNode(state.selectedNodeId);
+  if (!node || isFrameNode(node)) return;
+  const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
+  node.condition = deleteConditionExpressionClause(node.condition || "", conditionIndex);
+  node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
+  if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
+  setProjectDirty(true);
+  renderNodePanel(node);
+  renderNodes();
+  renderLinks();
+  renderPlaybookSurfaces();
+  scheduleStoryPanelRender();
+  updateStatus();
+  setStatus(t("Condition deleted."));
+}
+
+function showNodeConditionDraft() {
+  const node = getNode(state.selectedNodeId);
+  if (!node || isFrameNode(node)) return;
+  state.nodeConditionDraftNodeId = node.id;
+  renderNodePanel(node);
+  focusInspectorTarget(`.condition-draft-row[data-draft-id="node"] [data-draft-field="key"]`);
+}
+
+function commitNodeConditionDraft(target) {
+  const node = getNode(state.selectedNodeId);
+  const logic = getEditableNodeStateLogic(node);
+  if (!node || !logic || isFrameNode(node)) return;
+  const key = getDraftFieldValue(target, "key").trim();
+  const op = getDraftFieldValue(target, "op").trim();
+  const value = getDraftFieldValue(target, "value").trim();
+  if (!key) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  if (conditionOperatorNeedsValue(op) && !value) {
+    setStatus(t("Condition value is required."));
+    return;
+  }
+  const condition = buildConditionExpressionFromParts({ key, op, value });
+  if (!condition) {
+    setStatus(t("Condition expression is empty."));
+    return;
+  }
+  logic.requirements = appendConditionExpression(logic.requirements, condition, logic.requirementsMode);
+  node.stateLogic = logic;
+  state.nodeConditionDraftNodeId = "";
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  renderNodePanel(node);
+  renderPlaybookSurfaces();
+  updateStatus();
+  setStatus(t("Condition added."));
+}
+
+function showNodeEffectDraft() {
+  const node = getNode(state.selectedNodeId);
+  if (!node || isFrameNode(node)) return;
+  state.nodeEffectDraftNodeId = node.id;
+  renderNodePanel(node);
+  focusInspectorTarget(`.effect-draft-row[data-draft-id="node"] [data-draft-field="key"]`);
+}
+
+function commitNodeEffectDraft(target) {
+  const node = getNode(state.selectedNodeId);
+  const logic = getEditableNodeStateLogic(node);
+  if (!node || !logic || isFrameNode(node)) return;
+  const effect = normalizeStateEffectForVariableSchema(getDraftEffectValue(target, "onVisit"));
+  if (!effect.key && effect.op !== "clear") {
+    setStatus(t("State key is required."));
+    return;
+  }
+  if (!getVariableInfoForStateEffect(effect).hasVariable) {
+    setStatus(t("Define this key in Variables before this action can run."));
+    return;
+  }
+  logic.effects.push(effect);
+  node.stateLogic = logic;
+  state.nodeEffectDraftNodeId = "";
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  renderNodePanel(node);
+  renderPlaybookSurfaces();
+  updateStatus();
+  setStatus(t("Effect added."));
+}
+
+function appendConditionExpression(current, addition, mode = "all") {
+  const base = normalizeOptionalString(current).trim();
+  const next = normalizeOptionalString(addition).trim();
+  if (!base) return next;
+  if (!next) return base;
+  return `${base} ${getConditionConnectorForMode(mode)} ${next}`;
+}
+
+function getDraftFieldValue(target, field) {
+  const row = target?.closest?.(".logic-draft-row, .playbook-action-draft-row");
+  return normalizeOptionalString(row?.querySelector?.(`[data-draft-field="${CSS.escape(field)}"]`)?.value);
+}
+
+function syncConditionDraftRow(row, changedField = "") {
+  if (!row) return;
+  const keyControl = row.querySelector(`[data-draft-field="key"]`);
+  const opControl = row.querySelector(`[data-draft-field="op"]`);
+  const valueControl = row.querySelector(`[data-draft-field="value"]`);
+  const commitButton = row.querySelector(`[data-action^="commit-"]`);
+  const key = normalizeOptionalString(keyControl?.value).trim();
+  const op = normalizeConditionOperatorForKey(key, opControl?.value);
+  if (opControl) {
+    opControl.disabled = !key;
+    if (key && changedField === "key") {
+      opControl.innerHTML = renderPlaybookOptionList(getAllowedConditionOperatorsForKey(key), op);
+    }
+    opControl.value = op;
+  }
+  const needsValue = Boolean(key && conditionOperatorNeedsValue(op));
+  row.classList.toggle("no-condition-value", !needsValue);
+  if (commitButton) commitButton.disabled = !key;
+  if (!valueControl) return;
+  valueControl.hidden = !needsValue;
+  valueControl.disabled = !needsValue;
+  if (!needsValue) {
+    valueControl.value = "";
+    return;
+  }
+  if (changedField === "key" || (changedField === "op" && !valueControl.value.trim())) {
+    valueControl.value = getDefaultConditionValue(key, op);
+  }
+}
+
+function syncEffectDraftRow(row, changedField = "") {
+  if (!row) return;
+  const keyControl = row.querySelector(`[data-draft-field="key"]`);
+  const opControl = row.querySelector(`[data-draft-field="op"]`);
+  const valueControl = row.querySelector(`[data-draft-field="value"]`);
+  const commitButton = row.querySelector(`[data-action^="commit-"]`);
+  const key = normalizeOptionalString(keyControl?.value).trim();
+  const requestedOp = normalizePlaybookActionOperation(opControl?.value || "set");
+  const { variableInfo, allowedOperations, op } = getEffectOperationOptions(key, requestedOp);
+  if (opControl) {
+    opControl.disabled = !allowedOperations.length;
+    opControl.innerHTML = renderEffectOperationOptions(key, op);
+    opControl.value = allowedOperations.length ? op : "";
+  }
+  if (valueControl && changedField !== "value") {
+    const currentValue = changedField === "key"
+      ? getDefaultPlaybookActionValueForVariableInfo(variableInfo)
+      : getPlaybookActionInputValue(valueControl);
+    valueControl.outerHTML = renderPlaybookActionValueField({
+      attributes: `data-draft-field="value"`,
+      value: currentValue,
+      variableInfo,
+      op,
+      disabled: !allowedOperations.length
+    });
+  }
+  if (commitButton) commitButton.disabled = !key || !allowedOperations.length;
+}
+
+function getDraftEffectValue(target, fallbackTrigger = "onVisit") {
+  const trigger = getDraftFieldValue(target, "trigger") || fallbackTrigger;
+  const op = getDraftFieldValue(target, "op") || "set";
+  return {
+    trigger: normalizePlaybookActionTrigger(trigger),
+    op: normalizePlaybookActionOperation(op),
+    key: getDraftFieldValue(target, "key").trim(),
+    value: getDraftFieldValue(target, "value")
+  };
 }
 
 function setNodeRoutingField(field, value, rerender, nodeId = state.selectedNodeId) {
@@ -8039,9 +12890,19 @@ function setNodeEffectField(index, field, value, rerender) {
   const effect = logic.effects[index];
   if (!effect) return;
   if (field === "trigger") effect.trigger = normalizePlaybookActionTrigger(value);
-  if (field === "op") effect.op = normalizePlaybookActionOperation(value);
+  if (field === "op") {
+    const nextOp = normalizePlaybookActionOperation(value);
+    const allowed = getAllowedPlaybookActionOperationsForVariableInfo(getVariableInfoForStateEffect(effect));
+    if (!allowed.some((option) => option.value === nextOp)) {
+      setStatus(t("Operation not available for this variable type."));
+      if (rerender) renderNodePanel(node);
+      return;
+    }
+    effect.op = nextOp;
+  }
   if (field === "key") effect.key = normalizeOptionalString(value).trim();
   if (field === "value") effect.value = normalizeOptionalString(value);
+  Object.assign(effect, normalizeStateEffectForVariableSchema(effect));
   cleanupNodeStateLogic(node);
   setProjectDirty(true);
   updateStatus();
@@ -8108,6 +12969,23 @@ function syncChoicesFromOptions(node) {
   }
 }
 
+function formatChoiceOptionEffectsText(option) {
+  return normalizeNodeEffects(option?.effects)
+    .map((effect) => {
+      const key = effect.key || "";
+      const value = effect.value ? ` = ${effect.value}` : "";
+      return `${effect.op || "set"} ${key}${value}`.trim();
+    })
+    .join("\n");
+}
+
+function parseChoiceOptionEffectsText(value) {
+  return parseNodeEffectsText(value).map((effect) => ({
+    ...effect,
+    trigger: "onChoose"
+  }));
+}
+
 function setChoiceOptionField(optionId, field, value, rerender) {
   const node = getSelectedChoiceNode();
   if (!node || !optionId) return;
@@ -8115,12 +12993,135 @@ function setChoiceOptionField(optionId, field, value, rerender) {
   const option = options.find((opt) => opt.id === optionId);
   if (!option) return;
   if (field === "label") option.label = normalizeOptionalString(value);
-  else if (field === "requires") option.requires = normalizeOptionalString(value).trim();
+  else if (field === "requires") {
+    option.requires = normalizeOptionalString(value).trim();
+    option.requiresMode = getStoredConditionModeForExpression(option.requires, option.requiresMode);
+  }
+  else if (field === "effects") option.effects = parseChoiceOptionEffectsText(value);
   else return;
   syncChoicesFromOptions(node);
   setProjectDirty(true);
   updateStatus();
   if (rerender) renderNodePanel(node);
+  if (state.activeFileId === "variables") renderPlaybookSurfaces();
+}
+
+function setChoiceOptionConditionPart(optionId, field, value, conditionIndex, rerender) {
+  const node = getSelectedChoiceNode();
+  if (!node || !optionId) return;
+  const options = ensureChoiceOptionsArray(node);
+  const option = options.find((opt) => opt.id === optionId);
+  if (!option) return;
+  if (field === "mode") {
+    option.requiresMode = normalizeStoredConditionGroupMode(value);
+    option.requires = setConditionExpressionGroupMode(option.requires || "", option.requiresMode);
+  } else {
+    option.requires = updateConditionExpressionPart(option.requires || "", field, value, conditionIndex);
+    option.requiresMode = getStoredConditionModeForExpression(option.requires, option.requiresMode);
+  }
+  syncChoicesFromOptions(node);
+  setProjectDirty(true);
+  updateStatus();
+  if (rerender) renderNodePanel(node);
+  if (state.activeFileId === "variables") renderPlaybookSurfaces();
+}
+
+function addChoiceOptionCondition(optionId) {
+  const node = getSelectedChoiceNode();
+  if (!node || !optionId) return;
+  const option = ensureChoiceOptionsArray(node).find((opt) => opt.id === optionId);
+  if (!option) return;
+  if (!getDefaultConditionKey()) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  if (!(state.choiceConditionDraftIds instanceof Set)) state.choiceConditionDraftIds = new Set();
+  state.choiceConditionDraftIds.add(optionId);
+  setChoiceOptionConditionExpanded(optionId, true);
+  renderNodePanel(node);
+  focusInspectorTarget(`.condition-draft-row[data-draft-id="${CSS.escape(optionId)}"] [data-draft-field="key"]`);
+}
+
+function commitChoiceOptionConditionDraft(target) {
+  const node = getSelectedChoiceNode();
+  if (!node) return;
+  const optionId = target?.closest?.("[data-draft-id]")?.dataset?.draftId || "";
+  if (!optionId) return;
+  const option = ensureChoiceOptionsArray(node).find((opt) => opt.id === optionId);
+  if (!option) return;
+  const key = getDraftFieldValue(target, "key").trim();
+  const op = getDraftFieldValue(target, "op").trim();
+  const value = getDraftFieldValue(target, "value").trim();
+  if (!key) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  if (conditionOperatorNeedsValue(op) && !value) {
+    setStatus(t("Condition value is required."));
+    return;
+  }
+  const condition = buildConditionExpressionFromParts({ key, op, value });
+  if (!condition) {
+    setStatus(t("Condition expression is empty."));
+    return;
+  }
+  option.requiresMode = normalizeStoredConditionGroupMode(option.requiresMode);
+  option.requires = appendConditionExpression(option.requires || "", condition, option.requiresMode);
+  if (state.choiceConditionDraftIds instanceof Set) state.choiceConditionDraftIds.delete(optionId);
+  syncChoicesFromOptions(node);
+  setProjectDirty(true);
+  renderNodePanel(node);
+  if (state.activeFileId === "variables") renderPlaybookSurfaces();
+  updateStatus();
+  setStatus(t("Condition added."));
+}
+
+function deleteChoiceOptionCondition(optionId, conditionIndex) {
+  const node = getSelectedChoiceNode();
+  if (!node || !optionId) return;
+  const option = ensureChoiceOptionsArray(node).find((opt) => opt.id === optionId);
+  if (!option) return;
+  option.requires = deleteConditionExpressionClause(option.requires || "", conditionIndex);
+  option.requiresMode = getStoredConditionModeForExpression(option.requires, option.requiresMode);
+  syncChoicesFromOptions(node);
+  setProjectDirty(true);
+  renderNodePanel(node);
+  if (state.activeFileId === "variables") renderPlaybookSurfaces();
+  updateStatus();
+  setStatus(t("Condition deleted."));
+}
+
+function updateConditionExpressionPart(expression, field, value, conditionIndex = 0) {
+  const model = parseConditionBuilderExpression(expression);
+  const clauses = model.custom
+    ? [{ key: "", op: "==", value: "true", connector: "&&" }]
+    : model.clauses.map((clause) => ({ ...clause }));
+  const index = Number.isInteger(conditionIndex) && conditionIndex >= 0 && conditionIndex < clauses.length ? conditionIndex : 0;
+  const parts = clauses[index] || clauses[0];
+  if (field === "key") {
+    parts.key = normalizeOptionalString(value).trim();
+    parts.op = normalizeConditionOperatorForKey(parts.key, parts.op);
+    if (!parts.key || !conditionOperatorNeedsValue(parts.op)) {
+      parts.value = "";
+    } else if (!parts.value) {
+      parts.value = getDefaultConditionValue(parts.key, parts.op);
+    }
+  } else if (field === "op") {
+    parts.op = normalizeConditionOperatorForKey(parts.key, value);
+    if (!conditionOperatorNeedsValue(parts.op)) {
+      parts.value = "";
+    } else if (!parts.value) {
+      parts.value = getDefaultConditionValue(parts.key, parts.op);
+    }
+  } else if (field === "value") {
+    parts.value = normalizeOptionalString(value);
+  } else if (field === "connector") {
+    parts.connector = normalizeConditionConnector(value);
+  } else {
+    return normalizeOptionalString(expression).trim();
+  }
+  clauses[index] = parts;
+  return buildConditionExpressionFromClauses(clauses);
 }
 
 function addChoiceOption() {
@@ -8129,7 +13130,7 @@ function addChoiceOption() {
   const options = ensureChoiceOptionsArray(node);
   const used = new Set(options.map((opt) => opt.id));
   const id = generateChoiceOptionId(used);
-  const newOption = { id, label: t("New choice"), requires: "", effects: [] };
+  const newOption = { id, label: t("New choice"), requires: "", requiresMode: "all", effects: [] };
   options.push(newOption);
   syncChoicesFromOptions(node);
   setProjectDirty(true);
@@ -8148,6 +13149,8 @@ function deleteChoiceOption(optionId) {
   const index = options.findIndex((opt) => opt.id === optionId);
   if (index < 0) return;
   options.splice(index, 1);
+  setChoiceOptionConditionExpanded(optionId, false);
+  setChoiceOptionExpanded(optionId, false);
   syncChoicesFromOptions(node);
   setProjectDirty(true);
   renderNodePanel(node);
@@ -8179,13 +13182,38 @@ function addChoiceOptionEffect(optionId) {
   if (!node || !optionId) return;
   const option = ensureChoiceOptionsArray(node).find((opt) => opt.id === optionId);
   if (!option) return;
-  if (!Array.isArray(option.effects)) option.effects = [];
-  option.effects.push({ trigger: "onChoose", op: "set", key: uniqueVariableKey("new_state"), value: "true" });
+  if (!(state.choiceEffectDraftIds instanceof Set)) state.choiceEffectDraftIds = new Set();
+  state.choiceEffectDraftIds.add(optionId);
   setChoiceOptionExpanded(optionId, true);
+  renderNodePanel(node);
+  focusInspectorTarget(`.effect-draft-row[data-draft-id="${CSS.escape(optionId)}"] [data-draft-field="key"]`);
+}
+
+function commitChoiceOptionEffectDraft(target) {
+  const node = getSelectedChoiceNode();
+  if (!node) return;
+  const optionId = target?.closest?.("[data-draft-id]")?.dataset?.draftId || "";
+  if (!optionId) return;
+  const option = ensureChoiceOptionsArray(node).find((opt) => opt.id === optionId);
+  if (!option) return;
+  const effect = normalizeStateEffectForVariableSchema(getDraftEffectValue(target, "onChoose"));
+  effect.trigger = "onChoose";
+  if (!effect.key && effect.op !== "clear") {
+    setStatus(t("State key is required."));
+    return;
+  }
+  if (!getVariableInfoForStateEffect(effect).hasVariable) {
+    setStatus(t("Define this key in Variables before this action can run."));
+    return;
+  }
+  if (!Array.isArray(option.effects)) option.effects = [];
+  option.effects.push(effect);
+  if (state.choiceEffectDraftIds instanceof Set) state.choiceEffectDraftIds.delete(optionId);
   setProjectDirty(true);
   renderNodePanel(node);
+  if (state.activeFileId === "variables") renderPlaybookSurfaces();
   updateStatus();
-  setStatus("Effect added.");
+  setStatus(t("Effect added."));
 }
 
 function deleteChoiceOptionEffect(optionId, effectIndex) {
@@ -8196,6 +13224,7 @@ function deleteChoiceOptionEffect(optionId, effectIndex) {
   option.effects.splice(effectIndex, 1);
   setProjectDirty(true);
   renderNodePanel(node);
+  if (state.activeFileId === "variables") renderPlaybookSurfaces();
   updateStatus();
   setStatus("Effect deleted.");
 }
@@ -8207,13 +13236,25 @@ function setChoiceOptionEffectField(optionId, effectIndex, field, value, rerende
   if (!option || !Array.isArray(option.effects)) return;
   const effect = option.effects[effectIndex];
   if (!effect) return;
-  if (field === "op") effect.op = normalizePlaybookActionOperation(value);
+  if (field === "op") {
+    const nextOp = normalizePlaybookActionOperation(value);
+    const allowed = getAllowedPlaybookActionOperationsForVariableInfo(getVariableInfoForStateEffect(effect));
+    if (!allowed.some((item) => item.value === nextOp)) {
+      setStatus(t("Operation not available for this variable type."));
+      if (rerender) renderNodePanel(node);
+      return;
+    }
+    effect.op = nextOp;
+  }
   else if (field === "key") effect.key = normalizeOptionalString(value).trim();
   else if (field === "value") effect.value = normalizeOptionalString(value);
   else return;
+  Object.assign(effect, normalizeStateEffectForVariableSchema({ ...effect, trigger: "onChoose" }));
+  effect.trigger = "onChoose";
   setProjectDirty(true);
   updateStatus();
   if (rerender) renderNodePanel(node);
+  if (state.activeFileId === "variables") renderPlaybookSurfaces();
 }
 
 // --- Dialog turns editor (Phase 3) -------------------------------------------------------------
@@ -8433,11 +13474,17 @@ function setScriptNodeField(nodeId, field, value, rerender) {
   if (field === "requirements") {
     node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
     node.stateLogic.requirements = normalizeOptionalString(value).trim();
+    node.stateLogic.requirementsMode = getStoredConditionModeForExpression(node.stateLogic.requirements, node.stateLogic.requirementsMode);
     cleanupNodeStateLogic(node);
   } else if (field === "effects") {
+    const parsed = parsePlaybookEffectsText(value, { defaultTrigger: "onVisit" });
+    const editorStatus = ["ok", "empty", "none"].includes(parsed.status.status)
+      ? ""
+      : formatPlaybookEditorStatusLabel(parsed.status);
     node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
     node.stateLogic.effects = parseNodeEffectsText(value);
     cleanupNodeStateLogic(node);
+    if (editorStatus) setStatus(editorStatus);
   } else if (field === "routingMode") {
     setNodeRoutingField("mode", value, false, nodeId);
   } else if (field === "routingTarget") {
@@ -8445,7 +13492,341 @@ function setScriptNodeField(nodeId, field, value, rerender) {
   }
   setProjectDirty(true);
   updateStatus();
+  if (field === "effects") {
+    const parsed = parsePlaybookEffectsText(value, { defaultTrigger: "onVisit" });
+    if (!["ok", "empty", "none"].includes(parsed.status.status)) setStatus(formatPlaybookEditorStatusLabel(parsed.status));
+  }
   if (state.selectedNodeId === node.id && state.panel === "node") renderNodePanel(node);
+}
+
+function setScriptNodeConditionPart(nodeId, field, value, conditionIndex, rerender) {
+  const node = getNode(nodeId);
+  if (!node || isFrameNode(node)) return;
+  node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
+  if (field === "mode") {
+    node.stateLogic.requirementsMode = normalizeStoredConditionGroupMode(value);
+    node.stateLogic.requirements = setConditionExpressionGroupMode(node.stateLogic.requirements, node.stateLogic.requirementsMode);
+  } else {
+    node.stateLogic.requirements = updateConditionExpressionPart(node.stateLogic.requirements, field, value, conditionIndex);
+    node.stateLogic.requirementsMode = getStoredConditionModeForExpression(node.stateLogic.requirements, node.stateLogic.requirementsMode);
+  }
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  updateStatus();
+  if (state.selectedNodeId === node.id && state.panel === "node") renderNodePanel(node);
+  if (rerender) renderPlaybookSurfaces();
+}
+
+function addScriptNodeCondition(nodeId) {
+  const node = getNode(nodeId);
+  if (!node || isFrameNode(node)) return;
+  if (!getDefaultConditionKey()) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
+  node.stateLogic.requirements = addConditionExpressionClause(node.stateLogic.requirements, node.stateLogic.requirementsMode);
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  renderPlaybookSurfaces();
+  if (state.selectedNodeId === node.id && state.panel === "node") renderNodePanel(node);
+  updateStatus();
+  setStatus(t("Condition added."));
+}
+
+function deleteScriptNodeCondition(nodeId, conditionIndex) {
+  const node = getNode(nodeId);
+  if (!node || isFrameNode(node)) return;
+  node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
+  node.stateLogic.requirements = deleteConditionExpressionClause(node.stateLogic.requirements, conditionIndex);
+  node.stateLogic.requirementsMode = getStoredConditionModeForExpression(node.stateLogic.requirements, node.stateLogic.requirementsMode);
+  cleanupNodeStateLogic(node);
+  setProjectDirty(true);
+  renderPlaybookSurfaces();
+  if (state.selectedNodeId === node.id && state.panel === "node") renderNodePanel(node);
+  updateStatus();
+  setStatus(t("Condition deleted."));
+}
+
+function setGateField(id, field, value, rerender) {
+  const parts = String(id || "").split(":");
+  const kind = parts[0] || "";
+  if (!["condition", "effects"].includes(field)) return;
+  const condition = normalizeOptionalString(value).trim();
+  if (kind === "node") {
+    if (field !== "condition") return;
+    const node = getNode(parts[1]);
+    if (!node || isFrameNode(node)) return;
+    node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
+    node.stateLogic.requirements = condition;
+    node.stateLogic.requirementsMode = getStoredConditionModeForExpression(condition, node.stateLogic.requirementsMode);
+    cleanupNodeStateLogic(node);
+  } else if (kind === "condition") {
+    if (field !== "condition") return;
+    const node = getNode(parts[1]);
+    if (!node || isFrameNode(node)) return;
+    const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
+    node.condition = condition;
+    node.conditionMode = getStoredConditionModeForExpression(condition, node.conditionMode);
+    if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = condition;
+  } else if (kind === "choice") {
+    const node = getNode(parts[1]);
+    const optionId = parts.slice(2).join(":");
+    if (!node || !optionId || isFrameNode(node)) return;
+    const options = ensureChoiceOptionsArray(node);
+    const option = optionId.startsWith("index:")
+      ? options[Number(optionId.slice("index:".length))]
+      : options.find((item) => item.id === optionId);
+    if (!option) return;
+    if (field === "condition") {
+      option.requires = condition;
+      option.requiresMode = getStoredConditionModeForExpression(condition, option.requiresMode);
+    } else {
+      const parsed = parsePlaybookEffectsText(value, { defaultTrigger: "onChoose", forceTrigger: "onChoose" });
+      option.effects = parseChoiceOptionEffectsText(value);
+      if (!["ok", "empty", "none"].includes(parsed.status.status)) setStatus(formatPlaybookEditorStatusLabel(parsed.status));
+    }
+    syncChoicesFromOptions(node);
+  } else {
+    return;
+  }
+  setProjectDirty(true);
+  updateStatus();
+  if (kind === "choice" && field === "effects") {
+    const parsed = parsePlaybookEffectsText(value, { defaultTrigger: "onChoose", forceTrigger: "onChoose" });
+    if (!["ok", "empty", "none"].includes(parsed.status.status)) setStatus(formatPlaybookEditorStatusLabel(parsed.status));
+  }
+  if (state.selectedNodeId && state.panel === "node") renderNodePanel(getNode(state.selectedNodeId));
+  if (rerender) renderPlaybookSurfaces();
+}
+
+function getGateConditionExpression(id) {
+  const parts = String(id || "").split(":");
+  const kind = parts[0] || "";
+  if (kind === "node") {
+    const node = getNode(parts[1]);
+    return normalizeNodeStateLogic(node?.stateLogic).requirements || "";
+  }
+  if (kind === "condition") {
+    const node = getNode(parts[1]);
+    return node?.condition || (node?.type === "Condition" ? node.body || "" : "");
+  }
+  if (kind === "choice") {
+    return getChoiceOptionTargetFromGateId(id)?.option?.requires || "";
+  }
+  return "";
+}
+
+function getGateConditionMode(id) {
+  const parts = String(id || "").split(":");
+  const kind = parts[0] || "";
+  if (kind === "node") {
+    const node = getNode(parts[1]);
+    const logic = normalizeNodeStateLogic(node?.stateLogic);
+    return getConditionGroupModeForExpression(logic.requirements, logic.requirementsMode);
+  }
+  if (kind === "condition") {
+    const node = getNode(parts[1]);
+    const condition = node?.condition || (node?.type === "Condition" ? node.body || "" : "");
+    return getConditionGroupModeForExpression(condition, node?.conditionMode);
+  }
+  if (kind === "choice") {
+    const option = getChoiceOptionTargetFromGateId(id)?.option;
+    return getConditionGroupModeForExpression(option?.requires || "", option?.requiresMode);
+  }
+  return "all";
+}
+
+function setGateConditionPart(id, field, value, conditionIndex, rerender) {
+  const current = getGateConditionExpression(id);
+  if (field === "mode") {
+    setGateConditionMode(id, value, rerender);
+    return;
+  }
+  const next = updateConditionExpressionPart(current, field, value, conditionIndex);
+  setGateField(id, "condition", next, rerender);
+}
+
+function setGateConditionMode(id, value, rerender) {
+  const mode = normalizeStoredConditionGroupMode(value);
+  const parts = String(id || "").split(":");
+  const kind = parts[0] || "";
+  const current = getGateConditionExpression(id);
+  const next = setConditionExpressionGroupMode(current, mode);
+  if (kind === "node") {
+    const node = getNode(parts[1]);
+    if (!node || isFrameNode(node)) return;
+    node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
+    node.stateLogic.requirementsMode = mode;
+    node.stateLogic.requirements = next;
+    cleanupNodeStateLogic(node);
+  } else if (kind === "condition") {
+    const node = getNode(parts[1]);
+    if (!node || isFrameNode(node)) return;
+    const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
+    node.conditionMode = mode;
+    node.condition = next;
+    if (node.type === "Condition" && (!node.body || node.body === previousCondition || node.body === current)) node.body = next;
+  } else if (kind === "choice") {
+    const resolved = getChoiceOptionTargetFromGateId(id);
+    if (!resolved) return;
+    resolved.option.requiresMode = mode;
+    resolved.option.requires = next;
+    syncChoicesFromOptions(resolved.node);
+  } else {
+    return;
+  }
+  setProjectDirty(true);
+  updateStatus();
+  if (state.selectedNodeId && state.panel === "node") renderNodePanel(getNode(state.selectedNodeId));
+  if (rerender) renderPlaybookSurfaces();
+}
+
+function addGateCondition(id) {
+  if (!getDefaultConditionKey()) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  const mode = getGateConditionMode(id);
+  const next = addConditionExpressionClause(getGateConditionExpression(id), mode);
+  setGateField(id, "condition", next, true);
+  setStatus(t("Condition added."));
+}
+
+function deleteGateCondition(id, conditionIndex) {
+  const next = deleteConditionExpressionClause(getGateConditionExpression(id), conditionIndex);
+  setGateField(id, "condition", next, true);
+  setStatus(t("Condition deleted."));
+}
+
+function getChoiceOptionTargetFromGateId(id) {
+  const parts = String(id || "").split(":");
+  if (parts[0] !== "choice") return null;
+  const node = getNode(parts[1]);
+  const optionId = parts.slice(2).join(":");
+  if (!node || !optionId || isFrameNode(node)) return null;
+  const options = ensureChoiceOptionsArray(node);
+  const option = optionId.startsWith("index:")
+    ? options[Number(optionId.slice("index:".length))]
+    : options.find((item) => item.id === optionId);
+  if (!option) return null;
+  return { node, option, optionId };
+}
+
+function showPlaybookChoiceEffectDraft(gateId) {
+  const target = getChoiceOptionTargetFromGateId(gateId);
+  if (!target) return;
+  if (!(state.playbookChoiceEffectDraftIds instanceof Set)) state.playbookChoiceEffectDraftIds = new Set();
+  state.playbookChoiceEffectDraftIds.add(gateId);
+  state.activeFileId = "variables";
+  state.playbookTab = "gates";
+  renderPlaybookSurfaces();
+  requestAnimationFrame(() => {
+    const selector = `.effect-draft-row[data-draft-id="${CSS.escape(gateId)}"] [data-draft-field="key"]`;
+    const element = dom.variablesPanel?.querySelector(selector);
+    element?.focus?.({ preventScroll: true });
+  });
+}
+
+function commitPlaybookChoiceEffectDraft(target) {
+  const gateId = target?.closest?.("[data-draft-id]")?.dataset?.draftId || "";
+  const resolved = getChoiceOptionTargetFromGateId(gateId);
+  if (!resolved) return;
+  const effect = normalizeStateEffectForVariableSchema(getDraftEffectValue(target, "onChoose"));
+  effect.trigger = "onChoose";
+  if (!effect.key && effect.op !== "clear") {
+    setStatus(t("State key is required."));
+    return;
+  }
+  if (!getVariableInfoForStateEffect(effect).hasVariable) {
+    setStatus(t("Define this key in Variables before this action can run."));
+    return;
+  }
+  if (!Array.isArray(resolved.option.effects)) resolved.option.effects = [];
+  resolved.option.effects.push(effect);
+  if (state.playbookChoiceEffectDraftIds instanceof Set) state.playbookChoiceEffectDraftIds.delete(gateId);
+  syncChoicesFromOptions(resolved.node);
+  setProjectDirty(true);
+  renderPlaybookSurfaces();
+  if (state.selectedNodeId === resolved.node.id && state.panel === "node") renderNodePanel(resolved.node);
+  updateStatus();
+  setStatus(t("Effect added."));
+}
+
+function setChoiceOptionEffectByGateId(gateId, effectIndex, field, value, rerender) {
+  const resolved = getChoiceOptionTargetFromGateId(gateId);
+  if (!resolved || !Number.isInteger(effectIndex)) return;
+  if (!Array.isArray(resolved.option.effects)) return;
+  const effect = resolved.option.effects[effectIndex];
+  if (!effect) return;
+  if (field === "op") {
+    const nextOp = normalizePlaybookActionOperation(value);
+    const allowed = getAllowedPlaybookActionOperationsForVariableInfo(getVariableInfoForStateEffect(effect));
+    if (!allowed.some((item) => item.value === nextOp)) {
+      setStatus(t("Operation not available for this variable type."));
+      if (rerender) renderPlaybookSurfaces();
+      return;
+    }
+    effect.op = nextOp;
+  }
+  else if (field === "key") effect.key = normalizeOptionalString(value).trim();
+  else if (field === "value") effect.value = normalizeOptionalString(value);
+  else return;
+  Object.assign(effect, normalizeStateEffectForVariableSchema({ ...effect, trigger: "onChoose" }));
+  effect.trigger = "onChoose";
+  syncChoicesFromOptions(resolved.node);
+  setProjectDirty(true);
+  updateStatus();
+  if (state.selectedNodeId === resolved.node.id && state.panel === "node") renderNodePanel(resolved.node);
+  if (rerender) renderPlaybookSurfaces();
+}
+
+function deletePlaybookChoiceEffect(gateId, effectIndex) {
+  const resolved = getChoiceOptionTargetFromGateId(gateId);
+  if (!resolved || !Number.isInteger(effectIndex) || !Array.isArray(resolved.option.effects)) return;
+  resolved.option.effects.splice(effectIndex, 1);
+  syncChoicesFromOptions(resolved.node);
+  setProjectDirty(true);
+  renderPlaybookSurfaces();
+  if (state.selectedNodeId === resolved.node.id && state.panel === "node") renderNodePanel(resolved.node);
+  updateStatus();
+  setStatus("Effect deleted.");
+}
+
+function migrateLegacyGateAction(id) {
+  const action = getPlaybookActions().find((item) => item.id === id);
+  if (!action || action.trigger !== "gate" || action.op !== "if") return;
+  if (!normalizeOptionalString(action.target).trim()) {
+    setStatus(t("This legacy gate has no target. Add a target before migrating."));
+    return;
+  }
+  const condition = formatLegacyGateCondition(action);
+  const targets = getScriptBuilderNodes().filter((node) => matchesPlaybookActionTarget(action, node));
+  if (!targets.length) {
+    setStatus(t("No matching node, type, or ID."));
+    return;
+  }
+  targets.forEach((node) => {
+    if (hasNodeCondition(node)) {
+      const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
+      node.condition = condition;
+      if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = condition;
+      return;
+    }
+    node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
+    node.stateLogic.requirements = condition;
+    cleanupNodeStateLogic(node);
+  });
+  const nextActions = getPlaybookActions().filter((item) => item.id !== id);
+  state.project.script = normalizeScriptConfig({ ...state.project.script, actions: nextActions });
+  state.activeFileId = "variables";
+  state.playbookTab = "gates";
+  setProjectDirty(true);
+  renderPlaybookSurfaces();
+  renderNodes();
+  renderInspector();
+  updateStatus();
+  setStatus(t("Legacy gate migrated."));
 }
 
 function parseNodeEffectsText(value) {
@@ -8457,11 +13838,11 @@ function parseNodeEffectsText(value) {
       const triggerMatch = line.match(/^\[(onVisit|onChoose)\]\s*(.+)$/i);
       const trigger = triggerMatch ? normalizePlaybookActionTrigger(triggerMatch[1]) : "onVisit";
       const body = triggerMatch ? triggerMatch[2].trim() : line;
-      const match = body.match(/^(set|add|subtract|append|remove|toggle|clear)\s+([A-Za-z0-9_.-]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
+      const match = body.match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([A-Za-z0-9_.-]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
       if (!match) return { trigger, op: "set", key: body, value: "true" };
       return {
         trigger,
-        op: normalizePlaybookActionOperation(match[1]),
+        op: normalizePlaybookEffectTextOperation(match[1]),
         key: normalizeOptionalString(match[2]).trim(),
         value: normalizeOptionalString(match[3] ?? match[4] ?? "")
       };
@@ -8469,15 +13850,24 @@ function parseNodeEffectsText(value) {
     .filter((effect) => effect.key || effect.op === "clear");
 }
 
-function formatNodeEffectsText(node) {
-  return normalizeNodeStateLogic(node?.stateLogic).effects
+function formatStateEffectsText(effects, { defaultTrigger = "onVisit" } = {}) {
+  const fallbackTrigger = normalizePlaybookActionTrigger(defaultTrigger || "onVisit");
+  return (Array.isArray(effects) ? effects : [])
     .map((effect) => {
-      const prefix = effect.trigger && effect.trigger !== "onVisit" ? `[${effect.trigger}] ` : "";
-      const key = effect.key || "";
-      const value = effect.value ? ` = ${effect.value}` : "";
-      return `${prefix}${effect.op || "set"} ${key}${value}`.trim();
+      if (!effect || typeof effect !== "object" || Array.isArray(effect)) return "";
+      const trigger = normalizePlaybookActionTrigger(effect.trigger || fallbackTrigger);
+      const prefix = trigger && trigger !== fallbackTrigger ? `[${trigger}] ` : "";
+      const op = normalizePlaybookActionOperation(effect.op || "set");
+      const key = normalizeOptionalString(effect.key || effect.variable || effect.name).trim();
+      const value = normalizeOptionalString(effect.value);
+      return key || op === "clear" ? `${prefix}${op} ${key}${value ? ` = ${value}` : ""}`.trim() : "";
     })
+    .filter(Boolean)
     .join("\n");
+}
+
+function formatNodeEffectsText(node) {
+  return formatStateEffectsText(normalizeNodeStateLogic(node?.stateLogic).effects, { defaultTrigger: "onVisit" });
 }
 
 function renderCharacterListSurfaces() {
@@ -8506,27 +13896,76 @@ function addVariable() {
   setStatus("Variable added.");
 }
 
-function addPlaybookAction() {
-  const actions = getPlaybookActions();
-  const id = uniquePlaybookActionId(actions);
-  actions.push({
-    id,
-    trigger: "onVisit",
-    target: "",
-    op: "set",
-    category: "Variable",
-    key: uniqueVariableKey("new_state"),
-    value: "True",
-    append: false
-  });
-  state.project.script = normalizeScriptConfig({ ...state.project.script, actions });
+function showPlaybookActionDraft() {
+  const variables = normalizeVariablesObject(state.project.variables);
+  if (!Object.keys(variables).length) {
+    state.activeFileId = "variables";
+    state.playbookTab = "variables";
+    renderPlaybookSurfaces();
+    setStatus(t("Add a variable definition before adding a variable action."));
+    return;
+  }
+  state.playbookActionDraftOpen = true;
+  if (!state.playbookActionDraft) {
+    const keys = Object.keys(variables).sort((a, b) => a.localeCompare(b));
+    const key = getPreferredVariableKeyForPlaybookAction(keys);
+    const variableInfo = getPlaybookActionVariableInfo({ category: "Variable", key });
+    state.playbookActionDraft = {
+      trigger: "manual",
+      target: "",
+      key,
+      op: getAllowedPlaybookActionOperationsForVariableInfo(variableInfo)[0]?.value || "set",
+      value: getDefaultPlaybookActionValueForVariableInfo(variableInfo)
+    };
+  }
   state.activeFileId = "variables";
-  state.playbookTab = "script";
-  state.playbookFocusTarget = { kind: "action", id, field: "target" };
+  state.playbookTab = "actions";
+  renderPlaybookSurfaces();
+  requestAnimationFrame(() => {
+    const element = dom.variablesPanel?.querySelector(`.playbook-action-draft-row [data-draft-field="target"]`);
+    element?.focus?.({ preventScroll: true });
+  });
+}
+
+function commitPlaybookActionDraft(target) {
+  const variables = normalizeVariablesObject(state.project.variables);
+  const keys = Object.keys(variables).sort((a, b) => a.localeCompare(b));
+  if (!keys.length) {
+    setStatus(t("Add a variable definition before adding a variable action."));
+    return;
+  }
+  syncPlaybookActionDraftFromRow(target?.closest?.(".playbook-action-draft-row"));
+  const draft = normalizePlaybookActionDraft();
+  const actions = getPlaybookActions();
+  const key = draft.key || getPreferredVariableKeyForPlaybookAction(keys);
+  const info = getPlaybookActionVariableInfo({ category: "Variable", key });
+  if (!info.hasVariable) {
+    setStatus(t("State key is required."));
+    return;
+  }
+  const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
+  const requestedOp = normalizePlaybookActionOperation(draft.op || "set");
+  const op = allowed.some((option) => option.value === requestedOp) ? requestedOp : (allowed[0]?.value || "set");
+  const action = normalizePlaybookActionForVariableSchema({
+    id: uniquePlaybookActionId(actions),
+    trigger: normalizePlaybookActionTrigger(draft.trigger || "manual"),
+    target: normalizeOptionalString(draft.target).trim(),
+    op,
+    category: "Variable",
+    key,
+    value: draft.value
+  });
+  actions.push(action);
+  state.project.script = normalizeScriptConfig({ ...state.project.script, actions });
+  state.playbookActionDraftOpen = false;
+  state.playbookActionDraft = null;
+  state.activeFileId = "variables";
+  state.playbookTab = "actions";
+  state.playbookFocusTarget = { kind: "action", id: action.id, field: "target" };
   setProjectDirty(true);
   renderPlaybookSurfaces();
   updateStatus();
-  setStatus("Script line added.");
+  setStatus(t("Variable action added."));
 }
 
 function togglePlaybookJson() {
@@ -8542,10 +13981,20 @@ function selectPlaybookTab(tab) {
   renderPlaybookSurfaces();
 }
 
+function togglePlaybookRuleHelp(ruleId) {
+  if (!ruleId) return;
+  if (state.playbookRuleHelpOpenIds.has(ruleId)) state.playbookRuleHelpOpenIds.delete(ruleId);
+  else state.playbookRuleHelpOpenIds.add(ruleId);
+  state.activeFileId = "variables";
+  renderPlaybookSurfaces();
+}
+
 function filterPlaybookCategory(category) {
-  const next = category && PLAYBOOK_STATE_CATEGORIES.includes(category) ? category : null;
+  const validFilters = new Set(formatVariableTypeFilterOptions(createVariableTypeFilterCounts()).map((filter) => filter.value));
+  const next = category && validFilters.has(category) ? category : null;
   state.playbookCategoryFilter = next && state.playbookCategoryFilter === next ? null : next;
   state.activeFileId = "variables";
+  state.playbookTab = getValidPlaybookTab(state.playbookTab);
   renderPlaybookSurfaces();
 }
 
@@ -8571,6 +14020,13 @@ function addPlaybookRule(kind) {
   const ruleKind = normalizePlaybookRuleKind(kind);
   if (dom.playRuleDialog?.open) dom.playRuleDialog.close();
   const rules = getRunnerRules();
+  if (ruleKind === "visitTracking" && !isDebugModeRuleEnabled(rules)) {
+    state.activeFileId = "variables";
+    state.playbookTab = "rules";
+    renderPlaybookSurfaces();
+    setStatus(t("Enable Debug Mode before Visit Tracking."));
+    return;
+  }
   rules[ruleKind] = {
     ...(rules[ruleKind] || getDefaultRunnerRules()[ruleKind]),
     enabled: true
@@ -8627,13 +14083,12 @@ function addSelectedNodePlaybookRule() {
 }
 
 function normalizePlaybookRuleKind(kind) {
-  return ["startNode", "choiceDisplay", "endCondition", "visitTracking", "debugMode"].includes(kind) ? kind : "endCondition";
+  return ["startNode", "endCondition", "visitTracking", "debugMode"].includes(kind) ? kind : "endCondition";
 }
 
 function getRunnerRuleTitle(kind) {
   const labels = {
     startNode: "Start Node",
-    choiceDisplay: "Choice Display",
     endCondition: "End Condition",
     visitTracking: "Visit Tracking",
     debugMode: "Debug Mode"
@@ -8699,6 +14154,10 @@ function deleteVariable(key) {
   if (!key || !Object.prototype.hasOwnProperty.call(variables, key)) return;
   delete variables[key];
   state.project.variables = variables;
+  if (!Object.keys(variables).length) {
+    state.playbookCategoryFilter = null;
+    resetDocumentRenderLimit("variables");
+  }
   state.activeFileId = "variables";
   setProjectDirty(true);
   renderPlaybookSurfaces();
@@ -8714,7 +14173,7 @@ function deletePlaybookAction(id) {
   setProjectDirty(true);
   renderPlaybookSurfaces();
   updateStatus();
-  setStatus("Script line deleted.");
+  setStatus("Variable action deleted.");
 }
 
 function deletePlaybookRule(target) {
@@ -8722,7 +14181,7 @@ function deletePlaybookRule(target) {
   if (!key) return;
   const rules = getRunnerRules();
   if (!Object.prototype.hasOwnProperty.call(rules, key)) return;
-  if (key === "startNode" || key === "choiceDisplay") {
+  if (key === "startNode") {
     setStatus(`${getRunnerRuleTitle(key)} is a system rule.`);
     return;
   }
@@ -8753,15 +14212,43 @@ function setPlaybookActionField(id, field, value, rerender) {
   const actions = getPlaybookActions();
   const action = actions.find((item) => item.id === id);
   if (!action) return;
-  if (field === "append") action.append = Boolean(value);
-  else if (field === "trigger") action.trigger = normalizePlaybookActionTrigger(value);
-  else if (field === "op") action.op = normalizePlaybookActionOperation(value);
-  else if (field === "category") action.category = normalizePlaybookActionCategory(value);
-  else if (["target", "key", "value"].includes(field)) action[field] = normalizeOptionalString(value);
+  if (field === "append") return;
+  if (field === "trigger") action.trigger = normalizePlaybookActionTrigger(value);
+  else if (field === "op") {
+    const nextOp = normalizePlaybookActionOperation(value);
+    const info = getPlaybookActionVariableInfo(action);
+    const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
+    if (!allowed.some((option) => option.value === nextOp)) {
+      setStatus("Operation not available for this variable type.");
+      if (rerender) renderPlaybookSurfaces();
+      return;
+    }
+    action.op = nextOp;
+  } else if (field === "category") {
+    action.category = "Variable";
+  } else if (field === "key") {
+    action.category = "Variable";
+    action.key = normalizeOptionalString(value).trim();
+  } else if (["target", "value"].includes(field)) action[field] = normalizeOptionalString(value);
+  normalizePlaybookActionForVariableSchema(action);
   state.project.script = normalizeScriptConfig({ ...state.project.script, actions });
   setProjectDirty(true);
   updateStatus();
   if (rerender) renderPlaybookSurfaces();
+}
+
+function normalizePlaybookActionForVariableSchema(action, options = {}) {
+  const coerceValue = options.coerceValue !== false;
+  const info = getPlaybookActionVariableInfo(action);
+  if (!info.hasVariable) return action;
+  const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
+  if (!allowed.some((option) => option.value === action.op)) {
+    action.op = allowed[0]?.value || "set";
+    action.value = getDefaultPlaybookActionValueForVariableInfo(info);
+  }
+  if (action.op === "toggle") action.value = "";
+  else if (coerceValue) action.value = normalizePlaybookActionValueForVariableInfo(action.value, info, action.op);
+  return action;
 }
 
 function setRunnerRuleField(field, value, rerender) {
@@ -8776,6 +14263,33 @@ function setRunnerRuleField(field, value, rerender) {
   setProjectDirty(true);
   updateStatus();
   if (rerender) renderPlaybookSurfaces();
+}
+
+function setRunnerRuleEnabled(field, enabled, rerender) {
+  const rules = getRunnerRules();
+  if (!rules[field]) return;
+  if (field === "visitTracking" && enabled && !isDebugModeRuleEnabled(rules)) {
+    setStatus(t("Enable Debug Mode before Visit Tracking."));
+    if (rerender) renderPlaybookSurfaces();
+    return;
+  }
+  const required = field === "startNode";
+  const nextEnabled = required ? true : Boolean(enabled);
+  const nextRule = {
+    ...rules[field],
+    enabled: nextEnabled
+  };
+  if (nextEnabled && (field === "visitTracking" || field === "debugMode")) nextRule.value = true;
+  rules[field] = nextRule;
+  if (field === "debugMode" && !nextEnabled && rules.visitTracking) {
+    rules.visitTracking = { ...rules.visitTracking, enabled: false };
+  }
+  state.project.script = normalizeScriptConfig({ ...state.project.script, playRules: rules });
+  state.activeFileId = "variables";
+  setProjectDirty(true);
+  updateStatus();
+  if (rerender) renderPlaybookSurfaces();
+  setStatus(`${getRunnerRuleTitle(field)} ${nextEnabled ? "enabled" : "disabled"}.`);
 }
 
 function getRunnerRuleInputValue(target) {
@@ -8814,8 +14328,10 @@ function setVariableField(key, field, value, rerender) {
     }
   } else if (field === "type") {
     variables[key] = coerceVariableInput(formatVariableValue(variables[key]), value);
+    normalizePlaybookActionsForVariableKey(key);
   } else if (field === "value") {
     variables[key] = coerceVariableInput(value, variableType(variables[key]));
+    normalizePlaybookActionsForVariableKey(key);
   }
 
   state.project.variables = variables;
@@ -8825,6 +14341,20 @@ function setVariableField(key, field, value, rerender) {
   renderProjectPanel();
   updateStatus();
   if (rerender) renderWorkspaceFile();
+}
+
+function normalizePlaybookActionsForVariableKey(key) {
+  const stateKey = normalizeOptionalString(key).trim();
+  if (!stateKey) return;
+  const actions = getPlaybookActions();
+  let changed = false;
+  actions.forEach((action) => {
+    if (getPlaybookActionStateKey(action) !== stateKey) return;
+    const before = JSON.stringify({ op: action.op, value: action.value });
+    normalizePlaybookActionForVariableSchema(action);
+    if (before !== JSON.stringify({ op: action.op, value: action.value })) changed = true;
+  });
+  if (changed) state.project.script = normalizeScriptConfig({ ...state.project.script, actions });
 }
 
 function selectNode(id, rerender = true) {
@@ -8854,7 +14384,17 @@ function focusStoryNode(id) {
 
 function getCanvasSearchMatchIds(query = state.search.trim().toLowerCase()) {
   if (!query) return [];
-  return state.project.nodes.filter((node) => nodeMatches(node, query)).map((node) => node.id);
+  return [...getCanvasSearchMatchIdSet(query)];
+}
+
+function getCanvasSearchMatchIdSet(query = state.search.trim().toLowerCase()) {
+  if (!query) return new Set();
+  const matches = new Set();
+  const includeCharacterTerms = queryCanMatchCharacterTerms(query);
+  state.project.nodes.forEach((node) => {
+    if (nodeMatches(node, query, { includeCharacterTerms })) matches.add(node.id);
+  });
+  return matches;
 }
 
 function getCharacterSearchMatchIds(query = (state.characterSearch || "").trim().toLowerCase()) {
@@ -8880,10 +14420,22 @@ function getEventSheetMatchRowIds(query) {
 }
 
 function buildEventNodeSearchText(node) {
+  const cache = getEventSearchTextCache();
+  if (cache.has(node.id)) return cache.get(node.id);
   const columns = getEventSheetColumns(node.type) || [];
   const parts = [node.title, getNodeDisplayId(node), getNodeTypeLabel(node.type)];
   columns.forEach((column) => parts.push(String(getNodeEventValue(node, column.key) || "")));
-  return parts.filter(Boolean).join("\n").toLowerCase();
+  const text = parts.filter(Boolean).join("\n").toLowerCase();
+  cache.set(node.id, text);
+  return text;
+}
+
+function getEventSearchTextCache() {
+  const cached = state.derived.eventSearchText;
+  if (cached?.dirtyVersion === state.dirtyVersion && cached?.structureVersion === state.structureVersion) return cached.map;
+  const map = new Map();
+  state.derived.eventSearchText = { dirtyVersion: state.dirtyVersion, structureVersion: state.structureVersion, map };
+  return map;
 }
 
 function getPlaybookSearchMatchOffsets(query = (state.playbookSearch || "").trim().toLowerCase()) {
@@ -8979,23 +14531,24 @@ function focusPlaybookJsonAtOffset(offset) {
   const searchCaretStart = restoreSearchFocus ? searchInput.selectionStart : null;
   const searchCaretEnd = restoreSearchFocus ? searchInput.selectionEnd : null;
   const searchDirection = restoreSearchFocus ? searchInput.selectionDirection : "none";
+  const restoreFocus = () => {
+    if (!restoreSearchFocus || !searchInput) return;
+    try {
+      searchInput.focus({ preventScroll: true });
+    } catch (_error) {
+      searchInput.focus();
+    }
+    if (searchCaretStart != null && searchCaretEnd != null && typeof searchInput.setSelectionRange === "function") {
+      try { searchInput.setSelectionRange(searchCaretStart, searchCaretEnd, searchDirection || "none"); } catch (_error) { /* no-op */ }
+    }
+  };
   const apply = () => {
     const textarea = dom.variablesPanel?.querySelector('textarea[data-project-field="variables"]');
     if (!textarea) return;
     const length = (state.playbookSearch || "").length;
     const end = offset + Math.max(0, length);
-    const highlight = showPlaybookJsonSearchHighlight(textarea, offset, end);
-    centerPlaybookJsonOffset(textarea, offset, highlight);
-    if (restoreSearchFocus && searchInput) {
-      try {
-        searchInput.focus({ preventScroll: true });
-      } catch (_error) {
-        searchInput.focus();
-      }
-      if (searchCaretStart != null && searchCaretEnd != null && typeof searchInput.setSelectionRange === "function") {
-        try { searchInput.setSelectionRange(searchCaretStart, searchCaretEnd, searchDirection || "none"); } catch (_error) { /* no-op */ }
-      }
-    }
+    showPlaybookJsonSearchHighlight(textarea, offset, end);
+    centerPlaybookJsonSearchMatch(textarea, offset, restoreFocus);
   };
   if (wasOpen) apply();
   else requestAnimationFrame(apply);
@@ -9014,8 +14567,10 @@ function restorePlaybookJsonSearchHighlight() {
       return;
     }
     const length = (state.playbookSearch || "").length;
-    const highlight = showPlaybookJsonSearchHighlight(textarea, offset, offset + Math.max(0, length));
-    if (document.activeElement === dom.playbookSearchInput) centerPlaybookJsonOffset(textarea, offset, highlight);
+    showPlaybookJsonSearchHighlight(textarea, offset, offset + Math.max(0, length));
+    if (document.activeElement === dom.playbookSearchInput) {
+      centerPlaybookJsonSearchMatch(textarea, offset);
+    }
   });
 }
 
@@ -9039,19 +14594,26 @@ function showPlaybookJsonSearchHighlight(textarea, start, end) {
   return highlight;
 }
 
-function centerPlaybookJsonOffset(textarea, offset, highlight = null) {
+function centerPlaybookJsonSearchMatch(textarea, offset, restoreFocus = null) {
+  const apply = () => {
+    if (typeof restoreFocus === "function") restoreFocus();
+    centerPlaybookJsonOffset(textarea, offset);
+  };
+  if (typeof restoreFocus === "function") restoreFocus();
+  requestAnimationFrame(() => {
+    apply();
+    requestAnimationFrame(apply);
+  });
+}
+
+function centerPlaybookJsonOffset(textarea, offset) {
   const metrics = getPlaybookJsonLineMetrics(textarea, offset);
   const scrollable = findScrollableAncestor(textarea);
   if (!scrollable) return;
-  const textareaRect = textarea.getBoundingClientRect();
-  const lineCenterInViewport = textareaRect.top
-    + metrics.borderTop
-    + metrics.paddingTop
-    + metrics.lineIndex * metrics.lineHeight
-    + metrics.lineHeight / 2;
   const isDocumentScroller = scrollable === document.scrollingElement
     || scrollable === document.documentElement
     || scrollable === document.body;
+  const lineCenterInViewport = getPlaybookJsonLineCenterInViewport(textarea, metrics);
   if (isDocumentScroller) {
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || scrollable.clientHeight;
     const currentScrollTop = window.scrollY || scrollable.scrollTop || 0;
@@ -9065,15 +14627,20 @@ function centerPlaybookJsonOffset(textarea, offset, highlight = null) {
     return;
   }
   const scrollableRect = scrollable.getBoundingClientRect();
-  const lineYInScrollable = (textareaRect.top - scrollableRect.top)
-    + scrollable.scrollTop
-    + metrics.borderTop
-    + metrics.paddingTop
-    + metrics.lineIndex * metrics.lineHeight
-    + metrics.lineHeight / 2;
+  const lineYInScrollable = (lineCenterInViewport - scrollableRect.top) + scrollable.scrollTop;
   const maxScrollTop = Math.max(0, scrollable.scrollHeight - scrollable.clientHeight);
   const targetScrollTop = clamp(lineYInScrollable - scrollable.clientHeight / 2, 0, maxScrollTop);
   scrollable.scrollTop = targetScrollTop;
+}
+
+function getPlaybookJsonLineCenterInViewport(textarea, metrics) {
+  const textareaRect = textarea.getBoundingClientRect();
+  return textareaRect.top
+    + metrics.borderTop
+    + metrics.paddingTop
+    + metrics.lineIndex * metrics.lineHeight
+    - (textarea.scrollTop || 0)
+    + metrics.lineHeight / 2;
 }
 
 function getPlaybookJsonLineMetrics(textarea, offset) {
@@ -9174,7 +14741,7 @@ function editNodeType(type) {
 
   if (dom.nodeTypeDialog?.showModal) {
     dom.nodeTypeDialog.returnValue = "";
-    dom.nodeTypeDialogTitle.textContent = `Edit ${typeDef.label}`;
+    dom.nodeTypeDialogTitle.textContent = t("Edit {label}", { label: typeDef.label });
     dom.nodeTypeNameInput.value = typeDef.label || typeDef.type;
     dom.nodeTypeKindInput.value = typeDef.kind || "node";
     dom.nodeTypeFieldsInput.value = formatNodeTypeFields(typeDef.fields);
@@ -9194,7 +14761,7 @@ function editNodeType(type) {
 
   showGenericTextInput({
     kicker: "Node Type",
-    title: `Rename ${typeDef.label}`,
+    title: t("Rename {label}", { label: typeDef.label }),
     label: "Name",
     value: typeDef.label || typeDef.type,
     maxLength: 40,
@@ -9288,7 +14855,7 @@ function editNodeTypeBadge(type) {
 
   if (dom.nodeIconDialog?.showModal) {
     dom.nodeIconDialog.returnValue = "";
-    dom.nodeIconDialogTitle.textContent = `Edit icon for ${typeDef.label}`;
+    dom.nodeIconDialogTitle.textContent = t("Edit icon for {label}", { label: typeDef.label });
     dom.nodeIconInput.value = currentIcon;
     dom.nodeIconDialog.showModal();
     requestAnimationFrame(() => {
@@ -9300,7 +14867,7 @@ function editNodeTypeBadge(type) {
 
   showGenericTextInput({
     kicker: "Node Icon",
-    title: `Edit icon for ${typeDef.label}`,
+    title: t("Edit icon for {label}", { label: typeDef.label }),
     label: "Custom icon",
     value: currentIcon,
     maxLength: 8,
@@ -9386,6 +14953,7 @@ function setNodeField(field, value) {
   const node = getNode(state.selectedNodeId);
   if (!node) return;
   invalidateCharacterRenderContext();
+  const previousCondition = field === "condition" ? node.condition || (node.type === "Condition" ? node.body || "" : "") : "";
   if (field === "x" || field === "y") {
     node[field] = Number(value) || 0;
   } else if (field === "choices") {
@@ -9395,6 +14963,10 @@ function setNodeField(field, value) {
     applyNodeTypeDefaults(node);
   } else {
     node[field] = value;
+  }
+  if (field === "condition") {
+    node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
+    if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
   }
   if (field === "type") markProjectStructureChanged({ nodeTypes: true });
   const choiceLinksChanged = field === "choices" || field === "condition" || field === "type"
@@ -9448,7 +15020,10 @@ function setNodeCustomField(key, value, rerender) {
 
 function setEventField(nodeId, field, value, rerender) {
   const node = getNode(nodeId);
-  const column = getEventSheetColumns().find((item) => item.key === field);
+  const column = node
+    ? (getEventSheetColumns(node.type).find((item) => item.key === field)
+      || getEventSheetColumns().find((item) => item.key === field))
+    : null;
   if (!node || !column || column.readonly) return;
   invalidateCharacterRenderContext();
   if (column.custom && !isDirectNodeField(field)) {
@@ -9666,7 +15241,8 @@ function minimapPointToBoard(clientX, clientY) {
 }
 
 function openNodeInspector() {
-  if (!getNode(state.selectedNodeId)) {
+  const inspectNodeId = state.selectedNodeId || (state.selectedNodeIds.length === 1 ? state.selectedNodeIds[0] : null);
+  if (!getNode(inspectNodeId)) {
     if (state.panel === "node") {
       state.panel = "project";
       renderInspector();
@@ -9674,6 +15250,8 @@ function openNodeInspector() {
     showNodeRequiredDialog();
     return;
   }
+  state.selectedNodeId = inspectNodeId;
+  state.selectedNodeIds = [];
   focusSelectedNode();
 }
 
@@ -9954,7 +15532,7 @@ function createBlankProject(title = "Untitled") {
     title: projectTitle,
     notes: "",
     variables: defaultVariables(),
-    nodeTypes: defaultNodeTypeList(),
+    nodeTypes: visibleDefaultNodeTypeList(),
     customNodeTypes: [],
     characters: [],
     nodes: [normalizeNode({ id: "n0", type: "Entry", title: "Start", body: "Adventure Begins", x: 120, y: 120 })],
@@ -10138,7 +15716,8 @@ async function createVaultProjectForNewProject() {
 }
 
 async function createSampleProjectFile() {
-  state.project = cloneProject(sampleProject);
+  const project = getSampleProject(state.language);
+  state.project = cloneProject(project);
   markProjectStructureChanged({ nodeTypes: true });
   state.selectedNodeId = state.project.nodes[0]?.id || null;
   state.selectedLinkId = null;
@@ -10160,8 +15739,8 @@ async function createSampleProjectFile() {
   try {
     setStatus("Creating sample project...");
     const target = await host.createProjectFile(JSON.stringify(buildSavedState(), null, 2), {
-      filenameOverride: SAMPLE_PROJECT_FILENAME,
-      filenameProjectTitle: sampleProject.title
+      filenameOverride: getSampleProjectFilename(state.language),
+      filenameProjectTitle: project.title
     });
     setProjectDirty(false);
     renderProjectFileStatus();
@@ -10303,7 +15882,7 @@ function applySavedState(saved) {
 }
 
 function getValidPlaybookTab(value) {
-  return ["variables", "script", "rules"].includes(value) ? value : "variables";
+  return ["variables", "actions", "script", "gates", "rules", "validation"].includes(value) ? value : "variables";
 }
 
 function parseSavedPayload(saved) {
@@ -10405,7 +15984,7 @@ async function ensureVaultProjectFile() {
   const host = window.NarrativeCanvasHost;
   if (!host?.ensureProjectFile) return false;
   try {
-    const options = isSampleProjectForFilename() ? { filenameOverride: SAMPLE_PROJECT_FILENAME } : undefined;
+    const options = isSampleProjectForFilename() ? { filenameOverride: getSampleProjectFilenameForProject() } : undefined;
     const target = await host.ensureProjectFile(JSON.stringify(buildSavedState(), null, 2), options);
     if (target) setStatus(`Created ${target}.`);
     return Boolean(target);
@@ -10417,8 +15996,8 @@ async function ensureVaultProjectFile() {
 }
 
 function isSampleProjectForFilename() {
-  return state.project?.title === sampleProject.title
-    && state.project?.variables?.traveler === sampleProject.variables.traveler
+  return state.project?.variables?.sample_id === "narrative_canvas_feature_guide"
+    && ["en", "zh"].includes(state.project?.variables?.sample_language)
     && state.project?.nodes?.some((node) => node.id === "e1" && node.type === "StorySequence");
 }
 
@@ -10426,6 +16005,66 @@ function exportJson() {
   const blob = new Blob([buildProjectJson()], { type: "application/json" });
   downloadBlob(blob, `${slugify(state.project.title || "narrative-canvas")}.json`);
   setStatus("JSON exported.");
+}
+
+function exportRuntimeJson() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const document = buildRuntimeExportDocument();
+  downloadJsonFile(document, `${slug}-runtime.json`);
+  showExportReport(document, "Runtime JSON");
+  setStatus("Runtime JSON exported.");
+}
+
+function exportStoryMarkdown() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const document = buildRuntimeExportDocument();
+  downloadBlob(new Blob([buildStoryMarkdown(document)], { type: "text/markdown;charset=utf-8" }), `${slug}-story.md`);
+  showExportReport(document, "Story MD");
+  setStatus("Story Markdown exported.");
+}
+
+function exportStoryLayoutJson() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  downloadJsonFile(buildStoryLayoutDocument(), `${slug}-layout.json`);
+  setStatus("Story layout JSON exported.");
+}
+
+function exportStateSchemaJson() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  downloadJsonFile(buildStateSchemaDocument(), `${slug}-state.schema.json`);
+  setStatus("State schema JSON exported.");
+}
+
+function exportProfileJson() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const runtimeDocument = buildRuntimeExportDocument();
+  downloadJsonFile(buildExportProfileDocument(runtimeDocument), `${slug}-export.profile.json`);
+  showExportReport(runtimeDocument, "Export Profile");
+  setStatus("Export profile JSON exported.");
+}
+
+function exportYarn() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const document = buildRuntimeExportDocument();
+  downloadBlob(new Blob([buildYarnScript(document)], { type: "text/plain;charset=utf-8" }), `${slug}.yarn`);
+  showExportReport(document, "Yarn");
+  setStatus("Yarn exported.");
+}
+
+function exportInk() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const document = buildRuntimeExportDocument();
+  downloadBlob(new Blob([buildInkScript(document)], { type: "text/plain;charset=utf-8" }), `${slug}.ink`);
+  showExportReport(document, "Ink");
+  setStatus("Ink exported.");
+}
+
+function exportTwee() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const document = buildRuntimeExportDocument();
+  downloadBlob(new Blob([buildTweeScript(document)], { type: "text/plain;charset=utf-8" }), `${slug}.twee`);
+  showExportReport(document, "Twee");
+  setStatus("Twee exported.");
 }
 
 function exportCharactersMarkdown() {
@@ -10473,21 +16112,26 @@ async function exportImage() {
   }
 }
 
-function exportHtml() {
-  downloadBlob(new Blob([buildExportHtml()], { type: "text/html" }), `${slugify(state.project.title || "narrative-canvas")}.html`);
-  setStatus("HTML exported.");
-}
-
 async function exportAll() {
   try {
     const slug = slugify(state.project.title || "narrative-canvas");
+    const runtimeDocument = buildRuntimeExportDocument();
     const files = [
       { name: `${slug}.json`, blob: new Blob([buildProjectJson()], { type: "application/json" }) },
+      { name: `${slug}-story.md`, blob: new Blob([buildStoryMarkdown(runtimeDocument)], { type: "text/markdown;charset=utf-8" }) },
+      { name: `${slug}-layout.json`, blob: new Blob([JSON.stringify(buildStoryLayoutDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
+      { name: `${slug}-state.schema.json`, blob: new Blob([JSON.stringify(buildStateSchemaDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
+      { name: `${slug}-export.profile.json`, blob: new Blob([JSON.stringify(buildExportProfileDocument(runtimeDocument), null, 2)], { type: "application/json;charset=utf-8" }) },
+      { name: `${slug}-runtime.json`, blob: new Blob([JSON.stringify(runtimeDocument, null, 2)], { type: "application/json;charset=utf-8" }) },
+      { name: `${slug}.yarn`, blob: new Blob([buildYarnScript(runtimeDocument)], { type: "text/plain;charset=utf-8" }) },
+      { name: `${slug}.ink`, blob: new Blob([buildInkScript(runtimeDocument)], { type: "text/plain;charset=utf-8" }) },
+      { name: `${slug}.twee`, blob: new Blob([buildTweeScript(runtimeDocument)], { type: "text/plain;charset=utf-8" }) },
       { name: "Events Sheet.csv", blob: new Blob([buildEventSheetCsv()], { type: "text/csv;charset=utf-8" }) },
+      { name: `${slug}-events.json`, blob: new Blob([JSON.stringify(buildEventSheetJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
       { name: "Node Fields.csv", blob: new Blob([buildNodeFieldsCsv()], { type: "text/csv;charset=utf-8" }) },
       { name: "Characters.md", blob: new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }) },
-      { name: PLAYBOOK_FILE_NAME, blob: new Blob([buildVariablesJson()], { type: "application/json" }) },
-      { name: `${slug}.html`, blob: new Blob([buildExportHtml()], { type: "text/html" }) }
+      { name: "Characters.json", blob: new Blob([JSON.stringify(buildCharactersJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
+      { name: PLAYBOOK_FILE_NAME, blob: new Blob([buildVariablesJson()], { type: "application/json" }) }
     ];
     const svg = buildExportSvg();
     const imagePreset = getExportImageScalePreset();
@@ -10500,6 +16144,7 @@ async function exportAll() {
     }
     const zipBlob = await createZipBlob(files);
     downloadBlob(zipBlob, `${slug}-export.zip`);
+    showExportReport(runtimeDocument, "Export all");
     setStatus("Project export package created.");
   } catch (error) {
     console.error(error);
@@ -10507,8 +16152,1893 @@ async function exportAll() {
   }
 }
 
+function showExportReport(document, formatName) {
+  if (!dom.exportReportDialog?.showModal || !dom.exportReportBody || !dom.exportReportTitle) {
+    setStatus("Export report is unavailable.");
+    return false;
+  }
+  const warnings = getExportReportWarnings(document);
+  const formatLabel = t(formatName || "Export");
+  dom.exportReportKicker.textContent = t("Export report");
+  dom.exportReportTitle.textContent = t("{format} export report", { format: formatLabel });
+  dom.exportReportBody.innerHTML = buildExportReportHtml(document, warnings);
+  dom.exportReportDialog.returnValue = "";
+  if (!dom.exportReportDialog.open) dom.exportReportDialog.showModal();
+  return true;
+}
+
+function getExportReportWarnings(document) {
+  return Array.isArray(document?.report?.warnings) ? document.report.warnings : [];
+}
+
+function buildExportReportHtml(document, warnings) {
+  const warningCount = warnings.length;
+  const summaryTitle = warningCount
+    ? t("{count} export warnings", { count: warningCount })
+    : t("No export warnings");
+  const warningSection = warningCount
+    ? buildExportWarningListHtml(warnings)
+    : "";
+  return `
+    <section class="export-report-summary" data-report-status="${warningCount ? "warning" : "ok"}">
+      <strong>${escapeHtml(summaryTitle)}</strong>
+      <span>${escapeHtml(t("Runtime JSON keeps the full report. Review any warning before wiring the export into a target engine."))}</span>
+    </section>
+    ${warningSection}
+    ${buildExportVariableNameMapHtml(document)}
+  `;
+}
+
+function buildExportWarningListHtml(warnings) {
+  const visibleWarnings = warnings.slice(0, 30);
+  const remainingCount = warnings.length - visibleWarnings.length;
+  const remaining = remainingCount > 0
+    ? `<p class="confirm-body">${escapeHtml(t("{count} more warnings are available in Runtime JSON.", { count: remainingCount }))}</p>`
+    : "";
+  return `
+    <section class="export-report-section">
+      <h3>${escapeHtml(t("Warnings"))}</h3>
+      <div class="export-report-list">
+        ${visibleWarnings.map((warning) => `
+          <article class="export-report-warning">
+            <code>${escapeHtml(warning.code || "warning")}</code>
+            <span>${escapeHtml(formatExportWarningMessage(warning))}</span>
+            ${formatExportWarningReference(warning)}
+          </article>
+        `).join("")}
+      </div>
+      ${remaining}
+    </section>
+  `;
+}
+
+function formatExportWarningMessage(warning) {
+  const message = String(warning?.message || "");
+  if (state.language !== "zh") return message;
+  const quoted = [...message.matchAll(/"([^"]*)"/g)].map((match) => match[1]);
+  const code = String(warning?.code || "");
+  if (code === "complex-variable") {
+    const key = quoted[0] || warning?.key || "";
+    if (/\bis an array\b/.test(message)) {
+      return t("Variable \"{key}\" is an array; runtime JSON and Twee keep it, Yarn exports it as a JSON string for membership predicates, and Ink exports a LIST when items are primitive.", { key });
+    }
+    return t("Variable \"{key}\" is an object; runtime JSON keeps it, Twee initializes it, and Yarn/Ink comment it out.", { key });
+  }
+  if (code === "effect-op-runtime-only") {
+    return t("Effect \"{op}\" on \"{key}\" is kept in runtime JSON but commented in text exports.", {
+      op: quoted[0] || "",
+      key: quoted[1] || "(no key)"
+    });
+  }
+  if (code === "custom-node-type-runtime-only") {
+    return t("Custom node type \"{type}\" exports as rendered text and custom fields; target formats may need a custom loader.", { type: quoted[0] || "" });
+  }
+  if (code === "playbook-action-runtime-only") {
+    const detail = message.match(/\(([^)]+)\)/)?.[1] || "";
+    return t("Playbook action \"{id}\" ({detail}) is kept in runtime JSON but not emitted to text exports.", { id: quoted[0] || "", detail });
+  }
+  if (code === "playbook-actions-runtime-only") {
+    const count = message.match(/^(\d+)/)?.[1] || "";
+    return t("{count} Playbook action(s) are included in runtime JSON but not emitted to text exports.", { count });
+  }
+  if (code === "state-key-name-sanitized") {
+    return t("State key \"{key}\" exports with \".\" converted to \"_\" in portable text formats.", { key: quoted[0] || "" });
+  }
+  if (code === "state-path-flattened") {
+    return t("State path \"{key}\" exports as \"{exportKey}\" for portable text formats.", { key: quoted[0] || "", exportKey: quoted[1] || "" });
+  }
+  if (code === "implicit-variable") {
+    return t("State key \"{key}\" is referenced or written but has no initial variable value.", { key: quoted[0] || "" });
+  }
+  if (code === "variable-name-sanitized" || code === "variable-name-collision" || code === "node-name-sanitized" || code === "node-name-collision") {
+    const kind = code.startsWith("node-") ? t("Node") : t("Variable");
+    return t("{kind} \"{source}\" exports as \"{target}\".", { kind, source: quoted[0] || "", target: quoted[1] || "" });
+  }
+  if (code === "expression-not-translated") {
+    return t("Expression \"{expression}\" is kept in Runtime JSON; Yarn, Ink, and Twee use a false guard.", { expression: quoted[0] || "" });
+  }
+  return t(message);
+}
+
+function formatExportWarningReference(warning) {
+  const parts = [];
+  if (warning?.nodeId) {
+    const node = getNode(warning.nodeId);
+    parts.push(node ? `${getNodeDisplayTitle(node, node.type)} (${warning.nodeId})` : warning.nodeId);
+  }
+  if (warning?.linkId) parts.push(`link ${warning.linkId}`);
+  if (warning?.choiceId) parts.push(`choice ${warning.choiceId}`);
+  if (!parts.length) return "";
+  return `<small>${escapeHtml(t("Reference: {value}", { value: parts.join(" / ") }))}</small>`;
+}
+
+function buildExportVariableNameMapHtml(document) {
+  const entries = Object.entries(document?.report?.variableNameMap || {})
+    .filter(([source, target]) => source !== target);
+  if (!entries.length) {
+    return `
+      <section class="export-report-section">
+        <h3>${escapeHtml(t("Variable name map"))}</h3>
+        <p class="confirm-body">${escapeHtml(t("No variable names needed conversion."))}</p>
+      </section>
+    `;
+  }
+  return `
+    <section class="export-report-section">
+      <h3>${escapeHtml(t("Variable name map"))}</h3>
+      <p class="confirm-body">${escapeHtml(t("Only changed names are shown."))}</p>
+      <dl class="export-report-map">
+        ${entries.map(([source, target]) => `
+          <div>
+            <dt><code>${escapeHtml(source)}</code></dt>
+            <dd aria-hidden="true">→</dd>
+            <dd><code>${escapeHtml(target)}</code></dd>
+          </div>
+        `).join("")}
+      </dl>
+    </section>
+  `;
+}
+
 function buildProjectJson() {
   return JSON.stringify(state.project, null, 2);
+}
+
+function buildRuntimeExportDocument() {
+  const warnings = [];
+  const model = buildRuntimeExportNameModel(warnings);
+  const nodes = getRuntimeExportNodeOrder(model)
+    .map((node) => buildRuntimeExportNode(node, model, warnings));
+  const links = buildRuntimeExportLinks(model, warnings);
+  const playbookActions = getPlaybookActions();
+  const runtimeOnlyPlaybookActions = playbookActions.filter(isPlaybookActionRuntimeOnlyForPortableExport);
+  if (runtimeOnlyPlaybookActions.length) {
+    pushExportWarning(warnings, "playbook-actions-runtime-only", `${runtimeOnlyPlaybookActions.length} Playbook action(s) are included in runtime JSON but not emitted to Yarn, Ink, or Twee.`);
+  }
+  appendStateReportExportWarnings(warnings, buildStateReport());
+  const reportWarnings = dedupeExportWarnings(warnings);
+  return {
+    format: "narrative-canvas-runtime",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    source: {
+      title: state.project.title || "Untitled",
+      notes: state.project.notes || ""
+    },
+    startNodeId: model.startNode?.id || "",
+    startNode: model.startNode ? model.nodeNameMap[model.startNode.id] : "",
+    variables: model.variables,
+    variableNames: Object.values(model.variableNameMap),
+    characters: getCharacters().map((character) => ({
+      id: character.id,
+      name: character.name,
+      role: character.role,
+      voice: character.voice,
+      notes: character.notes
+    })),
+    nodes,
+    links,
+    playbook: {
+      rules: getRunnerRules(),
+      actions: playbookActions.map((action) => ({
+        id: action.id,
+        trigger: action.trigger,
+        op: action.op,
+        target: action.target,
+        category: action.category,
+        key: action.key,
+        stateKey: getPlaybookActionStateKey(action),
+        value: action.value
+      }))
+    },
+    report: {
+      warnings: reportWarnings,
+      variableNameMap: model.variableNameMap,
+      nodeNameMap: model.nodeNameMap
+    }
+  };
+}
+
+function appendStateReportExportWarnings(warnings, report) {
+  if (!Array.isArray(report?.exportBlocks)) return;
+  report.exportBlocks
+    .filter((block) => !["effect-op-runtime-only"].includes(block.code))
+    .forEach((block) => {
+      pushExportWarning(warnings, block.code, block.message, {
+        nodeId: block.nodeId
+      });
+    });
+}
+
+function dedupeExportWarnings(warnings) {
+  const seen = new Set();
+  return (Array.isArray(warnings) ? warnings : []).filter((warning) => {
+    const key = [
+      warning?.code || "",
+      warning?.message || "",
+      warning?.nodeId || "",
+      warning?.linkId || "",
+      warning?.choiceId || ""
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildRuntimeExportNameModel(warnings) {
+  const sourceVariables = normalizeVariablesObject(state.project.variables);
+  const variableNameMap = {};
+  const variableUsed = new Set();
+  const variables = {};
+  Object.entries(sourceVariables).forEach(([key, value]) => {
+    const safeKey = makeUniqueExportIdentifier(key, "variable", variableUsed, "variable", warnings);
+    variableNameMap[key] = safeKey;
+    variables[safeKey] = cloneRuntimeExportValue(value);
+    if (isComplexRuntimeValue(value)) {
+      const message = Array.isArray(value)
+        ? `Variable "${key}" is an array; runtime JSON and Twee keep it, Yarn exports it as a JSON string for membership predicates, and Ink exports a LIST when items are primitive.`
+        : `Variable "${key}" is an object; runtime JSON keeps it, Twee initializes it, and Yarn/Ink comment it out.`;
+      pushExportWarning(warnings, "complex-variable", message);
+    }
+  });
+
+  const exportNodes = getRuntimeExportableNodes();
+  const startNode = getPreviewStartNode(getPreviewPath()) || exportNodes[0] || null;
+  const nodeNameMap = {};
+  const nodeUsed = new Set();
+  if (startNode) {
+    nodeNameMap[startNode.id] = makeUniqueExportIdentifier("Start", "Start", nodeUsed, "node", warnings, { original: startNode.title || startNode.id, suppressSanitizedWarning: true });
+  }
+  exportNodes.forEach((node, index) => {
+    if (nodeNameMap[node.id]) return;
+    nodeNameMap[node.id] = makeUniqueExportIdentifier(node.title || node.id, `Node_${index + 1}`, nodeUsed, "node", warnings);
+  });
+
+  return {
+    sourceVariables,
+    variables,
+    variableNameMap,
+    variableUsed,
+    nodeNameMap,
+    nodeUsed,
+    startNode
+  };
+}
+
+function getRuntimeExportableNodes() {
+  return (Array.isArray(state.project.nodes) ? state.project.nodes : [])
+    .filter((node) => node && !isFrameNode(node));
+}
+
+function getRuntimeExportNodeOrder(model) {
+  const seen = new Set();
+  const ordered = [];
+  const add = (node) => {
+    if (!node || seen.has(node.id) || isFrameNode(node)) return;
+    seen.add(node.id);
+    ordered.push(node);
+  };
+  add(model.startNode);
+  getPreviewPath().forEach(add);
+  getRuntimeExportableNodes().slice().sort(compareRawNodePosition).forEach(add);
+  return ordered;
+}
+
+function buildRuntimeExportNode(node, model, warnings) {
+  const script = getNodeRuntimeScript(node);
+  const outgoing = getChoiceOrderedLinks(getOutgoing(node.id));
+  const requirementsSource = getExportNodeRequirementsSource(node, script, model);
+  const branchConditionSource = getExportBranchConditionSource(node, script, model);
+  const choices = getExportChoiceEntries(node, script, model, warnings, outgoing);
+  const routing = normalizeNodeRouting(node.routing);
+  return {
+    id: node.id,
+    slug: model.nodeNameMap[node.id],
+    title: renderExportTemplate(script.title, node, getNodeDisplayTitle(node, node.type), model, "runtime"),
+    type: node.type,
+    typeLabel: getNodeTypeLabel(node.type),
+    body: getExportNodeBody(node, script, model),
+    requirements: transformExportExpression(requirementsSource, model, warnings, { nodeId: node.id }),
+    condition: transformExportExpression(branchConditionSource, model, warnings, { nodeId: node.id }),
+    effects: getRuntimeExportNodeEffects(node, model, warnings),
+    choices,
+    conditionBranches: choices.length ? [] : getExportConditionBranches(branchConditionSource, outgoing, model, warnings, node.id),
+    next: choices.length || branchConditionSource ? [] : getExportNextTransitions(node, outgoing, routing, model, warnings),
+    routing: {
+      mode: routing.mode,
+      target: routing.target,
+      targetId: getRoutingNextNodeId(node)
+    },
+    cast: getRuntimeExportCast(node),
+    customFields: getRuntimeExportCustomFields(node, model)
+  };
+}
+
+function getRuntimeExportNodeEffects(node, model, warnings) {
+  return normalizeNodeStateLogic(node.stateLogic).effects
+    .map((effect) => buildRuntimeExportEffect(effect, model, warnings, { nodeId: node.id }));
+}
+
+function getExportNodeBody(node, script, model) {
+  if (node?.type === "Dialog" && Array.isArray(node.turns) && node.turns.length) {
+    return node.turns
+      .map((turn) => {
+        const speaker = renderExportTemplate(turn.speaker, node, turn.speaker, model, "runtime").trim();
+        const line = renderExportTemplate(turn.line, node, turn.line, model, "runtime").trim();
+        return speaker ? `${speaker}: ${line}` : line;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return renderExportTemplate(script.body, node, displayBody(node), model, "runtime");
+}
+
+function getRuntimeExportCast(node) {
+  const characters = new Map(getCharacters().map((character) => [character.id, character]));
+  return (Array.isArray(node?.cast) ? node.cast : [])
+    .map((entry) => {
+      const character = characters.get(entry.characterId);
+      if (!character) return null;
+      return {
+        characterId: character.id,
+        name: character.name,
+        role: entry.role || "Present"
+      };
+    })
+    .filter(Boolean);
+}
+
+function getRuntimeExportCustomFields(node, model) {
+  const fields = {};
+  getNodeCustomFieldEntries(node).forEach((field) => {
+    fields[field.key] = renderExportTemplate(field.value, node, field.value, model, "runtime");
+  });
+  return fields;
+}
+
+function getExportNodeRequirementsSource(node, script, model) {
+  const requirements = normalizeNodeStateLogic(node?.stateLogic).requirements;
+  if (requirements) return renderExportTemplate(requirements, node, requirements, model, "runtime");
+  const gateAction = getPlaybookGateAction(node);
+  if (gateAction) {
+    const value = renderExportTemplate(gateAction.value, node, gateAction.value, model, "runtime");
+    return `${getPlaybookActionStateKey(gateAction)} ${value}`.trim();
+  }
+  return "";
+}
+
+function getExportBranchConditionSource(node, script, model) {
+  if (script?.condition) {
+    const fieldValue = getNodeFieldValue(node, script.condition);
+    return fieldValue !== "" ? renderExportTemplate(fieldValue, node, fieldValue, model, "runtime") : script.condition;
+  }
+  return hasNodeCondition(node) ? renderExportTemplate(node.condition || node.body, node, node.condition || node.body, model, "runtime") : "";
+}
+
+function getExportChoiceEntries(node, script, model, warnings, outgoing) {
+  const labels = getExportRuntimeChoices(node, script, model);
+  const options = Array.isArray(node?.choiceOptions) ? node.choiceOptions : [];
+  const links = getChoiceOrderedLinks(outgoing || []);
+  return labels.map((label, index) => {
+    const option = options[index];
+    const link = findExportChoiceLink(option, index, links);
+    const requires = option?.requires ? renderExportTemplate(option.requires, node, option.requires, model, "runtime") : "";
+    const linkCondition = link ? getExportLinkCondition(link, model, warnings, { nodeId: node.id, linkId: link.id }) : "";
+    const targetRequirement = link ? getExportTargetRequirementCondition(link, model, warnings, { nodeId: node.id, linkId: link.id }) : "";
+    const playbookChoiceCondition = getExportPlaybookChoiceCondition(node, option, label, model, warnings, { nodeId: node.id, choiceId: option?.id || "" });
+    return {
+      id: option?.id || "",
+      label,
+      condition: combineRuntimeConditions([transformExportExpression(requires, model, warnings, { nodeId: node.id }), linkCondition, targetRequirement, playbookChoiceCondition], "&&"),
+      effects: (Array.isArray(option?.effects) ? option.effects : []).map((effect) => buildRuntimeExportEffect(effect, model, warnings, { nodeId: node.id, choiceId: option?.id || "" })),
+      targetId: link?.to || "",
+      target: link?.to ? model.nodeNameMap[link.to] || "" : "",
+      linkId: link?.id || ""
+    };
+  });
+}
+
+function getExportPlaybookChoiceCondition(node, option, label, model, warnings, ref) {
+  const conditions = getMatchingPlaybookChoiceGateActions(node, option, label)
+    .map((action) => {
+      const source = renderExportTemplate(action.value, node, action.value, model, "runtime").trim();
+      const condition = getChoiceGateConditionExpression(action, source);
+      return transformExportExpression(condition, model, warnings, { ...ref, choiceId: option?.id || ref?.choiceId || "" });
+    })
+    .filter(Boolean);
+  return combineRuntimeConditions(conditions, "&&");
+}
+
+function getExportRuntimeChoices(node, script, model) {
+  let choices = [];
+  if (Array.isArray(script?.choices)) {
+    choices = script.choices;
+  } else if (script?.choices) {
+    const fieldValue = getNodeFieldValue(node, script.choices);
+    choices = parseChoiceLines(fieldValue !== "" ? fieldValue : script.choices);
+  } else if (hasNodeChoices(node)) {
+    choices = node.choices;
+  }
+  return choices.map((choice) => renderExportTemplate(choice, node, choice, model, "runtime")).filter(Boolean);
+}
+
+function getMatchingPlaybookChoiceGateActions(node, option, label) {
+  return getPlaybookActions().filter((action) => {
+    return isPortableChoiceGateAction(action)
+      && matchesPlaybookActionTarget(action, node)
+      && playbookChoiceActionMatchesOption(action, option, label);
+  });
+}
+
+function playbookChoiceActionMatchesOption(action, option, label) {
+  const selector = normalizeOptionalString(action?.key).trim();
+  if (!selector || selector === "state_key") return false;
+  const candidates = [
+    option?.id,
+    option?.label,
+    label
+  ].map((value) => normalizeOptionalString(value).trim()).filter(Boolean);
+  if (candidates.some((candidate) => candidate === selector)) return true;
+  const normalizedSelector = normalizeChoiceMatchText(selector);
+  return Boolean(normalizedSelector) && candidates.some((candidate) => normalizeChoiceMatchText(candidate) === normalizedSelector);
+}
+
+function getChoiceGateConditionExpression(action, source) {
+  const condition = normalizeOptionalString(source).trim();
+  const truth = getStaticConditionTruth(condition);
+  if (action?.op === "lockChoice") {
+    if (truth === false) return "";
+    if (truth === true || !condition) return "false";
+    return `!(${condition})`;
+  }
+  if (action?.op === "unlockChoice") {
+    if (truth === false) return "false";
+    if (truth === true || !condition) return "";
+    return condition;
+  }
+  return "";
+}
+
+function getStaticConditionTruth(source) {
+  const text = normalizeOptionalString(source).trim();
+  if (!text) return true;
+  if (/^(true|1)$/i.test(text)) return true;
+  if (/^(false|0|null)$/i.test(text)) return false;
+  return null;
+}
+
+function findExportChoiceLink(option, index, links) {
+  if (option?.id) {
+    const byId = links.find((link) => link.choiceOptionId === option.id);
+    if (byId) return byId;
+  }
+  const byIndex = links.find((link) => normalizeChoiceIndex(link.choiceIndex) === index);
+  return byIndex || links[index] || null;
+}
+
+function getExportConditionBranches(conditionSource, outgoing, model, warnings, nodeId) {
+  if (!conditionSource) return [];
+  const links = getChoiceOrderedLinks(outgoing || []);
+  return links.slice(0, 2).map((link, index) => ({
+    branch: index === 0 ? "true" : "false",
+    targetId: link.to,
+    target: model.nodeNameMap[link.to] || "",
+    linkId: link.id || "",
+    condition: combineRuntimeConditions([
+      getExportLinkCondition(link, model, warnings, { nodeId, linkId: link.id }),
+      getExportTargetRequirementCondition(link, model, warnings, { nodeId, linkId: link.id })
+    ], "&&")
+  }));
+}
+
+function getExportNextTransitions(node, outgoing, routing, model, warnings) {
+  if (routing.mode === "end") return [];
+  const routingTargetId = getRoutingNextNodeId(node);
+  if (routingTargetId) {
+    return [{
+      targetId: routingTargetId,
+      target: model.nodeNameMap[routingTargetId] || "",
+      condition: "",
+      label: "Continue",
+      source: "routing"
+    }];
+  }
+  return getChoiceOrderedLinks(outgoing || []).map((link) => ({
+    targetId: link.to,
+    target: model.nodeNameMap[link.to] || "",
+    linkId: link.id || "",
+    label: link.label || "Continue",
+    condition: combineRuntimeConditions([
+      getExportLinkCondition(link, model, warnings, { nodeId: node.id, linkId: link.id }),
+      getExportTargetRequirementCondition(link, model, warnings, { nodeId: node.id, linkId: link.id })
+    ], "&&"),
+    source: "link"
+  }));
+}
+
+function getExportTargetRequirementCondition(link, model, warnings, ref) {
+  const targetNode = getNode(link?.to);
+  if (!targetNode) return "";
+  const targetScript = getNodeRuntimeScript(targetNode);
+  const requirements = getExportNodeRequirementsSource(targetNode, targetScript, model);
+  return requirements ? transformExportExpression(requirements, model, warnings, { ...ref, nodeId: targetNode.id }) : "";
+}
+
+function buildRuntimeExportLinks(model, warnings) {
+  return (Array.isArray(state.project.links) ? state.project.links : []).map((link) => ({
+    id: link.id || "",
+    fromId: link.from || "",
+    from: model.nodeNameMap[link.from] || "",
+    toId: link.to || "",
+    to: model.nodeNameMap[link.to] || "",
+    label: link.label || "",
+    choiceIndex: normalizeChoiceIndex(link.choiceIndex),
+    choiceOptionId: link.choiceOptionId || "",
+    condition: getExportLinkCondition(link, model, warnings, { linkId: link.id || "" })
+  }));
+}
+
+function getExportLinkCondition(link, model, warnings, ref) {
+  const source = normalizeOptionalString(link?.requirements || link?.requires).trim();
+  return source ? transformExportExpression(source, model, warnings, ref) : "";
+}
+
+function buildRuntimeExportEffect(effect, model, warnings, ref) {
+  const sourceKey = normalizeOptionalString(effect?.key).trim();
+  const key = sourceKey ? getOrCreateExportVariableName(sourceKey, model, warnings, ref) : "";
+  const op = effect?.op || "set";
+  if (!["set", "add", "subtract", "toggle"].includes(op)) {
+    pushExportWarning(warnings, "effect-op-runtime-only", `Effect "${op}" on "${sourceKey || "(no key)"}" is kept in runtime JSON but commented in Yarn and Ink.`, ref);
+  }
+  return {
+    trigger: effect?.trigger || "onVisit",
+    op,
+    sourceKey,
+    key,
+    value: coerceValue(effect?.value ?? ""),
+    valueSource: normalizeOptionalString(effect?.value)
+  };
+}
+
+function cloneRuntimeExportValue(value) {
+  if (value == null || typeof value !== "object") return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isComplexRuntimeValue(value) {
+  return Boolean(value && typeof value === "object");
+}
+
+function renderExportTemplate(template, node, fallback, model, format, depth = 0) {
+  if (depth > 8) return String(template == null || template === "" ? fallback : template || "");
+  const source = template == null || template === "" ? fallback : template;
+  return String(source || "").replace(/\{([a-zA-Z_][\w.-]*)\}/g, (match, key) => {
+    if (key.startsWith("variables.")) {
+      const variableKey = key.slice("variables.".length);
+      return formatExportVariableReference(getOrCreateExportVariableName(variableKey, model, [], {}), format);
+    }
+    const nodeValue = getNodeFieldValue(node, key);
+    if (nodeValue !== "") return renderExportTemplate(nodeValue, node, nodeValue, model, format, depth + 1);
+    if (Object.prototype.hasOwnProperty.call(model.sourceVariables, key)) {
+      return formatExportVariableReference(getOrCreateExportVariableName(key, model, [], {}), format);
+    }
+    if (key.includes(".")) {
+      return formatExportVariableReference(getOrCreateExportVariableName(key, model, [], {}), format);
+    }
+    return match;
+  });
+}
+
+function formatExportVariableReference(key, format) {
+  if (!key) return "";
+  return format === "yarn" ? `{$${key}}` : `{${key}}`;
+}
+
+function parseJsConditionExpression(source) {
+  const text = normalizeOptionalString(source).trim();
+  if (!text) return { ast: null, invalid: false, error: "" };
+  try {
+    const tokens = tokenizeJsConditionExpression(text);
+    const parser = createJsConditionParser(tokens);
+    const ast = parser.parseExpression();
+    parser.expect("eof");
+    return { ast, invalid: false, error: "" };
+  } catch (error) {
+    return { ast: null, invalid: true, error: error?.message || "Invalid expression" };
+  }
+}
+
+function tokenizeJsConditionExpression(source) {
+  const tokens = [];
+  const text = String(source || "");
+  let index = 0;
+  const push = (type, value, raw = value) => tokens.push({ type, value, raw });
+  const previousAllowsSignedNumber = () => {
+    const previous = tokens[tokens.length - 1];
+    return !previous || previous.type === "operator" || previous.type === "(" || previous.type === ",";
+  };
+  while (index < text.length) {
+    const char = text[index];
+    if (/\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      const quote = char;
+      let raw = quote;
+      let value = "";
+      index += 1;
+      let escaped = false;
+      while (index < text.length) {
+        const current = text[index];
+        raw += current;
+        index += 1;
+        if (escaped) {
+          value += current;
+          escaped = false;
+          continue;
+        }
+        if (current === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (current === quote) break;
+        value += current;
+      }
+      if (!raw.endsWith(quote)) throw new Error("Unclosed string");
+      push("literal", value, raw);
+      continue;
+    }
+    const numberMatch = text.slice(index).match(/^-?(?:\d+(?:\.\d*)?|\.\d+)/);
+    if (numberMatch && (numberMatch[0][0] !== "-" || previousAllowsSignedNumber())) {
+      push("literal", Number(numberMatch[0]), numberMatch[0]);
+      index += numberMatch[0].length;
+      continue;
+    }
+    const identifierMatch = text.slice(index).match(/^[A-Za-z_]\w*/);
+    if (identifierMatch) {
+      const value = identifierMatch[0];
+      const lower = value.toLowerCase();
+      if (lower === "true") push("literal", true, value);
+      else if (lower === "false") push("literal", false, value);
+      else if (lower === "null") push("literal", null, value);
+      else if (lower === "undefined") push("literal", undefined, value);
+      else if (lower === "not") push("operator", "!", value);
+      else push("identifier", value, value);
+      index += value.length;
+      continue;
+    }
+    const operator = ["===", "!==", "&&", "||", "==", "!=", ">=", "<=", ">", "<", "!"].find((item) => text.startsWith(item, index));
+    if (operator) {
+      push("operator", operator, operator);
+      index += operator.length;
+      continue;
+    }
+    if ("().,".includes(char)) {
+      push(char, char, char);
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unexpected token ${char}`);
+  }
+  push("eof", "");
+  return tokens;
+}
+
+function createJsConditionParser(tokens) {
+  let index = 0;
+  const current = () => tokens[index] || { type: "eof", value: "" };
+  const consume = (type, value) => {
+    const token = current();
+    if (token.type !== type || (value != null && token.value !== value)) {
+      throw new Error(`Expected ${value || type}`);
+    }
+    index += 1;
+    return token;
+  };
+  const match = (type, value) => {
+    const token = current();
+    if (token.type !== type || (value != null && token.value !== value)) return null;
+    index += 1;
+    return token;
+  };
+  const parseExpression = () => parseLogicalOr();
+  const parseLogicalOr = () => {
+    let node = parseLogicalAnd();
+    while (match("operator", "||")) node = { type: "logical", operator: "||", left: node, right: parseLogicalAnd() };
+    return node;
+  };
+  const parseLogicalAnd = () => {
+    let node = parseEquality();
+    while (match("operator", "&&")) node = { type: "logical", operator: "&&", left: node, right: parseEquality() };
+    return node;
+  };
+  const parseEquality = () => {
+    let node = parseComparison();
+    while (["===", "!==", "==", "!="].includes(current().value)) {
+      const operator = consume("operator").value;
+      node = { type: "binary", operator, left: node, right: parseComparison() };
+    }
+    return node;
+  };
+  const parseComparison = () => {
+    let node = parseUnary();
+    while ([">=", "<=", ">", "<"].includes(current().value)) {
+      const operator = consume("operator").value;
+      node = { type: "binary", operator, left: node, right: parseUnary() };
+    }
+    return node;
+  };
+  const parseUnary = () => {
+    if (match("operator", "!")) return { type: "unary", operator: "!", argument: parseUnary() };
+    return parsePostfix();
+  };
+  const parsePostfix = () => {
+    let node = parsePrimary();
+    while (match(".", ".")) {
+      const property = consume("identifier").value;
+      if (JS_CONDITION_METHODS.has(property) && match("(", "(")) {
+        const args = parseArgumentsAfterOpenParen();
+        node = { type: "call", name: property, object: node, args };
+      } else if (node.type === "identifier") {
+        node = { ...node, path: [...node.path, property] };
+      } else {
+        throw new Error("Unsupported property access");
+      }
+    }
+    if (node.type === "identifier" && match("(", "(")) {
+      const args = parseArgumentsAfterOpenParen();
+      const name = node.path.join(".");
+      if (!JS_CONDITION_LEGACY_FUNCTIONS.has(name)) throw new Error(`Unsupported function ${name}`);
+      return { type: "call", name, object: null, args };
+    }
+    return node;
+  };
+  const parseArgumentsAfterOpenParen = () => {
+    const args = [];
+    if (match(")", ")")) return args;
+    do {
+      args.push(parseExpression());
+    } while (match(",", ","));
+    consume(")", ")");
+    return args;
+  };
+  const parsePrimary = () => {
+    if (current().type === "literal") {
+      const token = consume("literal");
+      return { type: "literal", value: token.value, raw: token.raw };
+    }
+    if (current().type === "identifier") {
+      const token = consume("identifier");
+      return { type: "identifier", path: [token.value] };
+    }
+    if (match("(", "(")) {
+      const expression = parseExpression();
+      consume(")", ")");
+      return { type: "group", expression };
+    }
+    throw new Error("Expected expression");
+  };
+  return {
+    parseExpression,
+    expect: consume
+  };
+}
+
+function formatJsConditionAst(ast, format, context = {}) {
+  if (!ast) return "";
+  if (ast.type === "literal") return formatConditionLiteral(ast.value);
+  if (ast.type === "identifier") return formatConditionIdentifier(ast, format, context);
+  if (ast.type === "group") {
+    const expression = formatJsConditionAst(ast.expression, format, context);
+    return expression ? `(${expression})` : "";
+  }
+  if (ast.type === "unary") {
+    const argument = formatJsConditionAst(ast.argument, format, context);
+    if (!argument) return "";
+    if (format === "yarn" || format === "ink") return `not ${wrapConditionTerm(argument)}`;
+    return `!${wrapConditionTerm(argument)}`;
+  }
+  if (ast.type === "logical") {
+    const left = formatJsConditionAst(ast.left, format, context);
+    const right = formatJsConditionAst(ast.right, format, context);
+    const parts = [left, right].filter(Boolean);
+    if (!parts.length) return "";
+    if (parts.length === 1) return parts[0];
+    const operator = format === "yarn" || format === "ink"
+      ? (ast.operator === "&&" ? "and" : "or")
+      : ast.operator;
+    return parts.map((part) => wrapConditionTerm(part)).join(` ${operator} `);
+  }
+  if (ast.type === "binary") {
+    const left = formatJsConditionAst(ast.left, format, context);
+    const right = formatConditionComparisonOperand(ast.right, format, context);
+    if (!left || !right) return "";
+    return `${left} ${formatConditionOperator(ast.operator, format)} ${right}`;
+  }
+  if (ast.type === "call") return formatConditionCall(ast, format, context);
+  return "";
+}
+
+function formatConditionLiteral(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value == null) return "null";
+  if (typeof value === "undefined") return "undefined";
+  return JSON.stringify(String(value));
+}
+
+function formatConditionIdentifier(ast, format, context = {}) {
+  const key = normalizeConditionIdentifierPath(ast.path);
+  if (!key) return "";
+  if (isTransientVisitStateKey(key) && format === "runtime") return "";
+  if (format === "runtime") {
+    return getOrCreateExportVariableName(normalizeExportVariableSourceKey(key), context.model, context.warnings, context.ref);
+  }
+  if (format === "yarn") return `$${key}`;
+  if (format === "twee") return `$${key}`;
+  return key;
+}
+
+function formatConditionComparisonOperand(ast, format, context = {}) {
+  if (format !== "runtime" || ast?.type !== "identifier") return formatJsConditionAst(ast, format, context);
+  const key = normalizeConditionIdentifierPath(ast.path);
+  if (!key || ast.path?.[0] === "variables" || isTransientVisitStateKey(key)) return formatJsConditionAst(ast, format, context);
+  const resolved = resolveRuntimeStatePath(normalizeExportVariableSourceKey(key), context.model?.sourceVariables || {});
+  if (!resolved.found) return formatConditionLiteral(key);
+  return formatJsConditionAst(ast, format, context);
+}
+
+function normalizeConditionIdentifierPath(path) {
+  const parts = (Array.isArray(path) ? path : []).map((part) => normalizeOptionalString(part).trim()).filter(Boolean);
+  if (!parts.length) return "";
+  if (parts[0] === "variables" && parts.length > 1) return parts.slice(1).join(".");
+  return parts.join(".");
+}
+
+function formatConditionOperator(operator, format) {
+  if (operator === "==" || operator === "===") return format === "runtime" ? "===" : "==";
+  if (operator === "!=" || operator === "!==") return format === "runtime" ? "!==" : "!=";
+  return operator;
+}
+
+function wrapConditionTerm(term) {
+  const text = String(term || "").trim();
+  if (!text) return "";
+  if (/^(?:[$]?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?|true|false|null|undefined|-?\d+(?:\.\d+)?)$/.test(text)) return text;
+  if (text.startsWith("(") && text.endsWith(")")) return text;
+  return `(${text})`;
+}
+
+function formatConditionCall(ast, format, context = {}) {
+  if (ast.name === "includes") {
+    const object = formatJsConditionAst(ast.object, format, context);
+    const value = formatJsConditionAst(ast.args?.[0], format, context);
+    if (!object || !value) return "";
+    if (format === "yarn") return `contains(${object}, ${value})`;
+    if (format === "ink") return formatInkIncludesExpression(ast, context);
+    return `${object}.includes(${value})`;
+  }
+  if (JS_CONDITION_LEGACY_FUNCTIONS.has(ast.name)) {
+    const key = formatJsConditionAst(ast.args?.[0], format, context);
+    const value = formatJsConditionAst(ast.args?.[1], format, context);
+    if (!key || !value) return "";
+    if (format === "runtime" || format === "twee") return `${key}.includes(${value})`;
+    if (format === "ink") return formatInkLegacyMembershipExpression(ast, context);
+    return `contains(${key}, ${value})`;
+  }
+  return "";
+}
+
+function formatInkIncludesExpression(ast, context = {}) {
+  const key = ast.object?.type === "identifier" ? normalizeConditionIdentifierPath(ast.object.path) : "";
+  if (!key) {
+    const object = formatJsConditionAst(ast.object, "ink", context);
+    const value = formatJsConditionAst(ast.args?.[0], "ink", context);
+    return object && value ? `(${object} ? ${value})` : "";
+  }
+  return formatInkMembershipByKey(key, ast.args?.[0], context);
+}
+
+function formatInkLegacyMembershipExpression(ast, context = {}) {
+  const key = ast.args?.[0]?.type === "identifier" ? normalizeConditionIdentifierPath(ast.args[0].path) : "";
+  if (!key) {
+    const object = formatJsConditionAst(ast.args?.[0], "ink", context);
+    const value = formatJsConditionAst(ast.args?.[1], "ink", context);
+    return object && value ? `(${object} ? ${value})` : "";
+  }
+  return formatInkMembershipByKey(key, ast.args?.[1], context);
+}
+
+function formatInkMembershipByKey(key, valueAst, context = {}) {
+  const list = context.inkListMap?.[key];
+  const value = formatJsConditionAst(valueAst, "ink", context);
+  if (!list) return value ? `(${key} ? ${value})` : "";
+  const literal = valueAst?.type === "literal" ? valueAst.value : parseExpressionLiteral(value);
+  const item = list.itemByValue.get(String(literal));
+  return `(${key} ? ${item?.identifier || makeInkListIdentifier(`${key}_${literal || "item"}`, "item", new Set())})`;
+}
+
+function evaluateJsConditionAst(ast, variables) {
+  if (!ast) return false;
+  if (ast.type === "literal") return ast.value;
+  if (ast.type === "identifier") return resolveJsConditionIdentifier(ast.path, variables);
+  if (ast.type === "group") return evaluateJsConditionAst(ast.expression, variables);
+  if (ast.type === "unary") return !coerceBoolean(evaluateJsConditionAst(ast.argument, variables));
+  if (ast.type === "logical") {
+    if (ast.operator === "&&") return coerceBoolean(evaluateJsConditionAst(ast.left, variables)) && coerceBoolean(evaluateJsConditionAst(ast.right, variables));
+    return coerceBoolean(evaluateJsConditionAst(ast.left, variables)) || coerceBoolean(evaluateJsConditionAst(ast.right, variables));
+  }
+  if (ast.type === "binary") return evaluateJsConditionBinary(ast, variables);
+  if (ast.type === "call") return evaluateJsConditionCall(ast, variables);
+  return false;
+}
+
+function resolveJsConditionIdentifier(path, variables) {
+  const key = normalizeConditionIdentifierPath(path);
+  if (isTransientVisitStateKey(key)) return isPreviewVisitedStateKeyMet(key);
+  return resolveRuntimeStatePath(key, variables).value;
+}
+
+function evaluateJsConditionBinary(ast, variables) {
+  const left = evaluateJsConditionAst(ast.left, variables);
+  const right = evaluateJsConditionComparisonOperand(ast.right, variables);
+  if (ast.operator === "===") return expressionValuesStrictMatch(left, right);
+  if (ast.operator === "!==") return !expressionValuesStrictMatch(left, right);
+  if (ast.operator === "==") return expressionValuesMatch(left, right);
+  if (ast.operator === "!=") return !expressionValuesMatch(left, right);
+  if (ast.operator === ">=") return left >= right;
+  if (ast.operator === "<=") return left <= right;
+  if (ast.operator === ">") return left > right;
+  if (ast.operator === "<") return left < right;
+  return false;
+}
+
+function evaluateJsConditionComparisonOperand(ast, variables) {
+  if (ast?.type !== "identifier") return evaluateJsConditionAst(ast, variables);
+  const key = normalizeConditionIdentifierPath(ast.path);
+  if (!key || ast.path?.[0] === "variables" || isTransientVisitStateKey(key)) return evaluateJsConditionAst(ast, variables);
+  const resolved = resolveRuntimeStatePath(key, variables);
+  return resolved.found ? resolved.value : key;
+}
+
+function evaluateJsConditionCall(ast, variables) {
+  if (ast.name === "includes") {
+    const container = evaluateJsConditionAst(ast.object, variables);
+    const value = evaluateJsConditionAst(ast.args?.[0], variables);
+    return jsConditionIncludes(container, value);
+  }
+  if (JS_CONDITION_LEGACY_FUNCTIONS.has(ast.name)) {
+    const container = evaluateJsConditionAst(ast.args?.[0], variables);
+    const value = evaluateJsConditionAst(ast.args?.[1], variables);
+    return expressionContainerHasValue(container, value);
+  }
+  return false;
+}
+
+function jsConditionIncludes(container, value) {
+  if (Array.isArray(container)) return container.some((item) => expressionValuesMatch(item, value));
+  if (typeof container === "string") return String(value) !== "" && container.includes(String(value));
+  return false;
+}
+
+function expressionValuesStrictMatch(left, right) {
+  return left === right;
+}
+
+function collectJsConditionAstKeys(ast, variables = {}) {
+  const keys = [];
+  const membershipKeys = [];
+  const scan = (node, options = {}) => {
+    if (!node) return;
+    if (node.type === "identifier") {
+      const key = normalizeConditionIdentifierPath(node.path);
+      if (key && !JS_CONDITION_LITERAL_WORDS.has(key)) {
+        keys.push(key);
+        if (options.membership) membershipKeys.push(key);
+      }
+      return;
+    }
+    if (node.type === "group") scan(node.expression, options);
+    else if (node.type === "unary") scan(node.argument, options);
+    else if (node.type === "logical") {
+      scan(node.left, options);
+      scan(node.right, options);
+    } else if (node.type === "binary") {
+      scan(node.left, options);
+      if (shouldCollectComparisonRightKey(node.right, variables)) scan(node.right, options);
+    } else if (node.type === "call") {
+      if (node.name === "includes") {
+        scan(node.object, { membership: true });
+        (node.args || []).forEach((arg) => scan(arg));
+      } else if (JS_CONDITION_LEGACY_FUNCTIONS.has(node.name)) {
+        scan(node.args?.[0], { membership: true });
+        scan(node.args?.[1]);
+      } else {
+        (node.args || []).forEach((arg) => scan(arg));
+      }
+    }
+  };
+  scan(ast);
+  return {
+    keys: uniqueExpressionKeys(keys),
+    membershipKeys: uniqueExpressionKeys(membershipKeys),
+    invalid: false
+  };
+}
+
+function shouldCollectComparisonRightKey(node, variables) {
+  if (node?.type !== "identifier") return true;
+  const key = normalizeConditionIdentifierPath(node.path);
+  if (!key) return false;
+  if (node.path?.[0] === "variables") return true;
+  return resolveRuntimeStatePath(key, variables).found;
+}
+
+function transformExportExpression(source, model, warnings, ref = {}) {
+  const text = String(source || "").trim();
+  if (!text) return "";
+  const parsed = parseJsConditionExpression(text);
+  if (parsed.invalid) {
+    pushExportWarning(warnings, "expression-not-translated", `Expression "${text}" is kept in Runtime JSON; Yarn, Ink, and Twee use a false guard.`, ref);
+    return text;
+  }
+  return formatJsConditionAst(parsed.ast, "runtime", { model, warnings, ref });
+}
+
+function normalizeExportVariableSourceKey(key) {
+  const value = String(key || "").trim();
+  return value.startsWith("variables.") ? value.slice("variables.".length) : value;
+}
+
+function getOrCreateExportVariableName(key, model, warnings, ref) {
+  const sourceKey = String(key || "").trim();
+  if (!sourceKey) return "";
+  if (model.variableNameMap[sourceKey]) return model.variableNameMap[sourceKey];
+  const resolvedPath = resolveRuntimeStatePath(sourceKey, model.sourceVariables);
+  if (resolvedPath.found) {
+    const safeKey = makeUniqueExportIdentifier(sourceKey, "variable", model.variableUsed, "variable", warnings, ref);
+    model.variableNameMap[sourceKey] = safeKey;
+    model.variables[safeKey] = cloneRuntimeExportValue(resolvedPath.value);
+    if (resolvedPath.kind === "path") {
+      pushExportWarning(warnings, "state-path-flattened", `State path "${sourceKey}" exports as "${safeKey}" for portable text formats.`, ref);
+    }
+    return safeKey;
+  }
+  const safeKey = makeUniqueExportIdentifier(sourceKey, "variable", model.variableUsed, "variable", warnings, ref);
+  model.variableNameMap[sourceKey] = safeKey;
+  pushExportWarning(warnings, "implicit-variable", `State key "${sourceKey}" is referenced or written but has no initial variable value.`, ref);
+  return safeKey;
+}
+
+function makeUniqueExportIdentifier(value, fallback, used, kind, warnings, options = {}) {
+  const original = String(options.original || value || "").trim();
+  const raw = String(value || "").trim();
+  let base = raw
+    .replace(/\./g, "_")
+    .replace(/[^a-zA-Z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!base) base = fallback;
+  if (!/^[a-zA-Z_]/.test(base)) base = `${fallback}_${base}`;
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  if (!options.suppressSanitizedWarning && original && candidate !== original) {
+    const code = candidate === base ? `${kind}-name-sanitized` : `${kind}-name-collision`;
+    pushExportWarning(warnings, code, `${titleCase(kind)} "${original}" exports as "${candidate}".`);
+  }
+  return candidate;
+}
+
+function combineRuntimeConditions(conditions, operator) {
+  const items = conditions.map((condition) => String(condition || "").trim()).filter(Boolean);
+  if (!items.length) return "";
+  if (items.length === 1) return items[0];
+  return items.map((condition) => `(${condition})`).join(` ${operator} `);
+}
+
+function pushExportWarning(warnings, code, message, ref = {}) {
+  if (!Array.isArray(warnings)) return;
+  warnings.push({
+    code,
+    message,
+    ...(ref.nodeId ? { nodeId: ref.nodeId } : {}),
+    ...(ref.linkId ? { linkId: ref.linkId } : {}),
+    ...(ref.choiceId ? { choiceId: ref.choiceId } : {})
+  });
+}
+
+function buildYarnScript(document) {
+  const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
+  const formatContext = {};
+  const lines = buildExportHeaderLines(document, "Yarn Spinner");
+  document.nodes.forEach((node) => {
+    lines.push(`title: ${node.slug}`);
+    lines.push(`narrativeCanvasId: ${node.id}`);
+    lines.push(`nodeType: ${makePlainHeaderValue(node.typeLabel || node.type)}`);
+    lines.push("---");
+    if (node.id === document.startNodeId) {
+      appendYarnVariableDeclarations(lines, document);
+    }
+    appendYarnNodeEffects(lines, node.effects);
+    appendTextLines(lines, convertRuntimeTextForFormat(node.body, document, "yarn"));
+    appendYarnRouting(lines, node, nodeMap, document, formatContext);
+    lines.push("===", "");
+  });
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+function buildInkScript(document) {
+  const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
+  const formatContext = { inkListMap: buildInkListMap(document) };
+  const lines = buildExportHeaderLines(document, "ink");
+  appendInkVariableDeclarations(lines, document, formatContext);
+  if (document.startNode) {
+    lines.push(`-> ${document.startNode}`, "");
+  }
+  document.nodes.forEach((node) => {
+    lines.push(`=== ${node.slug} ===`);
+    appendInkNodeEffects(lines, node.effects);
+    appendTextLines(lines, convertRuntimeTextForFormat(getInkNodeBody(node), document, "ink"));
+    appendInkRouting(lines, node, nodeMap, document, formatContext);
+    lines.push("");
+  });
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+function buildTweeScript(document) {
+  const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
+  const formatContext = {};
+  const lines = buildTweeHeaderLines(document);
+  document.nodes.forEach((node) => {
+    lines.push(`:: ${formatTweePassageName(node.slug)} [${formatTweeTag(node.type || "node")}]`);
+    appendTweeNodeEffects(lines, node.effects);
+    appendTextLines(lines, convertRuntimeTextForFormat(node.body, document, "twee"));
+    appendTweeRouting(lines, node, nodeMap, document, formatContext);
+    lines.push("");
+  });
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+function buildTweeHeaderLines(document) {
+  const lines = [];
+  lines.push(":: StoryData");
+  lines.push(JSON.stringify({
+    ifid: buildDeterministicIfid(document),
+    format: "SugarCube",
+    "format-version": TWEE_SUGARCUBE_FORMAT_VERSION,
+    start: document.startNode || "Start"
+  }, null, 2));
+  lines.push("");
+  lines.push(":: StoryTitle");
+  lines.push(document.source?.title || "Untitled");
+  lines.push("");
+  lines.push(":: StoryInit");
+  appendTweeVariableDeclarations(lines, document);
+  if (!Object.keys(document.variables || {}).length) lines.push("/* No initial variables. */");
+  lines.push("");
+  appendTweeExportReportPassage(lines, document);
+  return lines;
+}
+
+function appendTweeExportReportPassage(lines, document) {
+  const warnings = document.report?.warnings || [];
+  lines.push(":: NarrativeCanvasExportReport [annotation]");
+  lines.push(`Exported from Narrative Canvas as Twee 3 / SugarCube.`);
+  lines.push(`Source: ${document.source?.title || "Untitled"}`);
+  if (warnings.length) {
+    lines.push("");
+    lines.push("Export report warnings:");
+    warnings.slice(0, 40).forEach((warning) => lines.push(`- [${warning.code}] ${warning.message}`));
+    if (warnings.length > 40) lines.push(`- ${warnings.length - 40} more warning(s) are available in runtime JSON.`);
+  }
+  lines.push("");
+}
+
+function buildExportHeaderLines(document, formatName) {
+  const lines = [
+    `// Exported from Narrative Canvas as ${formatName}.`,
+    `// Source: ${document.source?.title || "Untitled"}`
+  ];
+  const warnings = document.report?.warnings || [];
+  if (warnings.length) {
+    lines.push("// Export report warnings:");
+    warnings.slice(0, 40).forEach((warning) => lines.push(`// - [${warning.code}] ${warning.message}`));
+    if (warnings.length > 40) lines.push(`// - ${warnings.length - 40} more warning(s) are available in runtime JSON.`);
+  }
+  lines.push("");
+  return lines;
+}
+
+function appendYarnVariableDeclarations(lines, document) {
+  Object.entries(document.variables || {}).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      lines.push(`<<declare $${key} = ${formatYarnArrayLiteral(value)}>>`);
+      return;
+    }
+    if (isComplexRuntimeValue(value)) {
+      lines.push(`// Skipped complex variable $${key}; see runtime JSON.`);
+      return;
+    }
+    lines.push(`<<declare $${key} = ${formatExportLiteral(value)}>>`);
+  });
+  if (Object.keys(document.variables || {}).length) lines.push("");
+}
+
+function appendInkVariableDeclarations(lines, document, context = {}) {
+  const inkListMap = context.inkListMap || {};
+  Object.entries(document.variables || {}).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      const list = inkListMap[key];
+      if (!list || !list.items.length) {
+        lines.push(`// Skipped empty list ${key}; see runtime JSON.`);
+        return;
+      }
+      lines.push(`LIST ${list.listName} = ${list.items.map((item) => item.identifier).join(", ")}`);
+      lines.push(`VAR ${key} = (${list.initialItems.map((item) => item.identifier).join(", ")})`);
+      return;
+    }
+    if (isComplexRuntimeValue(value)) {
+      lines.push(`// Skipped complex variable ${key}; see runtime JSON.`);
+      return;
+    }
+    lines.push(`VAR ${key} = ${formatExportLiteral(value)}`);
+  });
+  if (Object.keys(document.variables || {}).length) lines.push("");
+}
+
+function appendTweeVariableDeclarations(lines, document) {
+  Object.entries(document.variables || {}).forEach(([key, value]) => {
+    lines.push(`<<set $${key} = ${formatSugarCubeLiteral(value)}>>`);
+  });
+}
+
+function appendYarnRouting(lines, node, nodeMap, document, context = {}) {
+  if (node.choices.length) {
+    node.choices.forEach((choice) => {
+      const condition = formatRuntimeExpressionForFormat(choice.condition, "yarn", context);
+      const suffix = condition ? ` <<if ${condition}>>` : "";
+      lines.push(`-> ${formatYarnOptionLabel(convertRuntimeTextForFormat(choice.label, document, "yarn"))}${suffix}`);
+      choice.effects.forEach((effect) => lines.push(`    ${formatYarnEffect(effect)}`));
+      appendYarnJump(lines, choice.targetId, nodeMap, "    ");
+    });
+    return;
+  }
+  if (node.condition && node.conditionBranches.length) {
+    lines.push(`<<if ${formatRuntimeExpressionForFormat(node.condition, "yarn", context)}>>`);
+    appendYarnJump(lines, node.conditionBranches[0]?.targetId, nodeMap, "    ");
+    if (node.conditionBranches[1]?.targetId) {
+      lines.push("<<else>>");
+      appendYarnJump(lines, node.conditionBranches[1].targetId, nodeMap, "    ");
+    }
+    lines.push("<<endif>>");
+    return;
+  }
+  appendYarnTransitions(lines, node.next, nodeMap, context);
+}
+
+function appendYarnTransitions(lines, transitions, nodeMap, context = {}) {
+  (transitions || []).forEach((transition) => {
+    if (transition.condition) {
+      lines.push(`<<if ${formatRuntimeExpressionForFormat(transition.condition, "yarn", context)}>>`);
+      appendYarnJump(lines, transition.targetId, nodeMap, "    ");
+      lines.push("<<endif>>");
+    } else {
+      appendYarnJump(lines, transition.targetId, nodeMap, "");
+    }
+  });
+}
+
+function appendYarnJump(lines, targetId, nodeMap, indent) {
+  const target = nodeMap.get(targetId);
+  if (target) lines.push(`${indent}<<jump ${target.slug}>>`);
+}
+
+function appendInkRouting(lines, node, nodeMap, document, context = {}) {
+  if (node.choices.length) {
+    node.choices.forEach((choice) => {
+      const condition = formatRuntimeExpressionForFormat(choice.condition, "ink", context);
+      const conditionPrefix = condition ? `{${condition}} ` : "";
+      lines.push(`+ ${conditionPrefix}[${formatInkOptionLabel(convertRuntimeTextForFormat(choice.label, document, "ink"))}]`);
+      choice.effects.forEach((effect) => lines.push(`    ${formatInkEffect(effect)}`));
+      appendInkDivert(lines, choice.targetId, nodeMap, "    ");
+    });
+    return;
+  }
+  if (node.condition && node.conditionBranches.length) {
+    lines.push(`{ ${formatRuntimeExpressionForFormat(node.condition, "ink", context)}:`);
+    appendInkDivert(lines, node.conditionBranches[0]?.targetId, nodeMap, "    ");
+    if (node.conditionBranches[1]?.targetId) {
+      lines.push("- else:");
+      appendInkDivert(lines, node.conditionBranches[1].targetId, nodeMap, "    ");
+    }
+    lines.push("}");
+    return;
+  }
+  if (node.next.length) {
+    node.next.forEach((transition) => {
+      if (transition.condition) {
+        lines.push(`{ ${formatRuntimeExpressionForFormat(transition.condition, "ink", context)}:`);
+        appendInkDivert(lines, transition.targetId, nodeMap, "    ");
+        lines.push("}");
+      } else {
+        appendInkDivert(lines, transition.targetId, nodeMap, "");
+      }
+    });
+    return;
+  }
+  lines.push("-> END");
+}
+
+function appendInkDivert(lines, targetId, nodeMap, indent) {
+  const target = nodeMap.get(targetId);
+  lines.push(target ? `${indent}-> ${target.slug}` : `${indent}-> END`);
+}
+
+function getInkNodeBody(node) {
+  const body = String(node?.body || "");
+  if (node?.type === "Condition" && node.condition && body.trim() === String(node.condition).trim()) return "";
+  return body;
+}
+
+function getPortableNodeEffects(effects) {
+  return (Array.isArray(effects) ? effects : [])
+    .filter((effect) => !isRuntimeVisitTrackingEffect(effect))
+    .filter((effect) => effect?.trigger === "onVisit" || !effect?.trigger);
+}
+
+function appendYarnNodeEffects(lines, effects) {
+  const entries = getPortableNodeEffects(effects);
+  entries.forEach((effect) => lines.push(formatYarnEffect(effect)));
+  if (entries.length) lines.push("");
+}
+
+function appendInkNodeEffects(lines, effects) {
+  const entries = getPortableNodeEffects(effects);
+  entries.forEach((effect) => lines.push(formatInkEffect(effect)));
+  if (entries.length) lines.push("");
+}
+
+function appendTweeNodeEffects(lines, effects) {
+  const entries = getPortableNodeEffects(effects);
+  entries.forEach((effect) => lines.push(formatTweeEffect(effect)));
+  if (entries.length) lines.push("");
+}
+
+function appendTweeRouting(lines, node, nodeMap, document, context = {}) {
+  if (node.choices.length) {
+    node.choices.forEach((choice) => {
+      const condition = formatRuntimeExpressionForFormat(choice.condition, "twee", context);
+      if (condition) lines.push(`<<if ${condition}>>`);
+      appendTweeLink(lines, choice.label, choice.targetId, nodeMap, choice.effects, condition ? "  " : "");
+      if (condition) lines.push("<</if>>");
+    });
+    return;
+  }
+  if (node.condition && node.conditionBranches.length) {
+    lines.push(`<<if ${formatRuntimeExpressionForFormat(node.condition, "twee", context)}>>`);
+    appendTweeGoto(lines, node.conditionBranches[0]?.targetId, nodeMap, "  ");
+    if (node.conditionBranches[1]?.targetId) {
+      lines.push("<<else>>");
+      appendTweeGoto(lines, node.conditionBranches[1].targetId, nodeMap, "  ");
+    }
+    lines.push("<</if>>");
+    return;
+  }
+  appendTweeTransitions(lines, node.next, nodeMap, context);
+}
+
+function appendTweeTransitions(lines, transitions, nodeMap, context = {}) {
+  (transitions || []).forEach((transition) => {
+    const condition = formatRuntimeExpressionForFormat(transition.condition, "twee", context);
+    if (condition) lines.push(`<<if ${condition}>>`);
+    const target = nodeMap.get(transition.targetId);
+    if (target) {
+      const label = transition.source === "routing" ? "Continue" : (transition.label || "Continue");
+      appendTweeLink(lines, label, transition.targetId, nodeMap, [], condition ? "  " : "");
+    }
+    if (condition) lines.push("<</if>>");
+  });
+}
+
+function appendTweeLink(lines, label, targetId, nodeMap, effects, indent = "") {
+  const target = nodeMap.get(targetId);
+  const text = formatTweeLinkText(label || "Continue");
+  if (!target) {
+    lines.push(`${indent}${text}`);
+    return;
+  }
+  lines.push(`${indent}<<link ${formatSugarCubeString(text)} ${formatSugarCubeString(target.slug)}>>`);
+  (Array.isArray(effects) ? effects : []).forEach((effect) => lines.push(`${indent}  ${formatTweeEffect(effect)}`));
+  lines.push(`${indent}<</link>>`);
+}
+
+function appendTweeGoto(lines, targetId, nodeMap, indent = "") {
+  const target = nodeMap.get(targetId);
+  if (target) lines.push(`${indent}<<goto ${formatSugarCubeString(target.slug)}>>`);
+}
+
+function formatYarnEffect(effect) {
+  if (!effect?.key) return "// Skipped effect without a state key.";
+  if (effect.op === "set") return `<<set $${effect.key} to ${formatExportEffectValue(effect)}>>`;
+  if (effect.op === "add") return `<<set $${effect.key} to $${effect.key} + ${formatExportEffectValue(effect)}>>`;
+  if (effect.op === "subtract") return `<<set $${effect.key} to $${effect.key} - ${formatExportEffectValue(effect)}>>`;
+  if (effect.op === "toggle") return `<<set $${effect.key} to not $${effect.key}>>`;
+  return `// Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key}`;
+}
+
+function formatInkEffect(effect) {
+  if (!effect?.key) return "// Skipped effect without a state key.";
+  if (effect.op === "set") return `~ ${effect.key} = ${formatExportEffectValue(effect)}`;
+  if (effect.op === "add") return `~ ${effect.key} = ${effect.key} + ${formatExportEffectValue(effect)}`;
+  if (effect.op === "subtract") return `~ ${effect.key} = ${effect.key} - ${formatExportEffectValue(effect)}`;
+  if (effect.op === "toggle") return `~ ${effect.key} = not ${effect.key}`;
+  return `// Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key}`;
+}
+
+function formatTweeEffect(effect) {
+  if (!effect?.key) return "/* Skipped effect without a state key. */";
+  const value = formatSugarCubeLiteral(coerceValue(effect?.valueSource ?? effect?.value ?? ""));
+  if (effect.op === "set") return `<<set $${effect.key} = ${value}>>`;
+  if (effect.op === "add") return `<<set $${effect.key} += ${value}>>`;
+  if (effect.op === "subtract") return `<<set $${effect.key} -= ${value}>>`;
+  if (effect.op === "toggle") return `<<set $${effect.key} = !$${effect.key}>>`;
+  return `/* Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key} */`;
+}
+
+function formatExportEffectValue(effect) {
+  return formatExportLiteral(coerceValue(effect?.valueSource ?? effect?.value ?? ""));
+}
+
+function formatExportLiteral(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value == null) return "null";
+  return JSON.stringify(String(value));
+}
+
+function formatYarnArrayLiteral(value) {
+  return JSON.stringify(JSON.stringify((Array.isArray(value) ? value : []).map((item) => {
+    if (item == null || typeof item === "string" || typeof item === "number" || typeof item === "boolean") return item;
+    return String(item);
+  })));
+}
+
+function formatSugarCubeLiteral(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value == null) return "null";
+  if (typeof value === "object") return JSON.stringify(value);
+  return JSON.stringify(String(value));
+}
+
+function formatSugarCubeString(value) {
+  return JSON.stringify(String(value || ""));
+}
+
+function formatRuntimeExpressionForFormat(expression, format, context = {}) {
+  const output = String(expression || "").trim();
+  if (!output) return "";
+  const parsed = parseJsConditionExpression(output);
+  if (parsed.invalid) {
+    // Runtime JSON and the export report keep the original expression; text formats stay parseable.
+    return "false";
+  }
+  return formatJsConditionAst(parsed.ast, format, context);
+}
+
+function buildInkListMap(document) {
+  const used = new Set();
+  const maps = {};
+  Object.entries(document?.variables || {}).forEach(([key, value]) => {
+    if (!Array.isArray(value)) return;
+    const listName = makeInkListIdentifier(`${key}_items`, "list_items", used);
+    const itemByValue = new Map();
+    const addItem = (rawValue) => {
+      const normalizedValue = String(rawValue);
+      if (itemByValue.has(normalizedValue)) return itemByValue.get(normalizedValue);
+      const identifier = makeInkListIdentifier(`${key}_${normalizedValue}`, "item", used);
+      const item = { value: normalizedValue, identifier };
+      itemByValue.set(normalizedValue, item);
+      return item;
+    };
+    const initialItems = value.map(addItem);
+    maps[key] = {
+      listName,
+      itemByValue,
+      get items() {
+        return [...itemByValue.values()];
+      },
+      initialItems
+    };
+  });
+  collectDocumentMembershipPredicates(document).forEach((predicate) => {
+    const key = normalizeExpressionVariableTerm(predicate.key) || predicate.key;
+    const list = maps[key];
+    if (!list) return;
+    const literal = parseExpressionLiteral(predicate.value);
+    if (literal == null || typeof literal === "object") return;
+    if (!list.itemByValue.has(String(literal))) {
+      const identifier = makeInkListIdentifier(`${key}_${literal}`, "item", used);
+      list.itemByValue.set(String(literal), { value: String(literal), identifier });
+    }
+  });
+  return maps;
+}
+
+function collectDocumentMembershipPredicates(document) {
+  const predicates = [];
+  const scan = (source) => {
+    collectExpressionPredicates(source).forEach((predicate) => predicates.push(predicate));
+  };
+  (document?.nodes || []).forEach((node) => {
+    scan(node.condition);
+    (node.choices || []).forEach((choice) => scan(choice.condition));
+    (node.conditionBranches || []).forEach((branch) => scan(branch.condition));
+    (node.next || []).forEach((transition) => scan(transition.condition));
+  });
+  return predicates;
+}
+
+function makeInkListIdentifier(value, fallback, used) {
+  let base = String(value || "")
+    .replace(/[^a-zA-Z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!base) base = fallback;
+  if (!/^[a-zA-Z_]/.test(base)) base = `${fallback}_${base}`;
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+function convertRuntimeTextForFormat(text, document, format) {
+  const variables = new Set(document.variableNames || []);
+  return String(text || "").replace(/\{([a-zA-Z_]\w*)\}/g, (match, key) => {
+    if (!variables.has(key)) return match;
+    if (format === "twee") return `<<print $${key}>>`;
+    return format === "yarn" ? `{$${key}}` : `{${key}}`;
+  });
+}
+
+function formatTweePassageName(value) {
+  return String(value || "Untitled")
+    .replace(/\\/g, "\\\\")
+    .replace(/([\[\]{}])/g, "\\$1");
+}
+
+function formatTweeTag(value) {
+  return String(value || "node").replace(/[^a-zA-Z0-9_-]+/g, "_") || "node";
+}
+
+function formatTweeLinkText(value) {
+  return String(value || "Continue").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim() || "Continue";
+}
+
+function buildDeterministicIfid(document) {
+  const source = [
+    document?.source?.title || "Untitled",
+    document?.startNodeId || "",
+    ...(Array.isArray(document?.nodes) ? document.nodes.map((node) => `${node.id}:${node.slug}`) : [])
+  ].join("|");
+  const hex = [
+    hashString32(`${source}:0`),
+    hashString32(`${source}:1`),
+    hashString32(`${source}:2`),
+    hashString32(`${source}:3`)
+  ].map((value) => value.toString(16).padStart(8, "0")).join("").toUpperCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-A${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function hashString32(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < String(value).length; index += 1) {
+    hash ^= String(value).charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function appendTextLines(lines, text) {
+  const value = String(text || "").trimEnd();
+  if (!value) return;
+  value.split(/\r?\n/).forEach((line) => lines.push(line));
+}
+
+function formatYarnOptionLabel(label) {
+  return String(label || "Continue").replace(/\s+/g, " ").trim() || "Continue";
+}
+
+function formatInkOptionLabel(label) {
+  return String(label || "Continue").replace(/[\[\]\r\n]+/g, " ").replace(/\s+/g, " ").trim() || "Continue";
+}
+
+function buildStoryMarkdown(document) {
+  const nodeMap = new Map((document.nodes || []).map((node) => [node.id, node]));
+  const lines = [
+    `# ${formatMarkdownHeading(document.source?.title || "Untitled Story")}`,
+    "",
+    "<!-- narrative-canvas-story-md: v1 -->",
+    ""
+  ];
+  if (document.source?.notes) {
+    lines.push("> Source notes");
+    String(document.source.notes).split(/\r?\n/).forEach((line) => lines.push(`> ${line}`));
+    lines.push("");
+  }
+  (document.nodes || []).forEach((node) => {
+    lines.push(`## ${formatMarkdownHeading(node.title || node.slug || node.id)}`);
+    lines.push(`<!-- id: ${node.id} -->`);
+    lines.push(`type: ${formatMarkdownInline(node.typeLabel || node.type || "Node")}`);
+    lines.push(`slug: ${formatMarkdownInline(node.slug || node.id)}`);
+    if (node.condition) lines.push(`requires: ${node.condition}`);
+    if (node.cast?.length) lines.push(`cast: ${node.cast.map((entry) => entry.name).filter(Boolean).join(", ")}`);
+    lines.push("");
+    appendStoryMarkdownBody(lines, node.body);
+    appendStoryMarkdownEffects(lines, node.effects, "effects");
+    appendStoryMarkdownChoices(lines, node, nodeMap);
+    appendStoryMarkdownBranches(lines, node, nodeMap);
+    appendStoryMarkdownNext(lines, node, nodeMap);
+    lines.push("");
+  });
+  return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd() + "\n";
+}
+
+function buildStoryLayoutDocument() {
+  const nodes = Array.isArray(state.project.nodes) ? state.project.nodes : [];
+  const links = Array.isArray(state.project.links) ? state.project.links : [];
+  return {
+    format: "narrative-canvas-story-layout",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    source: {
+      title: state.project.title || "Untitled",
+      notes: state.project.notes || ""
+    },
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      title: node.title || "",
+      type: node.type || "Content",
+      typeLabel: getNodeTypeLabel(node.type),
+      frame: Boolean(isFrameNode(node)),
+      x: Number(node.x) || 0,
+      y: Number(node.y) || 0,
+      ...(node.width != null ? { width: Number(node.width) || 0 } : {}),
+      ...(node.height != null ? { height: Number(node.height) || 0 } : {}),
+      ...(node.frameId ? { frameId: node.frameId } : {}),
+      ...(node.ports ? { portPositions: cloneRuntimeExportValue(node.ports) } : {}),
+      ...(node.collapsed != null ? { collapsed: Boolean(node.collapsed) } : {})
+    })),
+    links: links.map((link) => ({
+      id: link.id || "",
+      from: link.from || "",
+      to: link.to || "",
+      label: link.label || "",
+      ...(link.choiceIndex != null ? { choiceIndex: link.choiceIndex } : {}),
+      ...(link.choiceOptionId ? { choiceOptionId: link.choiceOptionId } : {}),
+      ...(link.requirements || link.requires ? { requirements: link.requirements || link.requires } : {})
+    })),
+    view: normalizeView(state.view)
+  };
+}
+
+function buildStateSchemaDocument() {
+  const report = buildStateReport();
+  const exportWarnings = [];
+  const exportNameModel = buildRuntimeExportNameModel(exportWarnings);
+  return {
+    format: "narrative-canvas-state-schema",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    source: {
+      title: state.project.title || "Untitled",
+      notes: state.project.notes || ""
+    },
+    summary: {
+      variableCount: report.rows.length,
+      issueCount: report.issueCount,
+      readCount: report.readCount,
+      writeCount: report.writeCount,
+      interpolationCount: report.interpolationCount,
+      exportBlockCount: report.exportBlocks.length,
+      invalidExpressionCount: report.invalidExpressions.length
+    },
+    variables: report.rows.map((row) => ({
+      key: row.key,
+      exportKey: getOrCreateExportVariableName(row.key, exportNameModel, exportWarnings, {}),
+      type: row.typeLabel,
+      hasInitial: Boolean(row.hasInitial),
+      ...(row.hasInitial ? { initialValue: cloneRuntimeExportValue(row.initialValue) } : {}),
+      statuses: [...row.statuses],
+      primaryStatus: row.primaryStatus,
+      readBy: formatStateSchemaRefs(row.reads),
+      writtenBy: formatStateSchemaRefs(row.writes),
+      interpolatedBy: formatStateSchemaRefs(row.interpolations)
+    })),
+    invalidExpressions: formatStateSchemaRefs(report.invalidExpressions),
+    exportBlocks: report.exportBlocks.map((block) => ({
+      code: block.code,
+      message: block.message,
+      ...(block.key ? { key: block.key } : {}),
+      label: block.label,
+      ...(block.nodeId ? { nodeId: block.nodeId } : {}),
+      ...(block.jsonToken ? { jsonToken: block.jsonToken } : {})
+    }))
+  };
+}
+
+function buildExportProfileDocument(runtimeDocument = buildRuntimeExportDocument()) {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const report = runtimeDocument?.report || {};
+  return {
+    format: "narrative-canvas-export-profile",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    source: {
+      title: runtimeDocument?.source?.title || state.project.title || "Untitled",
+      notes: runtimeDocument?.source?.notes || state.project.notes || ""
+    },
+    baseSlug: slug,
+    files: [
+      { id: "project-json", name: `${slug}.json`, role: "source", format: "narrative-canvas-project" },
+      { id: "story-md", name: `${slug}-story.md`, role: "text-source", format: "story-markdown", schema: "docs/story-markdown-format.md" },
+      { id: "layout-json", name: `${slug}-layout.json`, role: "sidecar", format: "narrative-canvas-story-layout", schema: "docs/story-layout.schema.json" },
+      { id: "state-schema", name: `${slug}-state.schema.json`, role: "sidecar", format: "narrative-canvas-state-schema", schema: "docs/state-schema.schema.json" },
+      { id: "export-profile", name: `${slug}-export.profile.json`, role: "sidecar", format: "narrative-canvas-export-profile", schema: "docs/export-profile.schema.json" },
+      { id: "runtime-json", name: `${slug}-runtime.json`, role: "runtime", format: "narrative-canvas-runtime", schema: "docs/runtime-json.schema.json" },
+      { id: "yarn", name: `${slug}.yarn`, role: "engine-script", format: "yarn-spinner" },
+      { id: "ink", name: `${slug}.ink`, role: "engine-script", format: "ink" },
+      { id: "twee", name: `${slug}.twee`, role: "engine-script", format: "twee-3-sugarcube" }
+    ],
+    targets: [
+      { id: "runtime-json", label: "Runtime JSON", fileId: "runtime-json", consumer: "custom-loader", schema: "docs/runtime-json.schema.json" },
+      { id: "yarn", label: "Yarn Spinner", fileId: "yarn", consumer: "ysc" },
+      { id: "ink", label: "Ink", fileId: "ink", consumer: "inklecate" },
+      { id: "twee", label: "Twee / Twine", fileId: "twee", consumer: "Tweego / SugarCube" }
+    ],
+    mappings: {
+      variables: filterTransientVisitVariableMap(report.variableNameMap || {}),
+      nodes: { ...(report.nodeNameMap || {}) }
+    },
+    warnings: buildExportProfileWarnings(report.warnings)
+  };
+}
+
+function filterTransientVisitVariableMap(variableNameMap) {
+  return Object.fromEntries(
+    Object.entries(variableNameMap || {}).filter(([sourceKey]) => !isTransientVisitStateKey(sourceKey))
+  );
+}
+
+function buildExportProfileWarnings(warnings) {
+  return (Array.isArray(warnings) ? warnings : [])
+    .filter((warning) => !isTransientVisitExportWarning(warning))
+    .map((warning) => ({
+      code: warning?.code || "warning",
+      message: warning?.message || "",
+      ...(warning?.nodeId ? { nodeId: warning.nodeId } : {}),
+      ...(warning?.linkId ? { linkId: warning.linkId } : {}),
+      ...(warning?.choiceId ? { choiceId: warning.choiceId } : {})
+    }));
+}
+
+function isTransientVisitExportWarning(warning) {
+  return /State key "visited\.[^"]+"/.test(normalizeOptionalString(warning?.message));
+}
+
+function formatStateSchemaRefs(refs) {
+  return (Array.isArray(refs) ? refs : []).map((ref) => ({
+    label: ref.label,
+    ...(ref.nodeId ? { nodeId: ref.nodeId } : {}),
+    ...(ref.jsonToken ? { jsonToken: ref.jsonToken } : {})
+  }));
+}
+
+function appendStoryMarkdownBody(lines, body) {
+  const text = String(body || "").trim();
+  if (!text) return;
+  text.split(/\r?\n/).forEach((line) => lines.push(line));
+  lines.push("");
+}
+
+function appendStoryMarkdownEffects(lines, effects, title) {
+  const entries = (Array.isArray(effects) ? effects : []).filter((effect) => !isRuntimeVisitTrackingEffect(effect));
+  if (!entries.length) return;
+  lines.push(`${title}:`);
+  entries.forEach((effect) => lines.push(`- ${formatStoryMarkdownEffect(effect)}`));
+  lines.push("");
+}
+
+function appendStoryMarkdownChoices(lines, node, nodeMap) {
+  if (!node.choices?.length) return;
+  lines.push("choices:");
+  node.choices.forEach((choice) => {
+    lines.push(`- ${formatMarkdownInline(choice.label || "Continue")}`);
+    if (choice.id) lines.push(`  id: ${choice.id}`);
+    if (choice.condition) lines.push(`  requires: ${choice.condition}`);
+    if (choice.effects?.length) {
+      choice.effects.forEach((effect) => lines.push(`  effect: ${formatStoryMarkdownEffect(effect)}`));
+    }
+    lines.push(`  goto: ${formatStoryMarkdownTarget(choice.targetId, nodeMap)}`);
+  });
+  lines.push("");
+}
+
+function appendStoryMarkdownBranches(lines, node, nodeMap) {
+  if (!node.conditionBranches?.length) return;
+  lines.push("branches:");
+  node.conditionBranches.forEach((branch) => {
+    const prefix = branch.branch === "false" ? "else" : `if ${node.condition || branch.condition || "true"}`;
+    lines.push(`- ${prefix}: ${formatStoryMarkdownTarget(branch.targetId, nodeMap)}`);
+  });
+  lines.push("");
+}
+
+function appendStoryMarkdownNext(lines, node, nodeMap) {
+  if (!node.next?.length) return;
+  lines.push("next:");
+  node.next.forEach((transition) => {
+    const condition = transition.condition ? ` if ${transition.condition}` : "";
+    lines.push(`- goto: ${formatStoryMarkdownTarget(transition.targetId, nodeMap)}${condition}`);
+  });
+  lines.push("");
+}
+
+function formatStoryMarkdownEffect(effect) {
+  const parts = [
+    effect?.trigger || "onVisit",
+    effect?.op || "set",
+    effect?.key || effect?.sourceKey || ""
+  ].filter(Boolean);
+  const value = effect?.valueSource ?? effect?.value;
+  if (value !== "" && value != null) parts.push(formatMarkdownInline(String(value)));
+  return parts.join(" ");
+}
+
+function formatStoryMarkdownTarget(targetId, nodeMap) {
+  const target = nodeMap.get(targetId);
+  return target ? (target.slug || target.title || target.id) : "END";
+}
+
+function formatMarkdownHeading(value) {
+  return String(value || "Untitled").replace(/\r?\n+/g, " ").trim() || "Untitled";
+}
+
+function formatMarkdownInline(value) {
+  return String(value || "").replace(/\r?\n+/g, " ").trim();
+}
+
+function makePlainHeaderValue(value) {
+  return String(value || "").replace(/\r?\n/g, " ").trim();
 }
 
 function buildCharactersMarkdown() {
@@ -10563,10 +18093,57 @@ function buildScriptDocument() {
   state.project.variables = normalizeVariablesObject(state.project.variables);
   return {
     variables: state.project.variables,
+    nodeLogic: buildPlaybookNodeLogicRows(),
+    choiceConditions: buildPlaybookChoiceConditionRows(),
     nodeTypes: getScriptNodeTypes(),
     actions: getPlaybookActions(),
-    playRules: getRunnerRules()
+    playRules: getRunnerRules(),
+    validation: buildPlaybookValidationRows()
   };
+}
+
+function buildPlaybookNodeLogicRows() {
+  return getScriptBuilderNodes().map((node) => {
+    const logic = normalizeNodeStateLogic(node.stateLogic);
+    return {
+      rowId: `node:${node.id}`,
+      nodeId: node.id,
+      title: node.title || "",
+      type: node.type,
+      requirements: logic.requirements,
+      requirementsMode: logic.requirementsMode,
+      effects: logic.effects,
+      routing: normalizeNodeRouting(node.routing)
+    };
+  });
+}
+
+function buildPlaybookChoiceConditionRows() {
+  return getPlaybookGateRows().map((row) => ({
+    rowId: row.id,
+    kind: row.kind,
+    typeLabel: row.typeLabel,
+    target: row.targetLabel,
+    nodeId: row.nodeId || "",
+    optionId: row.choiceOptionId || "",
+    legacyActionId: row.legacyActionId || "",
+    condition: row.condition || "",
+    conditionMode: row.conditionMode || "all",
+    effects: normalizeNodeEffects(row.effects)
+  }));
+}
+
+function buildPlaybookValidationRows() {
+  const report = buildStateReport();
+  return report.rows.map((row) => ({
+    rowId: `state:${row.key}`,
+    key: row.key,
+    type: row.typeLabel,
+    statuses: row.statuses,
+    reads: row.reads.map((ref) => ref.label),
+    writes: row.writes.map((ref) => ref.label),
+    interpolations: row.interpolations.map((ref) => ref.label)
+  }));
 }
 
 function applyScriptJson(value) {
@@ -10581,10 +18158,79 @@ function applyScriptJson(value) {
   if (isScriptDocument(parsed)) {
     state.project.variables = normalizeVariablesObject(parsed.variables);
     state.project.script = normalizeScriptConfig(parsed);
+    applyPlaybookNodeLogicRows(parsed.nodeLogic);
+    applyPlaybookChoiceConditionRows(parsed.choiceConditions);
     return;
   }
   state.project.variables = normalizeVariablesObject(parsed);
   state.project.script = normalizeScriptConfig(state.project.script);
+}
+
+function applyPlaybookNodeLogicRows(rows) {
+  if (!Array.isArray(rows)) return;
+  rows.forEach((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return;
+    const node = getNode(row.nodeId || row.id);
+    if (!node || isFrameNode(node)) return;
+    const logic = normalizeNodeStateLogic(node.stateLogic);
+    if (Object.prototype.hasOwnProperty.call(row, "requirements")) {
+      logic.requirements = normalizeOptionalString(row.requirements).trim();
+      logic.requirementsMode = getStoredConditionModeForExpression(logic.requirements, logic.requirementsMode);
+    }
+    if (Object.prototype.hasOwnProperty.call(row, "requirementsMode")) {
+      logic.requirementsMode = normalizeStoredConditionGroupMode(row.requirementsMode);
+      logic.requirements = setConditionExpressionGroupMode(logic.requirements, logic.requirementsMode);
+    }
+    if (Object.prototype.hasOwnProperty.call(row, "effects")) {
+      logic.effects = normalizeNodeEffects(row.effects);
+    }
+    node.stateLogic = logic;
+    cleanupNodeStateLogic(node);
+    if (Object.prototype.hasOwnProperty.call(row, "routing")) {
+      node.routing = normalizeNodeRouting(row.routing);
+    }
+  });
+}
+
+function applyPlaybookChoiceConditionRows(rows) {
+  if (!Array.isArray(rows)) return;
+  rows.forEach((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return;
+    const condition = normalizeOptionalString(row.condition).trim();
+    if (row.kind === "conditionNode") {
+      const node = getNode(row.nodeId);
+      if (!node || isFrameNode(node)) return;
+      const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
+      node.condition = condition;
+      if (Object.prototype.hasOwnProperty.call(row, "conditionMode")) {
+        node.conditionMode = normalizeStoredConditionGroupMode(row.conditionMode);
+        node.condition = setConditionExpressionGroupMode(node.condition, node.conditionMode);
+      } else {
+        node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
+      }
+      if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
+      return;
+    }
+    if (row.kind !== "choiceRequirement") return;
+    const node = getNode(row.nodeId);
+    if (!node || isFrameNode(node)) return;
+    const optionId = normalizeOptionalString(row.optionId).trim();
+    if (!optionId) return;
+    const options = ensureChoiceOptionsArray(node);
+    const option = optionId.startsWith("index:")
+      ? options[Number(optionId.slice("index:".length))]
+      : options.find((item) => item.id === optionId);
+    if (!option) return;
+    option.requires = condition;
+    if (Object.prototype.hasOwnProperty.call(row, "conditionMode")) {
+      option.requiresMode = normalizeStoredConditionGroupMode(row.conditionMode);
+      option.requires = setConditionExpressionGroupMode(option.requires, option.requiresMode);
+    } else {
+      option.requiresMode = getStoredConditionModeForExpression(option.requires, option.requiresMode);
+    }
+    if (Object.prototype.hasOwnProperty.call(row, "effects")) option.effects = normalizeNodeEffects(row.effects);
+    syncChoicesFromOptions(node);
+  });
 }
 
 function isScriptDocument(value) {
@@ -10592,6 +18238,8 @@ function isScriptDocument(value) {
     && typeof value === "object"
     && !Array.isArray(value)
     && (Object.prototype.hasOwnProperty.call(value, "variables")
+      || Object.prototype.hasOwnProperty.call(value, "nodeLogic")
+      || Object.prototype.hasOwnProperty.call(value, "choiceConditions")
       || Object.prototype.hasOwnProperty.call(value, "nodeTypes")
       || Object.prototype.hasOwnProperty.call(value, "actions")
       || Object.prototype.hasOwnProperty.call(value, "playRules"));
@@ -10625,13 +18273,15 @@ function normalizeRunnerRules(value) {
       normalized[key] = { ...fallback };
     }
   });
+  if (!(normalized.debugMode?.enabled && normalized.debugMode.value) && normalized.visitTracking) {
+    normalized.visitTracking.enabled = false;
+  }
   return normalized;
 }
 
 function getDefaultRunnerRules() {
   return {
     startNode: { enabled: true, value: "Start" },
-    choiceDisplay: { enabled: true, value: "hideUnavailable" },
     endCondition: { enabled: false, value: "" },
     visitTracking: { enabled: false, value: true },
     debugMode: { enabled: false, value: false }
@@ -10640,9 +18290,6 @@ function getDefaultRunnerRules() {
 
 function normalizeRunnerRuleValue(key, value) {
   if (key === "visitTracking" || key === "debugMode") return Boolean(value);
-  if (key === "choiceDisplay") {
-    return PLAYBOOK_CHOICE_DISPLAY_OPTIONS.some((option) => option.value === value) ? value : "hideUnavailable";
-  }
   return normalizeOptionalString(value).trim();
 }
 
@@ -10688,6 +18335,7 @@ function normalizePlaybookActions(value) {
 
 function normalizePlaybookAction(action, index = 0) {
   if (!action || typeof action !== "object" || Array.isArray(action)) return null;
+  const legacyAppend = Boolean(action.append);
   const normalized = {
     id: normalizePlaybookActionId(action.id, index),
     trigger: normalizePlaybookActionTrigger(action.trigger || action.when),
@@ -10695,9 +18343,9 @@ function normalizePlaybookAction(action, index = 0) {
     op: normalizePlaybookActionOperation(action.op || action.action || action.type),
     category: normalizePlaybookActionCategory(action.category || action.scopeType),
     key: normalizeOptionalString(action.key || action.variable || action.name).trim(),
-    value: normalizeOptionalString(action.value),
-    append: Boolean(action.append)
+    value: normalizeOptionalString(action.value)
   };
+  if (normalized.op === "set" && legacyAppend) normalized.op = "append";
   if (!normalized.key && normalized.op !== "clear") normalized.key = "state_key";
   return normalized;
 }
@@ -10709,12 +18357,12 @@ function normalizePlaybookActionId(value, index = 0) {
 
 function normalizePlaybookActionTrigger(value) {
   const trigger = normalizeOptionalString(value).trim();
-  return PLAYBOOK_ACTION_TRIGGERS.some((option) => option.value === trigger) ? trigger : "onVisit";
+  return PLAYBOOK_ACTION_TRIGGER_VALUES.has(trigger) ? trigger : "onVisit";
 }
 
 function normalizePlaybookActionOperation(value) {
   const operation = normalizeOptionalString(value).trim();
-  return PLAYBOOK_ACTION_OPERATIONS.some((option) => option.value === operation) ? operation : "set";
+  return PLAYBOOK_ACTION_OPERATION_VALUES.has(operation) ? operation : "set";
 }
 
 function normalizePlaybookActionCategory(value) {
@@ -10791,32 +18439,6 @@ function buildNodeFieldsCsv() {
       .map((field) => [getNodeDisplayId(node), getNodeTypeLabel(node.type), node.title || "", field.label, field.value]))
   ];
   return rows.map((row) => row.map(formatCsvCell).join(",")).join("\n");
-}
-
-function buildExportHtml() {
-  const svg = buildExportSvg();
-  const title = escapeHtml(state.project.title || "Narrative Canvas");
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>${title}</title>
-    <style>
-      @page { size: landscape; margin: 12mm; }
-      html, body { margin: 0; background: #ffffff; color: #111111; font-family: system-ui, sans-serif; }
-      main { display: grid; gap: 12px; padding: 16px; }
-      h1 { margin: 0; font-size: 18px; }
-      .canvas-export { width: 100%; height: auto; border: 1px solid #dddddd; }
-      @media print { main { padding: 0; } h1 { display: none; } .canvas-export { border: 0; } }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>${title}</h1>
-      ${svg.replace("<svg ", "<svg class=\"canvas-export\" ")}
-    </main>
-  </body>
-</html>`;
 }
 
 function downloadBlob(blob, filename) {
@@ -10955,25 +18577,495 @@ function crc32Table() {
 function importJsonFile() {
   const file = dom.fileInput.files?.[0];
   if (!file) return;
+  const importKind = state.pendingImportKind || "json";
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const payload = JSON.parse(String(reader.result));
-      const restoredView = applySavedState(payload);
-      if (!state.selectedNodeId) state.selectedNodeId = state.project.nodes[0]?.id || null;
-      if (!restoredView) centerViewAtScale(DEFAULT_CANVAS_ZOOM, false);
-      resetHistory();
-      setProjectDirty(true);
-      renderAll();
-      setStatus("JSON imported.");
+      if (importKind === "story-md") {
+        importStoryMarkdownText(String(reader.result || ""));
+      } else if (importKind === "story-layout") {
+        importStoryLayoutText(String(reader.result || ""));
+      } else if (importKind === "state-schema") {
+        importStateSchemaText(String(reader.result || ""));
+      } else {
+        const payload = JSON.parse(String(reader.result));
+        const restoredView = applySavedState(payload);
+        if (!state.selectedNodeId) state.selectedNodeId = state.project.nodes[0]?.id || null;
+        if (!restoredView) centerViewAtScale(DEFAULT_CANVAS_ZOOM, false);
+        resetHistory();
+        setProjectDirty(true);
+        renderAll();
+        setStatus("JSON imported.");
+      }
     } catch (error) {
       console.error(error);
-      setStatus("Import failed: invalid JSON.");
+      setStatus(getImportFailureStatus(importKind));
     } finally {
       dom.fileInput.value = "";
+      dom.fileInput.accept = "application/json,.json,.ncanvas,.narrativecanvas";
+      state.pendingImportKind = "";
     }
   };
   reader.readAsText(file);
+}
+
+function getImportFailureStatus(importKind) {
+  if (importKind === "story-md") return "Import failed: invalid Story Markdown.";
+  if (importKind === "story-layout") return "Import failed: invalid Story Layout.";
+  if (importKind === "state-schema") return "Import failed: invalid State Schema.";
+  return "Import failed: invalid JSON.";
+}
+
+function buildProjectFromStoryMarkdown(source) {
+  const parsed = parseStoryMarkdownDocument(source);
+  if (!parsed.nodes.length) throw new Error("Story Markdown has no nodes.");
+  const usedIds = new Set();
+  const nodes = parsed.nodes.map((node, index) => buildStoryMarkdownNode(node, index, usedIds));
+  const nodeByRef = new Map();
+  nodes.forEach((node, index) => {
+    const sourceNode = parsed.nodes[index];
+    [node.id, node.title, sourceNode.slug].filter(Boolean).forEach((ref) => nodeByRef.set(normalizeStoryMarkdownRef(ref), node.id));
+  });
+  const links = [];
+  const ensureTarget = (ref) => {
+    const key = normalizeStoryMarkdownRef(ref);
+    if (!key || key === "end") return "";
+    const existing = nodeByRef.get(key);
+    if (existing) return existing;
+    const id = makeUniqueStoryMarkdownId(ref || `n${nodes.length}`, usedIds);
+    const title = normalizeOptionalString(ref).trim() || id;
+    const node = normalizeNode({
+      id,
+      type: "Content",
+      title,
+      body: "",
+      x: 80 + (nodes.length % 3) * 280,
+      y: 80 + Math.floor(nodes.length / 3) * 220
+    });
+    nodes.push(node);
+    [node.id, node.title].forEach((value) => nodeByRef.set(normalizeStoryMarkdownRef(value), node.id));
+    return id;
+  };
+  parsed.nodes.forEach((sourceNode, index) => {
+    const node = nodes[index];
+    sourceNode.choices.forEach((choice, choiceIndex) => {
+      const targetId = ensureTarget(choice.goto);
+      if (!targetId) return;
+      links.push({
+        id: `l${links.length}`,
+        from: node.id,
+        to: targetId,
+        label: choice.label,
+        choiceIndex,
+        choiceOptionId: node.choiceOptions?.[choiceIndex]?.id || ""
+      });
+    });
+    sourceNode.next.forEach((next) => {
+      const targetId = ensureTarget(next.goto);
+      if (!targetId) return;
+      links.push({
+        id: `l${links.length}`,
+        from: node.id,
+        to: targetId,
+        label: next.condition ? `if ${next.condition}` : "Continue",
+        requirements: next.condition || ""
+      });
+    });
+    sourceNode.branches.forEach((branch, branchIndex) => {
+      const targetId = ensureTarget(branch.goto);
+      if (!targetId) return;
+      links.push({
+        id: `l${links.length}`,
+        from: node.id,
+        to: targetId,
+        label: branch.kind === "else" ? "false" : "true",
+        choiceIndex: branch.kind === "else" ? 1 : branchIndex,
+        requirements: branch.condition || ""
+      });
+    });
+  });
+  return {
+    title: parsed.title || "Imported Story",
+    workflowMode: WORKFLOW_MODE_TEXT_SOURCE,
+    notes: "Imported from Story Markdown.",
+    variables: {},
+    script: {
+      playRules: {
+        startNode: { enabled: true, value: nodes[0]?.title || nodes[0]?.id || "" },
+        endCondition: { enabled: false, value: "" },
+        visitTracking: { enabled: false, value: true },
+        debugMode: { enabled: false, value: false }
+      }
+    },
+    nodeTypes: defaultNodeTypeList(),
+    customNodeTypes: [],
+    characters: [],
+    nodes,
+    links
+  };
+}
+
+function parseStoryMarkdownDocument(source) {
+  const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
+  const titleLine = lines.find((line) => /^#\s+/.test(line) && !/^##\s+/.test(line));
+  const title = titleLine ? titleLine.replace(/^#\s+/, "").trim() : "Imported Story";
+  const blocks = [];
+  let current = null;
+  lines.forEach((line) => {
+    const heading = line.match(/^##\s+(.+)$/);
+    if (heading) {
+      current = { title: heading[1].trim(), lines: [] };
+      blocks.push(current);
+      return;
+    }
+    if (current) current.lines.push(line);
+  });
+  return {
+    title,
+    nodes: blocks.map(parseStoryMarkdownNodeBlock).filter((node) => node.title)
+  };
+}
+
+function parseStoryMarkdownNodeBlock(block) {
+  const node = {
+    title: block.title,
+    id: "",
+    type: "",
+    slug: "",
+    requires: "",
+    body: [],
+    effects: [],
+    choices: [],
+    next: [],
+    branches: []
+  };
+  let section = "body";
+  let currentChoice = null;
+  block.lines.forEach((rawLine) => {
+    const line = rawLine.replace(/\s+$/, "");
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (section === "body" && node.body.length) node.body.push("");
+      return;
+    }
+    const idComment = trimmed.match(/^<!--\s*id:\s*([^>]+?)\s*-->$/);
+    if (idComment) {
+      node.id = idComment[1].trim();
+      return;
+    }
+    if (/^(choices|effects|branches|next):$/i.test(trimmed)) {
+      section = trimmed.slice(0, -1).toLowerCase();
+      currentChoice = null;
+      return;
+    }
+    if (section === "choices") {
+      const choiceStart = line.match(/^-\s+(.+)$/);
+      if (choiceStart) {
+        currentChoice = { label: choiceStart[1].trim(), id: "", requires: "", effects: [], goto: "" };
+        node.choices.push(currentChoice);
+        return;
+      }
+      if (currentChoice) {
+        applyStoryMarkdownChoiceLine(currentChoice, trimmed);
+        return;
+      }
+    }
+    if (section === "effects") {
+      const effect = trimmed.match(/^-\s+(.+)$/);
+      if (effect) node.effects.push(parseStoryMarkdownEffect(effect[1], "onVisit"));
+      return;
+    }
+    if (section === "next") {
+      const next = parseStoryMarkdownNextLine(trimmed);
+      if (next) node.next.push(next);
+      return;
+    }
+    if (section === "branches") {
+      const branch = parseStoryMarkdownBranchLine(trimmed);
+      if (branch) node.branches.push(branch);
+      return;
+    }
+    const meta = trimmed.match(/^(type|slug|requires):\s*(.*)$/i);
+    if (meta) {
+      const key = meta[1].toLowerCase();
+      if (key === "type") node.type = meta[2].trim();
+      if (key === "slug") node.slug = meta[2].trim();
+      if (key === "requires") node.requires = meta[2].trim();
+      return;
+    }
+    const inlineChoice = trimmed.match(/^->\s*(.+)$/);
+    if (inlineChoice) {
+      currentChoice = { label: inlineChoice[1].trim(), id: "", requires: "", effects: [], goto: "" };
+      node.choices.push(currentChoice);
+      section = "choices";
+      return;
+    }
+    const gotoLine = trimmed.match(/^goto:\s*(.+)$/i);
+    if (gotoLine) {
+      node.next.push({ goto: gotoLine[1].trim(), condition: "" });
+      return;
+    }
+    node.body.push(line);
+  });
+  node.body = node.body.join("\n").trim();
+  return node;
+}
+
+function applyStoryMarkdownChoiceLine(choice, line) {
+  const match = line.match(/^(id|requires|goto|effect|set|add|subtract|toggle):\s*(.*)$/i);
+  if (!match) return;
+  const key = match[1].toLowerCase();
+  const value = match[2].trim();
+  if (key === "id") choice.id = value;
+  if (key === "requires") choice.requires = value;
+  if (key === "goto") choice.goto = value;
+  if (key === "effect") choice.effects.push(parseStoryMarkdownEffect(value, "onChoose"));
+  if (["set", "add", "subtract", "toggle"].includes(key)) choice.effects.push(parseStoryMarkdownEffect(`${key} ${value}`, "onChoose"));
+}
+
+function parseStoryMarkdownNextLine(line) {
+  const match = line.match(/^-\s*goto:\s*(.+?)(?:\s+if\s+(.+))?$/i);
+  return match ? { goto: match[1].trim(), condition: (match[2] || "").trim() } : null;
+}
+
+function parseStoryMarkdownBranchLine(line) {
+  const match = line.match(/^-\s*(?:(if)\s+(.+?)|(else)):\s*(.+)$/i);
+  if (!match) return null;
+  return {
+    kind: match[3] ? "else" : "if",
+    condition: (match[2] || "").trim(),
+    goto: (match[4] || "").trim()
+  };
+}
+
+function parseStoryMarkdownEffect(source, fallbackTrigger) {
+  const parts = String(source || "").trim().split(/\s+/).filter(Boolean);
+  const triggerValues = new Set(["onVisit", "onChoose", "gate", "manual"]);
+  let trigger = fallbackTrigger;
+  if (triggerValues.has(parts[0])) trigger = parts.shift();
+  const op = parts.shift() || "set";
+  const key = parts.shift() || "";
+  const value = parts.join(" ");
+  return { trigger, op, key, value };
+}
+
+function buildStoryMarkdownNode(sourceNode, index, usedIds) {
+  const type = sourceNode.type || (index === 0 ? "Entry" : sourceNode.choices.length ? "Choice" : sourceNode.branches.length ? "Condition" : "Content");
+  const id = makeUniqueStoryMarkdownId(sourceNode.id || `n${index}`, usedIds);
+  const node = {
+    id,
+    type,
+    title: sourceNode.title || id,
+    body: sourceNode.body || "",
+    x: 80 + (index % 3) * 280,
+    y: 80 + Math.floor(index / 3) * 220
+  };
+  if (sourceNode.requires || sourceNode.effects.length) {
+    node.stateLogic = {
+      requirements: sourceNode.requires,
+      requirementsMode: getStoredConditionModeForExpression(sourceNode.requires, "all"),
+      effects: sourceNode.effects
+    };
+  }
+  if (sourceNode.choices.length) {
+    node.choices = sourceNode.choices.map((choice) => choice.label);
+    node.choiceOptions = sourceNode.choices.map((choice, choiceIndex) => ({
+      id: choice.id || `${id}_choice_${choiceIndex + 1}`,
+      label: choice.label,
+      requires: choice.requires,
+      requiresMode: getStoredConditionModeForExpression(choice.requires, "all"),
+      effects: choice.effects
+    }));
+  }
+  if (sourceNode.branches.length && sourceNode.requires) {
+    node.condition = sourceNode.requires;
+    node.conditionMode = getStoredConditionModeForExpression(sourceNode.requires, "all");
+  }
+  return normalizeNode(node);
+}
+
+function normalizeStoryMarkdownRef(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function makeUniqueStoryMarkdownId(value, used) {
+  const fallback = `n${used.size}`;
+  let base = String(value || fallback)
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!base) base = fallback;
+  if (!/^[a-zA-Z_]/.test(base)) base = `n_${base}`;
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+function importStoryMarkdownText(source) {
+  const project = buildProjectFromStoryMarkdown(source);
+  state.project = normalizeProject(project);
+  markProjectStructureChanged({ nodeTypes: true });
+  invalidateCharacterRenderContext();
+  state.selectedNodeId = state.project.nodes[0]?.id || null;
+  state.selectedNodeIds = [];
+  state.selectedLinkId = null;
+  state.panel = "project";
+  state.activeFileId = "adventure";
+  state.playbookTab = "variables";
+  centerViewAtScale(DEFAULT_CANVAS_ZOOM, false);
+  resetHistory();
+  setProjectDirty(true);
+  renderAll();
+  setStatus("Story Markdown imported.");
+  return true;
+}
+
+function importStoryLayoutText(source) {
+  const document = typeof source === "string" ? JSON.parse(source) : source;
+  applyStoryLayoutDocument(document);
+  state.activeFileId = "adventure";
+  markProjectStructureChanged({ nodeTypes: true });
+  sanitizeFrameMembership(state.project);
+  resetHistory();
+  setProjectDirty(true);
+  renderAll();
+  setStatus("Story layout imported.");
+  return true;
+}
+
+function applyStoryLayoutDocument(document) {
+  if (!document || typeof document !== "object" || Array.isArray(document)) throw new Error("Invalid story layout.");
+  if (document.format !== "narrative-canvas-story-layout" || document.version !== 1) throw new Error("Unsupported story layout.");
+  if (!Array.isArray(document.nodes)) throw new Error("Story layout nodes are missing.");
+  const nodeLayouts = new Map(document.nodes
+    .filter((node) => node && typeof node === "object" && !Array.isArray(node) && node.id)
+    .map((node) => [String(node.id), node]));
+  const nodesById = new Map((state.project.nodes || []).map((node) => [node.id, node]));
+
+  nodeLayouts.forEach((layout) => {
+    if (!layout.frame || nodesById.has(String(layout.id))) return;
+    const frameNode = normalizeNode({
+      id: String(layout.id),
+      type: "Event",
+      title: normalizeOptionalString(layout.title).trim() || "Frame",
+      body: "",
+      x: Number(layout.x) || 0,
+      y: Number(layout.y) || 0,
+      width: Number(layout.width) || getNodeMeta("Event").width || 420,
+      height: Number(layout.height) || 260,
+      frameId: normalizeOptionalString(layout.frameId).trim(),
+      collapsed: Boolean(layout.collapsed)
+    });
+    state.project.nodes.push(frameNode);
+    nodesById.set(frameNode.id, frameNode);
+  });
+
+  state.project.nodes.forEach((node) => {
+    const layout = nodeLayouts.get(node.id);
+    if (!layout) return;
+    applyStoryLayoutToNode(node, layout);
+  });
+  applyStoryLayoutToLinks(document.links);
+  if (document.view) state.view = normalizeView(document.view);
+}
+
+function applyStoryLayoutToNode(node, layout) {
+  const x = Number(layout.x);
+  const y = Number(layout.y);
+  if (Number.isFinite(x)) node.x = x;
+  if (Number.isFinite(y)) node.y = y;
+  if (layout.width != null) {
+    const width = Number(layout.width);
+    if (Number.isFinite(width) && width > 0) node.width = width;
+  }
+  if (layout.height != null) {
+    const height = Number(layout.height);
+    if (Number.isFinite(height) && height > 0) node.height = height;
+  }
+  if (Object.prototype.hasOwnProperty.call(layout, "frameId")) node.frameId = normalizeOptionalString(layout.frameId).trim();
+  const portPositions = layout.portPositions || layout.ports;
+  if (portPositions && typeof portPositions === "object" && !Array.isArray(portPositions)) {
+    node.ports = normalizeNodePorts(portPositions, node);
+    delete node.portPositions;
+  }
+  if (Object.prototype.hasOwnProperty.call(layout, "collapsed") && isFrameNode(node)) {
+    node.collapsed = Boolean(layout.collapsed);
+  }
+}
+
+function applyStoryLayoutToLinks(layoutLinks) {
+  if (!Array.isArray(layoutLinks) || !Array.isArray(state.project.links)) return;
+  const usedIds = new Set(state.project.links.map((link) => link.id).filter(Boolean));
+  state.project.links.forEach((link) => {
+    const layout = findStoryLayoutForLink(link, layoutLinks);
+    if (!layout) return;
+    const nextId = normalizeOptionalString(layout.id).trim();
+    if (nextId && (nextId === link.id || !usedIds.has(nextId))) {
+      usedIds.delete(link.id);
+      link.id = nextId;
+      usedIds.add(nextId);
+    }
+    if (Object.prototype.hasOwnProperty.call(layout, "label")) link.label = normalizeOptionalString(layout.label).trim();
+    if (Object.prototype.hasOwnProperty.call(layout, "choiceIndex")) {
+      const choiceIndex = normalizeChoiceIndex(layout.choiceIndex);
+      if (choiceIndex == null) delete link.choiceIndex;
+      else link.choiceIndex = choiceIndex;
+    }
+    if (Object.prototype.hasOwnProperty.call(layout, "choiceOptionId")) {
+      const choiceOptionId = normalizeOptionalString(layout.choiceOptionId).trim();
+      if (choiceOptionId) link.choiceOptionId = choiceOptionId;
+      else delete link.choiceOptionId;
+    }
+    if (Object.prototype.hasOwnProperty.call(layout, "requirements")) {
+      const requirements = normalizeOptionalString(layout.requirements).trim();
+      if (requirements) link.requirements = requirements;
+      else delete link.requirements;
+    }
+  });
+  state.project.links = normalizeLinks(state.project.links);
+}
+
+function findStoryLayoutForLink(link, layoutLinks) {
+  const byId = layoutLinks.find((item) => item?.id && item.id === link.id && item.from === link.from && item.to === link.to);
+  if (byId) return byId;
+  return layoutLinks.find((item) => {
+    if (!item || item.from !== link.from || item.to !== link.to) return false;
+    if (item.choiceOptionId && link.choiceOptionId) return item.choiceOptionId === link.choiceOptionId;
+    if (item.choiceIndex != null && link.choiceIndex != null) return normalizeChoiceIndex(item.choiceIndex) === normalizeChoiceIndex(link.choiceIndex);
+    return normalizeOptionalString(item.label).trim() === normalizeOptionalString(link.label).trim();
+  }) || null;
+}
+
+function importStateSchemaText(source) {
+  const document = typeof source === "string" ? JSON.parse(source) : source;
+  const variables = buildVariablesFromStateSchemaDocument(document);
+  state.project.variables = variables;
+  state.activeFileId = "variables";
+  state.playbookTab = "variables";
+  state.panel = "project";
+  resetHistory();
+  setProjectDirty(true);
+  renderAll();
+  setStatus("State schema imported.");
+  return true;
+}
+
+function buildVariablesFromStateSchemaDocument(document) {
+  if (!document || typeof document !== "object" || Array.isArray(document)) throw new Error("Invalid state schema.");
+  if (document.format !== "narrative-canvas-state-schema" || document.version !== 1) throw new Error("Unsupported state schema.");
+  if (!Array.isArray(document.variables)) throw new Error("State schema variables are missing.");
+  const variables = {};
+  document.variables.forEach((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+    const key = normalizeStateReportKey(entry.exportKey || entry.key);
+    if (!key || !entry.hasInitial || !Object.prototype.hasOwnProperty.call(entry, "initialValue")) return;
+    variables[key] = cloneRuntimeExportValue(entry.initialValue);
+  });
+  return variables;
 }
 
 function normalizeProject(project) {
@@ -10982,6 +19074,7 @@ function normalizeProject(project) {
   const eventSheet = normalizeEventSheetConfig(project.eventSheet, project.eventSheetHiddenColumns);
   const normalized = {
     title: project.title || "Sample",
+    workflowMode: normalizeWorkflowMode(project.workflowMode || project.sourceMode || project.mode),
     notes: project.notes || "",
     variables: normalizeVariablesObject(project.variables),
     script: normalizeScriptConfig(project.script),
@@ -11037,9 +19130,11 @@ function syncDialogCastFromTurns(node, characters = getCharacters()) {
 function inferLegacyFrameMembership(project) {
   if (!project || !Array.isArray(project.nodes)) return;
   const frames = project.nodes.filter((node) => isFrameNode(node));
+  const frameEntries = buildFrameContainmentEntries(frames);
+  const frameIndex = buildFrameContainmentIndex(frameEntries);
   project.nodes.forEach((node) => {
     if (Object.prototype.hasOwnProperty.call(node, "frameId")) return;
-    const winner = getSmallestContainingFrameForNode(node, frames);
+    const winner = getSmallestContainingFrameForNode(node, frameIndex);
     node.frameId = winner ? winner.id : "";
   });
   sanitizeFrameMembership(project);
@@ -11072,13 +19167,88 @@ function wouldCreateFrameCycle(nodeId, parentId, nodeMap = getNodeIndex()) {
   return false;
 }
 
+function buildFrameContainmentEntries(frames) {
+  if (!Array.isArray(frames) || !frames.length) return [];
+  return frames.map((frame) => {
+    const fx = Number(frame?.x);
+    const fy = Number(frame?.y);
+    const size = nodeLayoutSize(frame);
+    const width = Number(size.width);
+    const height = Number(size.height);
+    if (![fx, fy, width, height].every(Number.isFinite)) return null;
+    const area = Math.max(0, width) * Math.max(0, height);
+    return {
+      frame,
+      area,
+      left: fx,
+      top: fy,
+      right: fx + width,
+      bottom: fy + height
+    };
+  }).filter(Boolean);
+}
+
+function buildFrameContainmentIndex(frameEntries) {
+  if (!Array.isArray(frameEntries) || !frameEntries.length) return [];
+  const cells = new Map();
+  frameEntries.forEach((entry) => {
+    const minX = Math.floor(entry.left / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
+    const maxX = Math.floor(entry.right / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
+    const minY = Math.floor(entry.top / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
+    const maxY = Math.floor(entry.bottom / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
+    for (let cellX = minX; cellX <= maxX; cellX += 1) {
+      for (let cellY = minY; cellY <= maxY; cellY += 1) {
+        const key = `${cellX}:${cellY}`;
+        if (!cells.has(key)) cells.set(key, []);
+        cells.get(key).push(entry);
+      }
+    }
+  });
+  return { entries: frameEntries, cells };
+}
+
 function getSmallestContainingFrameForNode(node, frames = state.project.nodes.filter((item) => isFrameNode(item))) {
   if (!node) return null;
-  const candidates = frames
-    .filter((frame) => frame.id !== node.id && isFrameNode(frame) && frameContainsNodeCenter(frame, node))
-    .filter((frame) => !isFrameNode(node) || frameArea(frame) > frameArea(node))
-    .sort((a, b) => frameArea(a) - frameArea(b));
-  return candidates[0] || null;
+  const frameSource = normalizeFrameContainmentSource(frames);
+  if (!frameSource.entries.length) return null;
+  const nx = Number(node?.x);
+  const ny = Number(node?.y);
+  if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
+  const nodeSize = nodeLayoutSize(node);
+  const nw = Number(nodeSize.width);
+  const nh = Number(nodeSize.height);
+  if (!Number.isFinite(nw) || !Number.isFinite(nh)) return null;
+  const cx = nx + nw / 2;
+  const cy = ny + nh / 2;
+  const nodeArea = isFrameNode(node) ? Math.max(0, nw) * Math.max(0, nh) : 0;
+  const frameEntries = getFrameContainmentCandidates(frameSource, cx, cy);
+  let winner = null;
+  let winnerArea = Infinity;
+  frameEntries.forEach((entry) => {
+    const frame = entry.frame;
+    if (!frame || frame.id === node.id) return;
+    if (isFrameNode(node) && entry.area <= nodeArea) return;
+    if (cx < entry.left || cx > entry.right || cy < entry.top || cy > entry.bottom) return;
+    if (entry.area < winnerArea) {
+      winner = frame;
+      winnerArea = entry.area;
+    }
+  });
+  return winner;
+}
+
+function normalizeFrameContainmentSource(frames) {
+  if (frames?.cells instanceof Map && Array.isArray(frames.entries)) return frames;
+  const frameList = Array.isArray(frames) ? frames : [];
+  const entries = frameList.length && frameList[0]?.frame ? frameList : buildFrameContainmentEntries(frameList);
+  return { entries, cells: null };
+}
+
+function getFrameContainmentCandidates(source, cx, cy) {
+  if (!source?.cells) return source?.entries || [];
+  const cellX = Math.floor(cx / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
+  const cellY = Math.floor(cy / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
+  return source.cells.get(`${cellX}:${cellY}`) || [];
 }
 
 function frameArea(frame) {
@@ -11222,6 +19392,14 @@ function normalizeProjectNodeTypes(types, legacyCustomTypes) {
   ];
 }
 
+function normalizeRemovedColumns(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map((key) => String(key || "").trim())
+    .filter((key) => key && !seen.has(key) && seen.add(key));
+}
+
 function normalizeNodeTypes(types) {
   if (!Array.isArray(types)) return [];
   const seen = new Set();
@@ -11250,6 +19428,8 @@ function normalizeCustomNodeType(typeDef) {
     badgeCustom: Boolean(typeDef?.badgeCustom),
     kind,
     fields: normalizeNodeTypeFields(typeDef?.fields),
+    removedColumns: isFrameKind(kind) ? normalizeRemovedColumns(typeDef?.removedColumns) : [],
+    eventColumnLabels: isFrameKind(kind) ? normalizeEventColumnLabels(typeDef?.eventColumnLabels) : {},
     hidden: Boolean(typeDef?.hidden),
     eventSheetHidden: isFrameKind(kind) ? Boolean(typeDef?.eventSheetHidden) : false,
     system: Boolean(typeDef?.system) || Boolean(builtIn?.system),
@@ -11399,9 +19579,13 @@ function normalizeNode(node, eventFrameTypes = null, eventColumns = null) {
   }
   const isEventType = eventFrameTypes ? eventFrameTypes.has(normalized.type) : isEventSheetNode(normalized);
   if (isEventType) ensureEventDefaults(normalized, eventColumns);
-  normalized.ports = normalizeNodePorts(normalized.ports, normalized);
+  const rawPorts = normalized.ports || normalized.portPositions;
+  normalized.ports = normalizeNodePorts(rawPorts, normalized);
+  delete normalized.portPositions;
   normalized.stateLogic = normalizeNodeStateLogic(normalized.stateLogic);
   if (!normalized.stateLogic.requirements && !normalized.stateLogic.effects.length) delete normalized.stateLogic;
+  if (normalized.condition || normalized.type === "Condition") normalized.conditionMode = normalizeStoredConditionGroupMode(normalized.conditionMode);
+  else delete normalized.conditionMode;
   normalized.routing = normalizeNodeRouting(normalized.routing || normalized.route);
   if (normalized.routing.mode === "continue" && !normalized.routing.target) delete normalized.routing;
   // Explicit frame membership; "" means root level. Missing frameId means legacy
@@ -11473,25 +19657,29 @@ function normalizeChoiceOptions(node) {
         const label = normalizeOptionalString(opt.label || opt.text || labels[index]).trim();
         if (!label) return null;
         let id = normalizeOptionalString(opt.id).trim();
-        if (!id || used.has(id)) id = generateChoiceOptionId(used);
+        if (!id || used.has(id)) id = generateChoiceOptionId(used, index);
         used.add(id);
         const requires = normalizeOptionalString(opt.requires || opt.requirement || opt.gate).trim();
+        const requiresMode = normalizeStoredConditionGroupMode(opt.requiresMode || opt.requirementsMode || opt.conditionMode);
         const effects = normalizeNodeEffects(opt.effects || opt.effect);
-        return { id, label, requires, effects };
+        return { id, label, requires, requiresMode, effects };
       })
       .filter(Boolean);
   }
   // Derive from legacy choices[] so per-option requires/effects can attach later without breaking existing links.
   if (!labels.length) return [];
   const used = new Set();
-  return labels.map((label) => {
-    const id = generateChoiceOptionId(used);
+  return labels.map((label, index) => {
+    const id = generateChoiceOptionId(used, index);
     used.add(id);
-    return { id, label: String(label).trim(), requires: "", effects: [] };
+    return { id, label: String(label).trim(), requires: "", requiresMode: "all", effects: [] };
   });
 }
 
-function generateChoiceOptionId(used) {
+function generateChoiceOptionId(used, index = null) {
+  if (Number.isInteger(index) && index >= 0) {
+    return makeUniqueChoiceOptionId(`opt_${index + 1}`, used);
+  }
   for (let i = 0; i < 999; i += 1) {
     const id = `opt_${Math.random().toString(36).slice(2, 8)}`;
     if (!used.has(id)) return id;
@@ -11499,10 +19687,21 @@ function generateChoiceOptionId(used) {
   return `opt_${Date.now().toString(36)}`;
 }
 
+function makeUniqueChoiceOptionId(base, used) {
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 function normalizeNodeStateLogic(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     requirements: normalizeOptionalString(source.requirements || source.requirement || source.gate).trim(),
+    requirementsMode: normalizeStoredConditionGroupMode(source.requirementsMode || source.requirementMode || source.conditionMode),
     effects: normalizeNodeEffects(source.effects || source.effect)
   };
 }
@@ -11612,38 +19811,168 @@ function openPreview() {
     setStatus("No nodes to play.");
     return;
   }
+  resetPreviewSessionState();
+  state.project.variables = normalizeVariablesObject(state.project.variables);
+  state.playVariables = clonePreviewVariables(state.project.variables);
   state.playPath = [entry.id];
+  state.playStepIndex = 0;
+  state.playSteps = [];
   state.playNodeId = entry.id;
   state.playTurnIndex = 0;
+  state.playManualActionRunIds = new Set();
+  state.playVisitedNodeIds = new Set();
+  state.playVisitRecords = [];
   renderPreviewNode(entry.id);
   dom.playDialog.showModal();
 }
 
+function resetPreviewSessionState() {
+  state.playNodeId = null;
+  state.playPath = [];
+  state.playStepIndex = 0;
+  state.playSteps = [];
+  state.playTurnIndex = 0;
+  state.playVariables = null;
+  state.playManualActionRunIds = new Set();
+  state.playVisitedNodeIds = new Set();
+  state.playVisitRecords = [];
+}
+
+function clonePreviewVariables(variables) {
+  return JSON.parse(JSON.stringify(normalizeVariablesObject(variables)));
+}
+
+function hasPreviewVariables() {
+  return Boolean(state.playVariables && typeof state.playVariables === "object" && !Array.isArray(state.playVariables));
+}
+
+function getRuntimeVariableSource() {
+  return hasPreviewVariables() ? state.playVariables : state.project.variables;
+}
+
+function getPlayRuntimeVariables() {
+  if (!hasPreviewVariables()) state.playVariables = clonePreviewVariables(state.project.variables);
+  return state.playVariables;
+}
+
+function getPreviewCurrentPathIndex() {
+  const index = Number.isInteger(state.playStepIndex) ? state.playStepIndex : -1;
+  if (index >= 0 && state.playPath[index] === state.playNodeId) return index;
+  const fallback = state.playPath.lastIndexOf(state.playNodeId);
+  state.playStepIndex = fallback >= 0 ? fallback : Math.max(state.playPath.length - 1, 0);
+  return fallback;
+}
+
+function clonePreviewVisitRecords(records = []) {
+  return (Array.isArray(records) ? records : []).map((record) => ({
+    nodeId: record.nodeId || "",
+    title: record.title || "",
+    displayId: record.displayId || "",
+    operations: Array.isArray(record.operations) ? [...record.operations] : []
+  }));
+}
+
+function capturePreviewStep(nodeId = state.playNodeId) {
+  if (!nodeId) return;
+  let index = getPreviewCurrentPathIndex();
+  if (index < 0) {
+    state.playPath.push(nodeId);
+    index = state.playPath.length - 1;
+    state.playStepIndex = index;
+  }
+  if (!Array.isArray(state.playSteps)) state.playSteps = [];
+  state.playSteps[index] = {
+    nodeId,
+    variables: clonePreviewVariables(getPlayRuntimeVariables()),
+    manualActionRunIds: state.playManualActionRunIds instanceof Set ? [...state.playManualActionRunIds] : [],
+    visitedNodeIds: state.playVisitedNodeIds instanceof Set ? [...state.playVisitedNodeIds] : [],
+    visitRecords: clonePreviewVisitRecords(state.playVisitRecords)
+  };
+}
+
+function restorePreviewStep(index) {
+  if (!Array.isArray(state.playSteps) || index < 0 || index >= state.playSteps.length) return false;
+  const step = state.playSteps[index];
+  if (!step?.nodeId) return false;
+  state.playSteps = state.playSteps.slice(0, index + 1);
+  state.playPath = state.playPath.slice(0, index + 1);
+  state.playStepIndex = index;
+  state.playNodeId = step.nodeId;
+  state.playTurnIndex = 0;
+  state.playVariables = clonePreviewVariables(step.variables || {});
+  state.playManualActionRunIds = new Set(step.manualActionRunIds || []);
+  state.playVisitedNodeIds = new Set(step.visitedNodeIds || []);
+  state.playVisitRecords = clonePreviewVisitRecords(step.visitRecords || []);
+  return true;
+}
+
+function isPreviewVisitTrackingEnabled() {
+  const rule = getRunnerRules().visitTracking;
+  return Boolean(isDebugModeRuleEnabled() && rule?.enabled && rule.value);
+}
+
+function ensurePreviewVisitRecord(node) {
+  if (!node || !isPreviewVisitTrackingEnabled()) return null;
+  if (!Array.isArray(state.playVisitRecords)) state.playVisitRecords = [];
+  let index = getPreviewCurrentPathIndex();
+  if (index < 0) index = Math.max(state.playVisitRecords.length, 0);
+  const existing = state.playVisitRecords[index];
+  if (existing?.nodeId === node.id) return existing;
+  state.playVisitRecords = state.playVisitRecords.slice(0, index);
+  const record = {
+    nodeId: node.id,
+    title: node.title || getNodeTypeLabel(node.type),
+    displayId: getNodeDisplayId(node),
+    operations: []
+  };
+  state.playVisitRecords[index] = record;
+  return record;
+}
+
+function getPreviewVisitRecordForNode(node) {
+  if (!node || !isPreviewVisitTrackingEnabled()) return null;
+  if (!Array.isArray(state.playVisitRecords)) state.playVisitRecords = [];
+  const index = getPreviewCurrentPathIndex();
+  const record = index >= 0 ? state.playVisitRecords[index] : null;
+  if (record?.nodeId === node.id) return record;
+  for (let i = state.playVisitRecords.length - 1; i >= 0; i -= 1) {
+    if (state.playVisitRecords[i]?.nodeId === node.id) return state.playVisitRecords[i];
+  }
+  return ensurePreviewVisitRecord(node);
+}
+
+function recordPreviewOperation(node, text) {
+  const label = normalizeOptionalString(text).trim();
+  if (!label) return;
+  const record = getPreviewVisitRecordForNode(node);
+  if (!record) return;
+  record.operations.push(label);
+}
+
 function advancePreview(nodeId, opts = {}) {
-  const currentIndex = state.playPath.indexOf(state.playNodeId);
-  const targetIndex = state.playPath.indexOf(nodeId);
+  const currentIndex = getPreviewCurrentPathIndex();
   const currentNode = getNode(state.playNodeId);
   if (currentNode) {
-    applyNodeEffectsForNode(currentNode, "onChoose");
-    applyPlaybookActionsForNode(currentNode, "onChoose");
+    applyNodeEffectsForNode(currentNode, "onChoose", "Node choose");
+    applyPlaybookActionsForNode(currentNode, "onChoose", "Node choose");
     // Per-option effects: when the user picked a specific choice option, run that option's effects
     // (these are independent from the node-level onChoose effects above).
     const optionId = opts && opts.optionId ? String(opts.optionId) : "";
     if (optionId && Array.isArray(currentNode.choiceOptions)) {
       const option = currentNode.choiceOptions.find((o) => o.id === optionId);
+      const entry = getRuntimeChoiceEntries(currentNode, getNodeRuntimeScript(currentNode)).find((item) => item.optionId === optionId);
+      const optionLabel = entry?.label || option?.label || optionId;
+      recordPreviewOperation(currentNode, `${t("Selected choice")}: ${optionLabel}`);
       if (option && Array.isArray(option.effects)) {
-        option.effects.forEach((effect) => applyNodeEffect(effect, currentNode));
+        option.effects.forEach((effect) => applyNodeEffect(effect, currentNode, "Choice effect"));
       }
     }
   }
-  if (currentIndex >= 0) {
-    if (targetIndex !== currentIndex + 1) {
-      state.playPath = state.playPath.slice(0, currentIndex + 1);
-      if (state.playPath[state.playPath.length - 1] !== nodeId) state.playPath.push(nodeId);
-    }
-  } else if (targetIndex < 0) {
-    state.playPath.push(nodeId);
-  }
+  const nextIndex = currentIndex >= 0 ? currentIndex + 1 : state.playPath.length;
+  state.playPath = state.playPath.slice(0, nextIndex);
+  state.playSteps = Array.isArray(state.playSteps) ? state.playSteps.slice(0, nextIndex) : [];
+  state.playPath[nextIndex] = nodeId;
+  state.playStepIndex = nextIndex;
   state.playNodeId = nodeId;
   state.playTurnIndex = 0;
   renderPreviewNode(nodeId);
@@ -11658,14 +19987,27 @@ function advanceDialogTurn(delta) {
 }
 
 function previousPreview() {
-  const index = state.playPath.indexOf(state.playNodeId);
+  const index = getPreviewCurrentPathIndex();
   if (index <= 0) return;
-  const previousId = state.playPath[index - 1];
-  if (previousId) {
-    state.playNodeId = previousId;
-    state.playTurnIndex = 0;
-    renderPreviewNode(previousId);
+  if (!restorePreviewStep(index - 1)) return;
+  renderPreviewNode(state.playNodeId, { skipVisit: true });
+}
+
+function executePreviewManualAction(nodeId, actionIdValue) {
+  const node = getNode(nodeId);
+  if (!node) return;
+  const actionId = normalizeOptionalString(actionIdValue).trim();
+  if (!actionId) return;
+  const actions = getMatchingPlaybookActions(node, "manual").filter(isExecutablePlaybookAction);
+  const action = actions.find((item) => item.id === actionId);
+  if (!action) return;
+  const applied = applyPlaybookActionWithPreviewLog(action, node, "Manual action");
+  if (applied) {
+    if (!(state.playManualActionRunIds instanceof Set)) state.playManualActionRunIds = new Set();
+    state.playManualActionRunIds.add(action.id);
+    capturePreviewStep(node.id);
   }
+  renderPreviewNode(node.id, { skipVisit: true });
 }
 
 function renderPreviewNode(nodeId, options = {}) {
@@ -11673,26 +20015,37 @@ function renderPreviewNode(nodeId, options = {}) {
   if (!node) return;
   const runtimeScript = getNodeRuntimeScript(node);
   if (!options.skipVisit) {
+    ensurePreviewVisitRecord(node);
     const assignment = getRuntimeAssignment(node, runtimeScript);
     if (assignment.key) {
-      state.project.variables[assignment.key] = coerceValue(assignment.value);
+      getPlayRuntimeVariables()[assignment.key] = coerceValue(assignment.value);
+      recordPreviewOperation(node, formatPreviewStateOperation("Node assignment", {
+        op: "set",
+        key: assignment.key,
+        value: assignment.value
+      }, node));
     }
-    applyNodeEffectsForNode(node, "onVisit");
-    applyPlaybookActionsForNode(node, "onVisit");
+    applyNodeEffectsForNode(node, "onVisit", "Node visit");
+    applyPlaybookActionsForNode(node, "onVisit", "Node visit");
     applyVisitTrackingRule(node);
+    capturePreviewStep(node.id);
   }
 
   const outgoing = getOutgoing(node.id);
   let nextLinks = outgoing;
-  const conditionSource = getRuntimeConditionSource(node, runtimeScript);
-  if (conditionSource) {
-    const result = evaluateCondition(conditionSource);
+  const requirementsSource = getRuntimeNodeRequirementsSource(node, runtimeScript);
+  const branchConditionSource = getRuntimeBranchConditionSource(node, runtimeScript);
+  if (branchConditionSource) {
+    const result = evaluateCondition(branchConditionSource);
     const conditionLinks = getChoiceOrderedLinks(outgoing);
     nextLinks = result ? conditionLinks.slice(0, 1) : conditionLinks.slice(1, 2);
   }
   nextLinks = filterRuntimeLinksByRequirements(nextLinks, node);
 
-  if (!state.playPath.includes(node.id)) state.playPath.push(node.id);
+  if (!state.playPath.includes(node.id)) {
+    state.playPath.push(node.id);
+    state.playStepIndex = state.playPath.length - 1;
+  }
   const runtimeChoices = getRuntimeChoices(node, runtimeScript);
   if (runtimeChoices.length && nextLinks.length) {
     nextLinks = getChoiceOrderedLinks(nextLinks);
@@ -11704,6 +20057,7 @@ function renderPreviewNode(nodeId, options = {}) {
     : "";
   const runtimeTitle = renderRuntimeTemplate(runtimeScript.title, node, getNodeDisplayTitle(node, node.type));
   const dialogTurns = getRuntimeDialogTurns(node);
+  const manualActionButtons = renderPreviewManualActions(node);
   const dialogTurnIndex = dialogTurns.length ? clamp(state.playTurnIndex || 0, 0, dialogTurns.length - 1) : 0;
   state.playTurnIndex = dialogTurnIndex;
   const runtimeBody = dialogTurns.length
@@ -11711,14 +20065,14 @@ function renderPreviewNode(nodeId, options = {}) {
     : renderRuntimeTemplate(runtimeScript.body, node, displayBody(node));
   dom.playTitle.textContent = runtimeTitle;
   const customFields = renderPreviewCustomFields(node);
-  const debugDetails = renderPreviewDebugDetails(node, conditionSource);
+  const debugDetails = renderPreviewDebugDetails(node, { requirementsSource, branchConditionSource });
   dom.playBody.innerHTML = `
     <div class="play-meta">
       <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
       <span>${pageNumber} / ${pageTotal}</span>
     </div>
     <h3>${escapeHtml(runtimeTitle)}</h3>
-    <p>${escapeHtml(interpolate(runtimeBody))}</p>
+    <p>${escapeHtml(runtimeBody)}</p>
     ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
     ${customFields}
     ${debugDetails}
@@ -11728,12 +20082,12 @@ function renderPreviewNode(nodeId, options = {}) {
     const linePrevButton = dialogTurnIndex > 0
       ? `<button class="play-action" type="button" data-action="play-dialog-prev">${escapeHtml(t("Previous line"))}</button>`
       : "";
-    dom.playActions.innerHTML = previousButton + linePrevButton + `<button class="play-action primary" type="button" data-action="play-dialog-next">${escapeHtml(t("Continue"))}</button>`;
+    dom.playActions.innerHTML = previousButton + linePrevButton + manualActionButtons + `<button class="play-action primary" type="button" data-action="play-dialog-next">${escapeHtml(t("Continue"))}</button>`;
     return;
   }
 
   if (isPreviewEndConditionMet() || normalizeNodeRouting(node.routing).mode === "end") {
-    dom.playActions.innerHTML = previousButton + `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`;
+    dom.playActions.innerHTML = previousButton + manualActionButtons + `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`;
     return;
   }
 
@@ -11746,7 +20100,7 @@ function renderPreviewNode(nodeId, options = {}) {
       if (!link.choiceOptionId) return true;  // legacy links with no option id stay visible
       return availability.get(link.choiceOptionId) !== false;
     });
-    dom.playActions.innerHTML = previousButton + visibleLinks.map((link, index) => {
+    dom.playActions.innerHTML = previousButton + manualActionButtons + visibleLinks.map((link, index) => {
       const label = getChoiceBranchButtonLabel(link, runtimeChoices, index, entries);
       const optionAttr = link.choiceOptionId ? ` data-choice-option-id="${escapeAttr(link.choiceOptionId)}"` : "";
       const available = link.choiceOptionId ? availability.get(link.choiceOptionId) !== false : true;
@@ -11758,9 +20112,38 @@ function renderPreviewNode(nodeId, options = {}) {
 
   const routingNextId = getRoutingNextNodeId(node);
   const nextId = routingNextId || nextLinks[0]?.to || nextPathId;
-  dom.playActions.innerHTML = previousButton + (nextId
+  dom.playActions.innerHTML = previousButton + manualActionButtons + (nextId
     ? `<button class="play-action primary" type="button" data-action="play-next" data-node-id="${escapeAttr(nextId)}">${escapeHtml(t("Next page"))}</button>`
     : `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`);
+}
+
+function renderPreviewManualActions(node) {
+  const actions = getMatchingPlaybookActions(node, "manual").filter(isExecutablePlaybookAction);
+  if (!actions.length) return "";
+  return actions.map((action, index) => {
+    const label = getPlaybookManualActionLabel(action);
+    const applied = state.playManualActionRunIds instanceof Set && state.playManualActionRunIds.has(action.id);
+    const appliedAttr = applied ? ` data-play-manual-applied="true"` : "";
+    return `<button class="play-action" type="button" data-action="play-manual" data-node-id="${escapeAttr(node.id)}" data-playbook-action-id="${escapeAttr(action.id)}"${appliedAttr}>${escapeHtml(label)}</button>`;
+  }).join("");
+}
+
+function isExecutablePlaybookAction(action) {
+  const info = getPlaybookActionVariableInfo(action);
+  return getAllowedPlaybookActionOperationsForVariableInfo(info).some((entry) => entry.value === action?.op);
+}
+
+function getPlaybookManualActionLabel(action) {
+  const op = String(action?.op || "action").trim();
+  const operation = PLAYBOOK_ACTION_OPERATIONS.find((entry) => entry.value === op);
+  let opLabel = t(operation?.label || op);
+  const key = getPlaybookActionStateKey(action);
+  const value = String(action?.value || "").trim();
+  if (!key) return opLabel;
+  if (value === "" || ["clear", "toggle", "show", "hide", "lockChoice", "unlockChoice", "goTo"].includes(op)) {
+    return `${opLabel} ${key}`;
+  }
+  return `${opLabel} ${key} = ${value}`;
 }
 
 function getPreviewProgress(node, nextLinks, runtimeChoices) {
@@ -11791,9 +20174,9 @@ function getPreviewFutureCount(startId, initialNextLinks) {
     const outgoing = getOutgoing(node.id);
     if (getRuntimeChoices(node, runtimeScript).length && outgoing.length) break;
     let nextLinks = outgoing;
-    const conditionSource = getRuntimeConditionSource(node, runtimeScript);
-    if (conditionSource) {
-      const result = evaluateCondition(conditionSource);
+    const branchConditionSource = getRuntimeBranchConditionSource(node, runtimeScript);
+    if (branchConditionSource) {
+      const result = evaluateCondition(branchConditionSource);
       const conditionLinks = getChoiceOrderedLinks(outgoing);
       nextLinks = result ? conditionLinks.slice(0, 1) : conditionLinks.slice(1, 2);
     }
@@ -11832,10 +20215,14 @@ function findNodeByTitleOrId(value, options = {}) {
 }
 
 function applyVisitTrackingRule(node) {
-  const rule = getRunnerRules().visitTracking;
-  if (!rule?.enabled || !rule.value || !node) return;
-  const key = `visited.${slugPlaybookCategory(node.title || node.id || "node")}`;
-  state.project.variables[key] = true;
+  if (!isPreviewVisitTrackingEnabled() || !node) return;
+  if (!(state.playVisitedNodeIds instanceof Set)) state.playVisitedNodeIds = new Set();
+  state.playVisitedNodeIds.add(node.id);
+  ensurePreviewVisitRecord(node);
+}
+
+function isRuntimeVisitTrackingEffect(effect) {
+  return false;
 }
 
 function isPreviewEndConditionMet() {
@@ -11847,49 +20234,34 @@ function getEndConditionStatus(source) {
   const text = String(source || "").trim();
   if (!text) return { status: "empty" };
   const variables = normalizeVariablesObject(state.project.variables);
-  const unknown = collectEndConditionUnknownKeys(text, variables);
-  if (unknown === null) return { status: "invalid" };
+  const result = collectExpressionKeys(text, variables);
+  if (result.invalid) return { status: "invalid" };
+  const unknown = result.keys.filter((key) => !resolveRuntimeStatePath(key, variables).found);
   if (unknown.length) return { status: "unknown", key: unknown[0] };
   return { status: "ok" };
 }
 
 function collectEndConditionUnknownKeys(text, variables) {
+  const result = collectExpressionKeys(text, variables);
+  if (result.invalid) return null;
+  return result.keys.filter((key) => !resolveRuntimeStatePath(key, variables).found);
+}
+
+function collectExpressionKeys(text, variables = {}) {
   const trimmed = String(text || "").trim();
-  if (!trimmed) return [];
-  const orParts = splitConditionExpression(trimmed, "||");
-  if (orParts.length > 1) {
-    const merged = [];
-    for (const part of orParts) {
-      const sub = collectEndConditionUnknownKeys(part, variables);
-      if (sub === null) return null;
-      merged.push(...sub);
-    }
-    return merged;
-  }
-  const andParts = splitConditionExpression(trimmed, "&&");
-  if (andParts.length > 1) {
-    const merged = [];
-    for (const part of andParts) {
-      const sub = collectEndConditionUnknownKeys(part, variables);
-      if (sub === null) return null;
-      merged.push(...sub);
-    }
-    return merged;
-  }
-  const bareIdentifier = trimmed.match(/^([a-zA-Z_][\w.-]*)$/);
-  if (bareIdentifier) {
-    const key = bareIdentifier[1];
-    return Object.prototype.hasOwnProperty.call(variables, key) ? [] : [key];
-  }
-  const match = trimmed.match(/^\s*([a-zA-Z_][\w.-]*)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$/);
-  if (!match) return null;
-  const key = match[1];
-  return Object.prototype.hasOwnProperty.call(variables, key) ? [] : [key];
+  if (!trimmed) return { keys: [], membershipKeys: [], invalid: false };
+  const parsed = parseJsConditionExpression(trimmed);
+  if (parsed.invalid) return { keys: [], membershipKeys: [], invalid: true };
+  return collectJsConditionAstKeys(parsed.ast, variables);
+}
+
+function uniqueExpressionKeys(keys) {
+  return [...new Set((keys || []).map((key) => normalizeOptionalString(key).trim()).filter(Boolean))];
 }
 
 function formatEndConditionStatusLabel(status) {
   if (!status || status.status === "empty") return "";
-  if (status.status === "ok") return t("OK");
+  if (status.status === "ok") return t("Expression valid");
   if (status.status === "invalid") return t("Invalid expression");
   if (status.status === "unknown") return t("Unknown variable: {key}", { key: status.key });
   return "";
@@ -11910,22 +20282,165 @@ function getRunnerRuleValue(key) {
   return rule?.enabled ? rule.value : "";
 }
 
-function renderPreviewDebugDetails(node, conditionSource) {
+function formatPreviewTemplateValues(node) {
+  const refs = collectPreviewTemplateValueRefs(node);
+  if (!refs.length) return t("No template values.");
+  return refs
+    .map((ref) => `${ref.label && ref.label !== ref.key ? `${ref.label} (${ref.key})` : ref.key}: ${formatPreviewDebugValue(ref.value)}`)
+    .join("\n");
+}
+
+function collectPreviewTemplateValueRefs(node) {
+  const runtimeScript = getNodeRuntimeScript(node);
+  const sources = [
+    runtimeScript.title || getNodeDisplayTitle(node, node?.type || "Node"),
+    runtimeScript.body || displayBody(node)
+  ];
+  if (node?.title) sources.push(node.title);
+  if (node?.body) sources.push(node.body);
+  getRuntimeDialogTurns(node).forEach((turn) => {
+    sources.push(turn.speaker, turn.line);
+  });
+  getNodeCustomFieldEntries(node).forEach((field) => {
+    if (field.value !== "") sources.push(field.value);
+  });
+  const refs = new Map();
+  sources.forEach((source) => {
+    collectPreviewTemplateValueRefsFromSource(source, node).forEach((ref) => {
+      const existing = refs.get(ref.key);
+      if (!existing || (existing.label === ref.key && ref.label !== ref.key)) refs.set(ref.key, ref);
+    });
+  });
+  return [...refs.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function collectPreviewTemplateValueRefsFromSource(source, node) {
+  const text = String(source || "");
+  const variables = normalizeVariablesObject(getPlayRuntimeVariables());
+  const refs = [];
+  text.replace(/\{([a-zA-Z_][\w.-]*)\}/g, (match, rawKey, offset) => {
+    const key = rawKey.startsWith("variables.") ? rawKey.slice("variables.".length) : rawKey;
+    if (!rawKey.startsWith("variables.") && getNodeFieldValue(node, rawKey) !== "") return match;
+    const resolved = resolveRuntimeStatePath(key, variables);
+    if (!resolved.found) return match;
+    refs.push({
+      key,
+      label: inferTemplateValueLabel(text, offset, key),
+      value: resolved.value
+    });
+    return match;
+  });
+  return refs;
+}
+
+function inferTemplateValueLabel(source, offset, key) {
+  const prefix = String(source || "").slice(0, Math.max(0, offset));
+  const cleaned = prefix.replace(/\{[^{}]*\}/g, " ");
+  const parts = cleaned.split(/[\r\n;；。.!！?？,，:：()（）/|]/);
+  let label = normalizeOptionalString(parts[parts.length - 1]).trim();
+  label = label.replace(/["'“”‘’`[\]{}<>]+/g, "").replace(/\s+/g, " ").trim();
+  if (label.length > 32) label = label.slice(Math.max(0, label.length - 32)).trim();
+  return label || key;
+}
+
+function formatPreviewAffectedValues(node) {
+  const rows = collectPreviewAffectedValueRows(node);
+  return rows.length ? rows.join("\n") : t("No affected values.");
+}
+
+function collectPreviewAffectedValueRows(node) {
+  const rows = [];
+  const push = (label, action) => {
+    const row = formatPreviewAffectedValueRow(label, action, node);
+    if (row) rows.push(row);
+  };
+  const assignment = getRuntimeAssignment(node, getNodeRuntimeScript(node));
+  if (assignment.key) {
+    push(`${t("Node assignment")} / ${t("On visit")}`, {
+      op: "set",
+      category: "Variable",
+      key: assignment.key,
+      value: assignment.value
+    });
+  }
+  normalizeNodeStateLogic(node?.stateLogic).effects.forEach((effect) => {
+    push(`${t("Node effect")} / ${t(effect.trigger === "onChoose" ? "On choose" : "On visit")}`, effect);
+  });
+  getMatchingPlaybookActions(node, "onVisit").forEach((action) => push(`${t("Variable action")} / ${t("On visit")}`, action));
+  getMatchingPlaybookActions(node, "manual").forEach((action) => push(t("Manual action"), action));
+  getMatchingPlaybookActions(node, "onChoose").forEach((action) => push(`${t("Variable action")} / ${t("On choose")}`, action));
+  getRuntimeChoiceEntries(node, getNodeRuntimeScript(node)).forEach((entry) => {
+    (entry.effects || []).forEach((effect) => push(`${t("Choice effect")} / ${entry.label || entry.optionId || t("Option")}`, effect));
+  });
+  return [...new Set(rows)];
+}
+
+function formatPreviewAffectedValueRow(label, action, node) {
+  const stateAction = { ...action, category: action?.category || "Variable" };
+  const key = getPlaybookActionStateKey(stateAction);
+  if (!key) return "";
+  const op = String(stateAction?.op || "set").trim() || "set";
+  const operation = PLAYBOOK_ACTION_OPERATIONS.find((entry) => entry.value === op);
+  const opLabel = t(operation?.label || op);
+  const rawValue = normalizeOptionalString(stateAction?.value).trim();
+  const value = rawValue ? renderRuntimeTemplate(rawValue, node, rawValue) : "";
+  const current = getPlayRuntimeStateValueLabel(key);
+  const valueText = value === "" || ["clear", "toggle", "show", "hide", "lockChoice", "unlockChoice", "goTo"].includes(op)
+    ? `${opLabel} ${key}`
+    : `${opLabel} ${key} = ${value}`;
+  return current === "" ? `${label}: ${valueText}` : `${label}: ${valueText} (${t("current")}: ${current})`;
+}
+
+function formatPreviewDebugValue(value) {
+  return JSON.stringify(value);
+}
+
+function renderPreviewDebugDetails(node, details = {}) {
   const rule = getRunnerRules().debugMode;
   if (!rule?.enabled || !rule.value) return "";
-  const variables = Object.entries(normalizeVariablesObject(state.project.variables))
-    .slice(0, 8)
+  const branchConditionSource = typeof details === "string" ? details : details.branchConditionSource;
+  const requirementsSource = typeof details === "string" ? "" : details.requirementsSource;
+  const variables = Object.entries(normalizeVariablesObject(getPlayRuntimeVariables()))
+    .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-    .join("\n");
-  const gate = conditionSource ? `${conditionSource} => ${evaluateCondition(conditionSource)}` : "No gate";
+    .join("\n") || t("No variables yet.");
+  const visitTrackingEnabled = isPreviewVisitTrackingEnabled();
+  const visitedTitles = visitTrackingEnabled ? getPreviewVisitedNodeTitles() : [];
+  const visited = visitedTitles.length ? visitedTitles.join("\n") : t("No visits yet.");
+  const gate = branchConditionSource ? `${branchConditionSource} => ${evaluateCondition(branchConditionSource)}` : "No gate";
+  const requirements = requirementsSource ? `\n${t("Requirements")}: ${requirementsSource} => ${evaluateRequirementExpression(requirementsSource)}` : "";
   const routing = normalizeNodeRouting(node.routing);
   const routingText = routing.mode === "goTo" ? `Go to ${routing.target}` : routing.mode;
+  const templateValues = formatPreviewTemplateValues(node);
+  const affectedValues = formatPreviewAffectedValues(node);
+  const visitedText = visitTrackingEnabled ? `\n${t("Visited")}:\n${visited}` : "";
   return `
-    <details class="play-debug" open>
+    <details class="play-debug" ${state.playDebugOpen === false ? "" : "open"}>
       <summary>${escapeHtml(t("Debug"))}</summary>
-      <pre>${escapeHtml(`Gate: ${gate}\nRouting: ${routingText}\nVariables:\n${variables}`)}</pre>
+      <pre>${escapeHtml(`${t("Gate")}: ${gate}${requirements}\n${t("Routing")}: ${routingText}\n${t("Template values")}:\n${templateValues}\n${t("Variables")}:\n${variables}\n${t("Affected values")}:\n${affectedValues}${visitedText}`)}</pre>
     </details>
   `;
+}
+
+function getPreviewVisitedNodeTitles() {
+  const records = clonePreviewVisitRecords(state.playVisitRecords);
+  if (records.length) {
+    return records.map((record) => {
+      const title = record.title || getNode(record.nodeId)?.title || getNodeTypeLabel(getNode(record.nodeId)?.type);
+      const displayId = record.displayId || (getNode(record.nodeId) ? getNodeDisplayId(getNode(record.nodeId)) : record.nodeId);
+      const operations = record.operations.length
+        ? `\n${record.operations.map((operation) => `  - ${operation}`).join("\n")}`
+        : "";
+      return `${title} (${displayId})${operations}`;
+    });
+  }
+  const ids = state.playVisitedNodeIds instanceof Set ? [...state.playVisitedNodeIds] : [];
+  return ids
+    .map((id) => {
+      const node = getNode(id);
+      return node ? `${node.title || getNodeTypeLabel(node.type)} (${getNodeDisplayId(node)})` : "";
+    })
+    .filter(Boolean);
 }
 
 function renderPreviewCustomFields(node) {
@@ -11936,7 +20451,7 @@ function renderPreviewCustomFields(node) {
       ${fields.map((field) => `
         <div>
           <dt>${escapeHtml(field.label)}</dt>
-          <dd>${escapeHtml(interpolate(field.value))}</dd>
+          <dd>${escapeHtml(renderRuntimeTemplate(field.value, node, field.value))}</dd>
         </div>
       `).join("")}
     </dl>
@@ -11969,11 +20484,15 @@ function getRuntimeAssignment(node, script) {
   return fallbackKey ? { key: fallbackKey, value: node.value } : { key: "", value: "" };
 }
 
-function getRuntimeConditionSource(node, script) {
+function getRuntimeNodeRequirementsSource(node, script) {
   const requirements = normalizeNodeStateLogic(node?.stateLogic).requirements;
   if (requirements) return requirements;
   const gateAction = getPlaybookGateAction(node);
   if (gateAction) return `${getPlaybookActionStateKey(gateAction)} ${renderRuntimeTemplate(gateAction.value, node, gateAction.value)}`.trim();
+  return "";
+}
+
+function getRuntimeBranchConditionSource(node, script) {
   if (script?.condition) {
     const fieldValue = getNodeFieldValue(node, script.condition);
     return fieldValue !== "" ? fieldValue : script.condition;
@@ -11981,23 +20500,22 @@ function getRuntimeConditionSource(node, script) {
   return hasNodeCondition(node) ? (node.condition || node.body) : "";
 }
 
-function applyNodeEffectsForNode(node, trigger) {
+function applyNodeEffectsForNode(node, trigger, contextLabel = "") {
   normalizeNodeStateLogic(node?.stateLogic).effects
     .filter((effect) => effect.trigger === trigger)
-    .forEach((effect) => applyNodeEffect(effect, node));
+    .forEach((effect) => applyNodeEffect(effect, node, contextLabel));
 }
 
-function applyNodeEffect(effect, node) {
-  return applyPlaybookAction({
+function applyNodeEffect(effect, node, contextLabel = "") {
+  return applyPlaybookActionWithPreviewLog({
     id: "",
     trigger: effect.trigger || "onVisit",
     target: "",
     op: effect.op || "set",
     category: "Variable",
     key: effect.key || "",
-    value: effect.value || "",
-    append: false
-  }, node);
+    value: effect.value || ""
+  }, node, contextLabel);
 }
 
 function getRuntimeChoices(node, script) {
@@ -12045,27 +20563,39 @@ function getRuntimeChoiceEntries(node, script) {
 
 // True iff the option's `requires` expression evaluates true. Empty `requires` means always available.
 function isChoiceOptionAvailable(entry, node) {
-  if (!entry?.requires) return true;
-  const expr = renderRuntimeTemplate(entry.requires, node, entry.requires);
-  return evaluateCondition(expr);
+  const conditions = [];
+  if (entry?.requires) conditions.push(renderRuntimeTemplate(entry.requires, node, entry.requires));
+  getMatchingPlaybookChoiceGateActions(node, { id: entry?.optionId || "", label: entry?.label || "" }, entry?.label || "")
+    .forEach((action) => {
+      const source = renderRuntimeTemplate(action.value, node, action.value);
+      const condition = getChoiceGateConditionExpression(action, source);
+      if (condition) conditions.push(condition);
+    });
+  return conditions.every((condition) => evaluateRequirementExpression(condition));
 }
 
 function getChoiceRevealMode(node) {
   if (node?.choiceRevealMode) return normalizeChoiceRevealMode(node.choiceRevealMode);
-  const globalMode = getRunnerRuleValue("choiceDisplay");
-  if (globalMode === "disableUnavailable") return "disabled";
-  if (globalMode === "showAll") return "show";
   return "hide";
 }
 
 function filterRuntimeLinksByRequirements(links, node) {
-  return (links || []).filter((link) => isLinkRequirementMet(link, node));
+  return (links || []).filter((link) => isLinkRequirementMet(link, node) && isTargetNodeRequirementMet(link));
 }
 
 function isLinkRequirementMet(link, node) {
   const source = normalizeOptionalString(link?.requirements || link?.requires).trim();
   if (!source) return true;
   return evaluateRequirementExpression(renderRuntimeTemplate(source, node, source));
+}
+
+function isTargetNodeRequirementMet(link) {
+  const targetNode = getNode(link?.to);
+  if (!targetNode) return true;
+  const targetScript = getNodeRuntimeScript(targetNode);
+  const source = getRuntimeNodeRequirementsSource(targetNode, targetScript);
+  if (!source) return true;
+  return evaluateRequirementExpression(renderRuntimeTemplate(source, targetNode, source));
 }
 
 function evaluateRequirementExpression(source) {
@@ -12080,23 +20610,56 @@ function evaluateRequirementExpression(source) {
 
 function renderRuntimeTemplate(template, node, fallback) {
   const source = template == null || template === "" ? fallback : template;
+  const variables = getRuntimeVariableSource();
   return String(source || "").replace(/\{([a-zA-Z_][\w.-]*)\}/g, (match, key) => {
     if (key.startsWith("variables.")) {
       const variableKey = key.slice("variables.".length);
-      return state.project.variables?.[variableKey] ?? match;
+      const resolved = resolveRuntimeStatePath(variableKey, variables);
+      return resolved.found ? resolved.value : match;
     }
     const nodeValue = getNodeFieldValue(node, key);
     if (nodeValue !== "") return nodeValue;
-    return state.project.variables?.[key] ?? match;
+    const resolved = resolveRuntimeStatePath(key, variables);
+    return resolved.found ? resolved.value : match;
   });
+}
+
+function resolveRuntimeStatePath(key, variables = state.project.variables) {
+  const sourceKey = String(key || "").trim();
+  const source = normalizeVariablesObject(variables);
+  if (!sourceKey) return { found: false, key: "", value: undefined, kind: "missing" };
+  if (Object.prototype.hasOwnProperty.call(source, sourceKey)) {
+    return { found: true, key: sourceKey, value: source[sourceKey], kind: "flat" };
+  }
+  if (!sourceKey.includes(".")) return { found: false, key: sourceKey, value: undefined, kind: "missing" };
+  const parts = sourceKey.split(".").filter(Boolean);
+  if (!parts.length || !Object.prototype.hasOwnProperty.call(source, parts[0])) {
+    return { found: false, key: sourceKey, value: undefined, kind: "missing" };
+  }
+  let value = source[parts[0]];
+  for (let index = 1; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (value == null) return { found: false, key: sourceKey, value: undefined, kind: "missing" };
+    if (Array.isArray(value) && /^\d+$/.test(part)) {
+      const arrayIndex = Number(part);
+      if (arrayIndex < 0 || arrayIndex >= value.length) return { found: false, key: sourceKey, value: undefined, kind: "missing" };
+      value = value[arrayIndex];
+      continue;
+    }
+    if (typeof value !== "object" || !Object.prototype.hasOwnProperty.call(value, part)) {
+      return { found: false, key: sourceKey, value: undefined, kind: "missing" };
+    }
+    value = value[part];
+  }
+  return { found: true, key: sourceKey, value, kind: "path" };
 }
 
 function getPlaybookGateAction(node) {
   return getMatchingPlaybookActions(node, "gate").find((action) => action.op === "if" && action.key && action.value);
 }
 
-function applyPlaybookActionsForNode(node, trigger) {
-  getMatchingPlaybookActions(node, trigger).forEach((action) => applyPlaybookAction(action, node));
+function applyPlaybookActionsForNode(node, trigger, contextLabel = "") {
+  getMatchingPlaybookActions(node, trigger).forEach((action) => applyPlaybookActionWithPreviewLog(action, node, contextLabel));
 }
 
 function getMatchingPlaybookActions(node, trigger) {
@@ -12116,17 +20679,55 @@ function matchesPlaybookActionTarget(action, node) {
   return candidates.has(target);
 }
 
+function applyPlaybookActionWithPreviewLog(action, node, contextLabel = "") {
+  const applied = applyPlaybookAction(action, node);
+  if (applied && contextLabel) {
+    const operationText = formatPreviewStateOperation(contextLabel, action, node);
+    if (operationText) recordPreviewOperation(node, operationText);
+  }
+  return applied;
+}
+
+function formatPreviewStateOperation(contextLabel, action, node) {
+  const key = getPlaybookActionStateKey(action);
+  if (!key) return "";
+  const op = String(action?.op || "set").trim() || "set";
+  const operation = PLAYBOOK_ACTION_OPERATIONS.find((entry) => entry.value === op);
+  const opLabel = t(operation?.label || op);
+  const rawValue = normalizeOptionalString(action?.value).trim();
+  const value = rawValue ? renderRuntimeTemplate(rawValue, node, rawValue) : "";
+  const prefix = t(contextLabel);
+  // Toggle has no authored value, so show the resulting state value (true/false)
+  // instead of just the operation name.
+  if (op === "toggle") {
+    const result = getPlayRuntimeStateValueLabel(key);
+    return result === "" ? `${prefix}: ${opLabel} ${key}` : `${prefix}: ${opLabel} ${key} → ${result}`;
+  }
+  if (value === "" || ["clear", "show", "hide", "lockChoice", "unlockChoice", "goTo"].includes(op)) {
+    return `${prefix}: ${opLabel} ${key}`;
+  }
+  return `${prefix}: ${opLabel} ${key} = ${value}`;
+}
+
+function getPlayRuntimeStateValueLabel(key) {
+  const resolved = resolveRuntimeStatePath(key, normalizeVariablesObject(getPlayRuntimeVariables()));
+  if (!resolved.found) return "";
+  const value = resolved.value;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value == null) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function applyPlaybookAction(action, node) {
+  const info = getPlaybookActionVariableInfo(action);
+  if (!info.hasVariable) return false;
+  if (!getAllowedPlaybookActionOperationsForVariableInfo(info).some((option) => option.value === action.op)) return false;
   const key = getPlaybookActionStateKey(action);
   if (!key) return false;
-  const variables = normalizeVariablesObject(state.project.variables);
-  state.project.variables = variables;
-  const value = coerceValue(renderRuntimeTemplate(action.value, node, action.value));
+  const variables = getPlayRuntimeVariables();
+  const value = coercePlaybookActionValueForVariable(renderRuntimeTemplate(action.value, node, action.value), info, action);
   const existing = variables[key];
-  if (action.op === "set" && action.append) {
-    appendPlaybookStateValue(variables, key, value);
-    return true;
-  }
   if (action.op === "set") {
     variables[key] = value;
     return true;
@@ -12154,6 +20755,20 @@ function applyPlaybookAction(action, node) {
     return true;
   }
   return false;
+}
+
+function coercePlaybookActionValueForVariable(value, info, action = null) {
+  if (info.type === "number") return Number(value) || 0;
+  if (info.type === "boolean") return coerceBoolean(value);
+  if ((info.type === "array" || info.type === "object") && action?.op === "set") {
+    try {
+      return JSON.parse(value || (info.type === "array" ? "[]" : "{}"));
+    } catch (error) {
+      return info.type === "array" ? [] : {};
+    }
+  }
+  if (info.type === "array") return coerceValue(value);
+  return String(value ?? "");
 }
 
 function appendPlaybookStateValue(variables, key, value) {
@@ -12407,37 +21022,180 @@ function getChoiceBranchButtonLabel(link, runtimeChoices, fallbackIndex, entries
 
 function evaluateCondition(source) {
   const text = String(source || "").trim();
+  const variables = getRuntimeVariableSource();
   if (!text) return false;
-  const orParts = splitConditionExpression(text, "||");
-  if (orParts.length > 1) return orParts.some((part) => evaluateCondition(part));
-  const andParts = splitConditionExpression(text, "&&");
-  if (andParts.length > 1) return andParts.every((part) => evaluateCondition(part));
-  const bareIdentifier = text.match(/^([a-zA-Z_][\w.-]*)$/);
-  if (bareIdentifier) return coerceBoolean(state.project.variables?.[bareIdentifier[1]]);
-  const match = text.match(/^\s*([a-zA-Z_][\w.-]*)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$/);
-  if (!match) return false;
-  const actualRaw = state.project.variables?.[match[1]];
-  const expectedRaw = String(match[3]).replace(/^["']|["']$/g, "");
-  const actualNumber = Number(actualRaw);
-  const expectedNumber = Number(expectedRaw);
-  const canCompareNumbers = Number.isFinite(actualNumber) && Number.isFinite(expectedNumber);
-  if (match[2] === ">=") return canCompareNumbers && actualNumber >= expectedNumber;
-  if (match[2] === "<=") return canCompareNumbers && actualNumber <= expectedNumber;
-  if (match[2] === ">") return canCompareNumbers && actualNumber > expectedNumber;
-  if (match[2] === "<") return canCompareNumbers && actualNumber < expectedNumber;
-  const actual = String(actualRaw ?? "");
-  return match[2] === "==" ? actual === expectedRaw : actual !== expectedRaw;
+  const parsed = parseJsConditionExpression(text);
+  if (parsed.invalid) return false;
+  return coerceBoolean(evaluateJsConditionAst(parsed.ast, variables || {}));
 }
 
-function splitConditionExpression(source, operator) {
-  return String(source || "")
-    .split(operator)
-    .map((part) => part.trim())
-    .filter(Boolean);
+function isPreviewVisitedStateKeyMet(key) {
+  const visitSlug = normalizeStateReportKey(key).slice("visited.".length).toLowerCase();
+  if (!visitSlug || !(state.playVisitedNodeIds instanceof Set)) return false;
+  return [...state.playVisitedNodeIds].some((nodeId) => {
+    const node = getNode(nodeId);
+    if (!node) return false;
+    const titleSlug = slugPlaybookCategory(node.title || node.id || "node").toLowerCase();
+    const idSlug = slugPlaybookCategory(node.id || "node").toLowerCase();
+    return titleSlug === visitSlug || idSlug === visitSlug;
+  });
 }
 
-function interpolate(text) {
-  return String(text || "").replace(/\{([a-zA-Z_][\w-]*)\}/g, (_, key) => state.project.variables?.[key] ?? `{${key}}`);
+function parseExpressionPredicate(source) {
+  const match = String(source || "").trim().match(/^(has|contains)\s*\(([\s\S]*)\)$/i);
+  if (!match) return null;
+  const args = splitExpressionArguments(match[2]);
+  if (args.length !== 2) return { invalid: true };
+  const key = normalizeExpressionVariableTerm(args[0]);
+  if (!key) return { invalid: true };
+  return {
+    name: match[1].toLowerCase(),
+    keySource: args[0].trim(),
+    key,
+    value: args[1].trim(),
+    invalid: false
+  };
+}
+
+function collectExpressionPredicates(source) {
+  const parsed = parseJsConditionExpression(source);
+  if (parsed.invalid) return [];
+  const predicates = [];
+  const scan = (node) => {
+    if (!node) return;
+    if (node.type === "call" && node.name === "includes" && node.object?.type === "identifier") {
+      predicates.push({
+        name: "contains",
+        key: normalizeConditionIdentifierPath(node.object.path),
+        value: formatJsConditionAst(node.args?.[0], "runtime", { model: { variableNameMap: {}, sourceVariables: {}, variableUsed: new Set(), variables: {} }, warnings: [], ref: {} }),
+        invalid: false
+      });
+      return;
+    }
+    if (node.type === "call" && JS_CONDITION_LEGACY_FUNCTIONS.has(node.name) && node.args?.[0]?.type === "identifier") {
+      predicates.push({
+        name: node.name,
+        key: normalizeConditionIdentifierPath(node.args[0].path),
+        value: formatJsConditionAst(node.args?.[1], "runtime", { model: { variableNameMap: {}, sourceVariables: {}, variableUsed: new Set(), variables: {} }, warnings: [], ref: {} }),
+        invalid: false
+      });
+      return;
+    }
+    if (node.type === "group") scan(node.expression);
+    else if (node.type === "unary") scan(node.argument);
+    else if (node.type === "logical" || node.type === "binary") {
+      scan(node.left);
+      scan(node.right);
+    } else if (node.type === "call") {
+      scan(node.object);
+      (node.args || []).forEach(scan);
+    }
+  };
+  scan(parsed.ast);
+  return predicates;
+}
+
+function splitExpressionArguments(source) {
+  const text = String(source || "");
+  const args = [];
+  let quote = "";
+  let escaped = false;
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "(") {
+      depth += 1;
+      continue;
+    }
+    if (char === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0 && char === ",") {
+      args.push(text.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  args.push(text.slice(start).trim());
+  return args.filter((arg) => arg !== "");
+}
+
+function normalizeExpressionVariableTerm(source) {
+  const text = String(source || "").trim().replace(/^\$/, "");
+  const variablePrefix = text.match(/^variables\.([a-zA-Z_][\w.-]*)$/);
+  if (variablePrefix) return variablePrefix[1];
+  const match = text.match(/^([a-zA-Z_][\w.-]*)$/);
+  return match ? match[1] : "";
+}
+
+function parseExpressionLiteral(source) {
+  const text = String(source || "").trim();
+  if (isQuotedExpressionLiteral(text)) return text.slice(1, -1).replace(/\\(["'\\])/g, "$1");
+  if (/^true$/i.test(text)) return true;
+  if (/^false$/i.test(text)) return false;
+  if (/^null$/i.test(text)) return null;
+  if (text !== "" && !Number.isNaN(Number(text))) return Number(text);
+  return text;
+}
+
+function isQuotedExpressionLiteral(source) {
+  return /^"(?:\\.|[^"\\])*"$/.test(String(source || "").trim())
+    || /^'(?:\\.|[^'\\])*'$/.test(String(source || "").trim());
+}
+
+function isPlainExpressionLiteral(source) {
+  const text = String(source || "").trim();
+  return isQuotedExpressionLiteral(text)
+    || /^(true|false|null)$/i.test(text)
+    || (text !== "" && !Number.isNaN(Number(text)));
+}
+
+function evaluateExpressionPredicate(predicate, variables) {
+  const key = normalizeExpressionVariableTerm(predicate.key);
+  const container = resolveRuntimeStatePath(key, variables).value;
+  const value = resolveExpressionPredicateValue(predicate.value, variables);
+  return expressionContainerHasValue(container, value);
+}
+
+function resolveExpressionPredicateValue(source, variables) {
+  const text = String(source || "").trim();
+  if (isPlainExpressionLiteral(text)) return parseExpressionLiteral(text);
+  const key = normalizeExpressionVariableTerm(text);
+  if (key) {
+    const resolved = resolveRuntimeStatePath(key, variables);
+    if (resolved.found) return resolved.value;
+  }
+  return parseExpressionLiteral(text);
+}
+
+function expressionContainerHasValue(container, value) {
+  if (Array.isArray(container)) {
+    return container.some((item) => expressionValuesMatch(item, value));
+  }
+  if (typeof container === "string") return String(value) !== "" && container.includes(String(value));
+  if (container && typeof container === "object") {
+    return Object.prototype.hasOwnProperty.call(container, String(value));
+  }
+  return expressionValuesMatch(container, value);
+}
+
+function expressionValuesMatch(left, right) {
+  if (left === right) return true;
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber === rightNumber;
+  return String(left) === String(right);
 }
 
 function coerceValue(value) {
@@ -12534,11 +21292,20 @@ function uniqueCharacterName(baseName) {
 }
 
 function getCharacterById(id) {
-  return getCharacters().find((character) => character.id === id) || null;
+  return getCharacterIndex().get(id) || null;
 }
 
 function getCharacterName(id) {
   return getCharacterById(id)?.name || "";
+}
+
+function getCharacterIndex() {
+  const characters = getCharacters();
+  const current = state.characterIndex;
+  if (current?.characters === characters && current.length === characters.length) return current.map;
+  const map = new Map(characters.map((character) => [character.id, character]));
+  state.characterIndex = { characters, length: characters.length, map };
+  return map;
 }
 
 function getActiveCharacterFocusId() {
@@ -12558,36 +21325,32 @@ function getNodeCharacterLinks(node, options = {}) {
   const includeCast = options.includeCast !== false;
   const includeEventAggregate = Boolean(options.includeEventAggregate);
   const characters = getCharacters();
+  const characterIndex = getCharacterIndex();
   const links = [];
 
   if (includeCast) {
     normalizeNodeCast(node.cast).forEach((entry) => {
-      const character = characters.find((item) => item.id === entry.characterId);
+      const character = characterIndex.get(entry.characterId);
       if (character) links.push(createCharacterLink(character, entry.role, "cast"));
     });
   }
 
   const dialogSpeaker = node.type === "Dialog" && node.title
-    ? characters.find((item) => item.name === node.title)
+    ? getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase())
     : null;
   if (dialogSpeaker) links.push(createCharacterLink(dialogSpeaker, "Speaker", "dialog"));
 
   const fieldText = getNodeCharacterFieldText(node);
   if (fieldText) {
-    characters.forEach((character) => {
-      if (dialogSpeaker?.id === character.id) return;
-      if (characterFieldReferencesName(fieldText, character.name)) {
-        links.push(createCharacterLink(character, "Present", "field"));
-      }
+    getCharactersMentionedInText(fieldText, dialogSpeaker?.id).forEach((character) => {
+      links.push(createCharacterLink(character, "Present", "field"));
     });
   }
 
   const body = displayBody(node);
   if (body) {
-    characters.forEach((character) => {
-      if (bodyMentionsCharacter(body, character.name)) {
-        links.push(createCharacterLink(character, "Mentioned", "mention"));
-      }
+    getCharactersMentionedInText(body, "", { requireAtPrefix: true }).forEach((character) => {
+      links.push(createCharacterLink(character, "Mentioned", "mention"));
     });
   }
 
@@ -12626,32 +21389,56 @@ function getNodeCharacterFieldText(node) {
   return String(node?.characterEncountered || "");
 }
 
-function characterFieldReferencesName(value, name) {
-  const text = String(value || "").trim().toLowerCase();
-  const target = String(name || "").trim().toLowerCase();
-  if (!text || !target) return false;
-  const parts = text.split(/[,;\n]/).map((part) => part.trim()).filter(Boolean);
-  return parts.includes(target) || text.includes(target);
-}
-
-function bodyMentionsCharacter(text, name) {
-  const body = String(text || "");
-  const target = `@${String(name || "").trim()}`;
-  if (target.length <= 1) return false;
-  const lowerBody = body.toLowerCase();
-  const lowerTarget = target.toLowerCase();
-  let index = lowerBody.indexOf(lowerTarget);
-  while (index >= 0) {
-    const before = index > 0 ? lowerBody[index - 1] : "";
-    const after = lowerBody[index + lowerTarget.length] || "";
-    if (!isMentionNameChar(before) && !isMentionNameChar(after)) return true;
-    index = lowerBody.indexOf(lowerTarget, index + lowerTarget.length);
-  }
-  return false;
-}
-
 function isMentionNameChar(character) {
   return /[a-z0-9_]/i.test(character || "");
+}
+
+function getCharactersMentionedInText(text, excludeCharacterId = "", options = {}) {
+  const value = String(text || "");
+  if (!value) return [];
+  const context = getCharacterMentionContext();
+  if (!context.pattern) return [];
+  const requireAtPrefix = Boolean(options.requireAtPrefix);
+  if (requireAtPrefix && !value.includes("@")) return [];
+  const matches = [];
+  const seen = new Set();
+  context.pattern.lastIndex = 0;
+  let match = context.pattern.exec(value);
+  while (match) {
+    const name = match[0];
+    const prefixIndex = match.index - 1;
+    const before = value[prefixIndex] || "";
+    const beforePrefix = value[prefixIndex - 1] || "";
+    const after = value[match.index + name.length] || "";
+    const character = context.byName.get(name.toLowerCase());
+    const prefixOk = requireAtPrefix
+      ? before === "@" && !isMentionNameChar(beforePrefix)
+      : !isMentionNameChar(before);
+    if (character && character.id !== excludeCharacterId && !seen.has(character.id) && prefixOk && !isMentionNameChar(after)) {
+      seen.add(character.id);
+      matches.push(character);
+    }
+    match = context.pattern.exec(value);
+  }
+  return matches;
+}
+
+function getCharacterMentionContext() {
+  const cached = state.derived.characterMentionContext;
+  const characters = getCharacters();
+  if (cached?.characters === characters && cached.length === characters.length) return cached;
+  const byName = new Map();
+  characters.forEach((character) => {
+    const name = String(character.name || "").trim();
+    if (name) byName.set(name.toLowerCase(), character);
+  });
+  const alternatives = [...byName.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp);
+  const pattern = alternatives.length ? new RegExp(alternatives.join("|"), "gi") : null;
+  const context = { characters, length: characters.length, byName, pattern };
+  state.derived.characterMentionContext = context;
+  return context;
 }
 
 function isNodeRelatedToCharacter(node, characterId) {
@@ -12711,24 +21498,55 @@ function finalizeCharacterBacklinkGroups(groups, sequenceMap) {
 }
 
 function buildCharacterBacklinkIndex(characters = getCharacters()) {
-  const sequenceMap = getStorySequenceMap(getStoryStructure());
+  const sequenceMap = getNodeFlowOrderMap();
   const characterIds = new Set(characters.map((character) => character.id));
   const index = new Map(characters.map((character) => [character.id, createCharacterBacklinkGroups()]));
+  const directCharacterIdsByNodeId = new Map();
 
   state.project.nodes.forEach((node) => {
-    getNodeCharacterLinks(node, { includeEventAggregate: false }).forEach((link) => {
-      if (!characterIds.has(link.characterId)) return;
-      const role = normalizeCastRole(link.role);
-      addIndexedCharacterBacklink(index, link.characterId, role, node, CAST_RELATION_LABELS[role], link.source);
+    const directCharacterIds = new Set();
+    const addDirectLink = (characterId, role, relation, source) => {
+      if (!characterIds.has(characterId)) return;
+      const normalizedRole = normalizeCastRole(role);
+      addIndexedCharacterBacklink(index, characterId, normalizedRole, node, relation || getCastRelationLabel(normalizedRole), source);
+      directCharacterIds.add(characterId);
+    };
+
+    normalizeNodeCast(node.cast).forEach((entry) => {
+      addDirectLink(entry.characterId, entry.role, "", "cast");
     });
 
-    if (isEventSheetNode(node)) {
-      getEventFrameCharacterIds(node).forEach((characterId) => {
-        if (characterIds.has(characterId)) {
-          addIndexedCharacterBacklink(index, characterId, "EventFrames", node, "Characters", "event");
-        }
+    if (node.type === "Dialog" && node.title) {
+      const speaker = getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase());
+      if (speaker) addDirectLink(speaker.id, "Speaker", getCastRelationLabel("Speaker"), "dialog");
+    }
+
+    const fieldText = getNodeCharacterFieldText(node);
+    if (fieldText) {
+      getCharactersMentionedInText(fieldText).forEach((character) => {
+        addDirectLink(character.id, "Present", getCastRelationLabel("Present"), "field");
       });
     }
+
+    const body = displayBody(node);
+    if (body) {
+      getCharactersMentionedInText(body, "", { requireAtPrefix: true }).forEach((character) => {
+        addDirectLink(character.id, "Mentioned", getCastRelationLabel("Mentioned"), "mention");
+      });
+    }
+
+    directCharacterIdsByNodeId.set(node.id, directCharacterIds);
+  });
+
+  state.project.nodes.forEach((node) => {
+    if (!isEventSheetNode(node)) return;
+    const eventCharacterIds = new Set();
+    getEventContainedNodes(node).forEach((child) => {
+      directCharacterIdsByNodeId.get(child.id)?.forEach((characterId) => eventCharacterIds.add(characterId));
+    });
+    eventCharacterIds.forEach((characterId) => {
+      if (characterIds.has(characterId)) addIndexedCharacterBacklink(index, characterId, "EventFrames", node, "Characters", "event");
+    });
   });
 
   index.forEach((groups) => finalizeCharacterBacklinkGroups(groups, sequenceMap));
@@ -12819,12 +21637,10 @@ function getReachableStory() {
 
 function getStoryStructure() {
   const entries = new Map(state.project.nodes.map((node) => [node.id, { node, children: [] }]));
-  const frameIds = new Set(state.project.nodes.filter((node) => isFrameNode(node)).map((node) => node.id));
+  const frames = state.project.nodes.filter((node) => isFrameNode(node));
+  const frameIds = new Set(frames.map((node) => node.id));
   const frameChildren = new Map([...frameIds].map((frameId) => [frameId, []]));
-  const parentFrameByNodeId = new Map(state.project.nodes.map((node) => {
-    const parentId = normalizeOptionalString(node.frameId).trim();
-    return [node.id, parentId && frameIds.has(parentId) && parentId !== node.id ? parentId : ""];
-  }));
+  const parentFrameByNodeId = new Map(state.project.nodes.map((node) => [node.id, getStoryParentFrameId(node, frameIds, frames)]));
   const reachable = new Set(getReachableStory().map((node) => node.id));
   const includeMemo = new Map();
   const roots = [];
@@ -12840,8 +21656,8 @@ function getStoryStructure() {
     if (!node) return false;
     if (includeMemo.has(node.id)) return includeMemo.get(node.id);
     const included = isFrameNode(node)
-      ? reachable.has(node.id) || (frameChildren.get(node.id) || []).some((childId) => shouldInclude(getNode(childId)))
-      : reachable.has(node.id);
+      || reachable.has(node.id)
+      || Boolean(parentFrameByNodeId.get(node.id));
     includeMemo.set(node.id, included);
     return included;
   };
@@ -12865,6 +21681,20 @@ function getStoryStructure() {
   };
   sortEntries(roots);
   return roots;
+}
+
+function getStoryParentFrameId(node, frameIds, frames) {
+  if (node && Object.prototype.hasOwnProperty.call(node, "frameId")) {
+    const explicitParentId = normalizeOptionalString(node.frameId).trim();
+    return explicitParentId && frameIds.has(explicitParentId) && explicitParentId !== node.id ? explicitParentId : "";
+  }
+  const explicitParentId = normalizeOptionalString(node?.frameId).trim();
+  if (explicitParentId && frameIds.has(explicitParentId) && explicitParentId !== node.id) return explicitParentId;
+
+  const visualParent = getSmallestContainingFrameForNode(node, frames);
+  if (!visualParent || visualParent.id === node?.id) return "";
+  if (isFrameNode(node) && wouldCreateFrameCycle(node.id, visualParent.id)) return "";
+  return visualParent.id;
 }
 
 function createStorySortContext() {
@@ -13316,7 +22146,6 @@ function getFilteredEventRowGroups(groups) {
 
 function eventRowMatchesSearch(node, query) {
   const columns = getEventSheetColumns(node.type);
-  const containedNodes = getEventContainedNodes(node);
   const values = [
     node.id,
     getNodeDisplayId(node),
@@ -13324,20 +22153,22 @@ function eventRowMatchesSearch(node, query) {
     node.type,
     getNodeTypeLabel(node.type),
     displayBody(node),
-    getNodeCharacterSummary(node, { includeEventAggregate: true }),
-    ...columns.map((column) => getNodeEventValue(node, column.key)),
-    ...containedNodes.flatMap((child) => [
+    getNodeCharacterSummary(node, { includeEventAggregate: false }),
+    ...columns.map((column) => column.key === "characterEncountered"
+      ? getNodeCharacterSummary(node, { includeEventAggregate: false })
+      : getNodeEventValue(node, column.key))
+  ];
+  if (values.filter(Boolean).some((value) => String(value).toLowerCase().includes(query))) return true;
+  return getEventContainedNodes(node).some((child) => [
       child.id,
       getNodeDisplayId(child),
       child.title,
       getNodeTypeLabel(child.type),
       displayBody(child),
       getNodeCharacterSummary(child, { includeEventAggregate: false })
-    ])
-  ];
-  return values
+    ]
     .filter(Boolean)
-    .some((value) => String(value).toLowerCase().includes(query));
+    .some((value) => String(value).toLowerCase().includes(query)));
 }
 
 function getEventRows(type = null) {
@@ -13426,10 +22257,48 @@ function getNodeEventValue(node, key) {
 
 function getEventContainedNodes(eventNode) {
   if (!isEventSheetNode(eventNode)) return [];
-  return state.project.nodes
-    .filter((node) => node.id !== eventNode.id && !isFrameNode(node))
-    .filter((node) => isFrameDescendantOf(node, eventNode.id))
-    .sort((a, b) => a.y - b.y || a.x - b.x);
+  return getFrameDescendantNodes(eventNode.id).filter((node) => !isFrameNode(node));
+}
+
+function getFrameDescendantNodes(frameId) {
+  const sourceId = normalizeOptionalString(frameId).trim();
+  if (!sourceId) return [];
+  const store = getFrameDescendantNodeStore();
+  if (store.cache.has(sourceId)) return store.cache.get(sourceId);
+  const result = [];
+  const stack = (store.direct.get(sourceId) || []).slice().reverse();
+  const seen = new Set([sourceId]);
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || seen.has(node.id)) continue;
+    seen.add(node.id);
+    result.push(node);
+    const children = store.direct.get(node.id);
+    if (children?.length) {
+      for (let index = children.length - 1; index >= 0; index -= 1) stack.push(children[index]);
+    }
+  }
+  result.sort((a, b) => a.y - b.y || a.x - b.x);
+  store.cache.set(sourceId, result);
+  return result;
+}
+
+function getFrameDescendantNodeStore() {
+  const cached = state.derived.frameDescendantNodes;
+  if (derivedStructureUnchanged(cached)) return cached;
+  const frameIds = new Set(state.project.nodes.filter((node) => isFrameNode(node)).map((node) => node.id));
+  const direct = new Map([...frameIds].map((frameId) => [frameId, []]));
+  state.project.nodes.forEach((node) => {
+    const parentId = normalizeOptionalString(node.frameId).trim();
+    if (parentId && frameIds.has(parentId) && parentId !== node.id) {
+      direct.get(parentId)?.push(node);
+    }
+  });
+  const store = derivedStructureStamp(new Map());
+  store.direct = direct;
+  store.cache = new Map();
+  state.derived.frameDescendantNodes = store;
+  return store;
 }
 
 function getEventBounds(eventNode) {
@@ -13784,11 +22653,29 @@ function getLinkCurveBounds(from, to) {
 }
 
 function getLinkControlPoints(from, to) {
-  const dx = Math.max(80, Math.abs(to.x - from.x) * 0.45);
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  const tension = clamp(distance * 0.42, 64, 260);
+  const fromVector = getPortSideVector(from.side) || inferLinkControlVector(from, to);
+  const toVector = getPortSideVector(to.side) || inferLinkControlVector(to, from);
   return {
-    c1: { x: from.x + dx, y: from.y },
-    c2: { x: to.x - dx, y: to.y }
+    c1: { x: from.x + fromVector.x * tension, y: from.y + fromVector.y * tension },
+    c2: { x: to.x + toVector.x * tension, y: to.y + toVector.y * tension }
   };
+}
+
+function getPortSideVector(side) {
+  if (side === "top") return { x: 0, y: -1 };
+  if (side === "right") return { x: 1, y: 0 };
+  if (side === "bottom") return { x: 0, y: 1 };
+  if (side === "left") return { x: -1, y: 0 };
+  return null;
+}
+
+function inferLinkControlVector(point, otherPoint) {
+  const dx = point.x - otherPoint.x;
+  const dy = point.y - otherPoint.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return { x: dx >= 0 ? 1 : -1, y: 0 };
+  return { x: 0, y: dy >= 0 ? 1 : -1 };
 }
 
 function cubicPoint(p0, p1, p2, p3, t) {
@@ -13829,10 +22716,10 @@ function getNodePortPoint(node, kind) {
   const top = node.y;
   const right = node.x + size.width;
   const bottom = node.y + size.height;
-  if (port.side === "top") return { x: left + size.width * port.t, y: top - LINK_PORT_ANCHOR_OFFSET };
-  if (port.side === "right") return { x: right + LINK_PORT_ANCHOR_OFFSET, y: top + size.height * port.t };
-  if (port.side === "bottom") return { x: left + size.width * port.t, y: bottom + LINK_PORT_ANCHOR_OFFSET };
-  return { x: left - LINK_PORT_ANCHOR_OFFSET, y: top + size.height * port.t };
+  if (port.side === "top") return { x: left + size.width * port.t, y: top - LINK_PORT_ANCHOR_OFFSET, side: port.side };
+  if (port.side === "right") return { x: right + LINK_PORT_ANCHOR_OFFSET, y: top + size.height * port.t, side: port.side };
+  if (port.side === "bottom") return { x: left + size.width * port.t, y: bottom + LINK_PORT_ANCHOR_OFFSET, side: port.side };
+  return { x: left - LINK_PORT_ANCHOR_OFFSET, y: top + size.height * port.t, side: port.side };
 }
 
 function nodeHeight(node) {
@@ -14054,12 +22941,44 @@ function getTextGraphemes(value) {
   return Array.from(text);
 }
 
-function nodeMatches(node, query) {
+function nodeMatches(node, query, options = {}) {
+  if (getNodeSearchText(node).includes(query)) return true;
+  const includeCharacterTerms = options.includeCharacterTerms ?? queryCanMatchCharacterTerms(query);
+  return includeCharacterTerms && getNodeCharacterSearchText(node).includes(query);
+}
+
+function getNodeSearchText(node) {
+  if (!node?.id) return "";
+  const cache = getNodeSearchTextCache();
+  if (cache.has(node.id)) return cache.get(node.id);
+  const text = [node.type, node.title, node.body, node.condition, node.variable, node.value, ...(node.choices || []), ...Object.values(node.customFields || {})]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+    .join("\n");
+  cache.set(node.id, text);
+  return text;
+}
+
+function getNodeSearchTextCache() {
+  const cached = state.derived.nodeSearchText;
+  if (cached?.dirtyVersion === state.dirtyVersion && cached?.structureVersion === state.structureVersion) return cached.map;
+  const map = new Map();
+  state.derived.nodeSearchText = { dirtyVersion: state.dirtyVersion, structureVersion: state.structureVersion, map };
+  return map;
+}
+
+function getNodeCharacterSearchText(node) {
+  if (!node?.id) return "";
   const castTerms = getNodeCharacterLinks(node, { includeEventAggregate: isEventSheetNode(node) })
     .flatMap((link) => [link.character?.name, link.role]);
-  return [node.type, node.title, node.body, node.condition, node.variable, node.value, ...(node.choices || []), ...Object.values(node.customFields || {}), ...castTerms]
-    .filter(Boolean)
-    .some((value) => String(value).toLowerCase().includes(query));
+  return castTerms.filter(Boolean).map((value) => String(value).toLowerCase()).join("\n");
+}
+
+function queryCanMatchCharacterTerms(query) {
+  const text = String(query || "").trim().toLowerCase();
+  if (!text) return false;
+  if (CAST_RELATIONS.some((role) => role.toLowerCase().includes(text))) return true;
+  return getCharacters().some((character) => String(character.name || "").toLowerCase().includes(text));
 }
 
 function getCanvasRenderNodes() {
@@ -14110,13 +23029,17 @@ function getNodeDisplayIdMap() {
   const cached = state.derived.displayId;
   if (derivedStructureUnchanged(cached)) return cached.map;
   const flowOrderMap = getNodeFlowOrderMap();
-  const indexedNodes = state.project.nodes.map((node, index) => ({ node, index }));
+  const indexedNodes = state.project.nodes.map((node, index) => ({
+    node,
+    index,
+    identityOrder: getNodeIdentityOrder(node, flowOrderMap)
+  }));
   const counters = { node: 0, frame: 0 };
   const prefixes = { node: "n", frame: "f" };
   const displayMap = new Map();
 
   indexedNodes
-    .sort((a, b) => compareNodeIdentityOrder(a, b, flowOrderMap))
+    .sort((a, b) => compareIndexedNodeIdentityOrder(a, b))
     .forEach(({ node }) => {
       const category = getNodeDisplayCategory(node);
       counters[category] += 1;
@@ -14125,6 +23048,16 @@ function getNodeDisplayIdMap() {
 
   state.derived.displayId = derivedStructureStamp(displayMap);
   return displayMap;
+}
+
+function compareIndexedNodeIdentityOrder(a, b) {
+  if (a.identityOrder !== b.identityOrder) return a.identityOrder - b.identityOrder;
+  if (a.node.y !== b.node.y) return a.node.y - b.node.y;
+  if (a.node.x !== b.node.x) return a.node.x - b.node.x;
+  const numberA = getNodeIdNumber(a.node?.id);
+  const numberB = getNodeIdNumber(b.node?.id);
+  if (numberA !== numberB) return numberA - numberB;
+  return a.index - b.index;
 }
 
 function getNodeDisplayCategory(node) {
@@ -14152,12 +23085,27 @@ function getNodeIdentityOrder(node, flowOrderMap) {
   if (!node) return Number.POSITIVE_INFINITY;
   const ownOrder = flowOrderMap.get(node.id) ?? Number.POSITIVE_INFINITY;
   if (!isFrameNode(node)) return ownOrder;
-  const frameBounds = getNodeBounds(node);
-  const childOrder = state.project.nodes
-    .filter((candidate) => candidate.id !== node.id)
-    .filter((candidate) => boundsContainBounds(frameBounds, getNodeBounds(candidate)))
-    .reduce((best, candidate) => Math.min(best, flowOrderMap.get(candidate.id) ?? Number.POSITIVE_INFINITY), Number.POSITIVE_INFINITY);
+  const childOrder = getFrameChildFlowOrderMap(flowOrderMap).get(node.id) ?? Number.POSITIVE_INFINITY;
   return Math.min(ownOrder, childOrder);
+}
+
+function getFrameChildFlowOrderMap(flowOrderMap = getNodeFlowOrderMap()) {
+  const cached = state.derived.frameChildFlowOrder;
+  if (derivedStructureUnchanged(cached)) return cached.map;
+  const frameIds = new Set(state.project.nodes.filter((node) => isFrameNode(node)).map((node) => node.id));
+  const orderMap = new Map();
+  state.project.nodes.forEach((node) => {
+    const order = flowOrderMap.get(node.id) ?? Number.POSITIVE_INFINITY;
+    let parentId = normalizeOptionalString(node.frameId).trim();
+    const seen = new Set();
+    while (parentId && frameIds.has(parentId) && !seen.has(parentId)) {
+      seen.add(parentId);
+      orderMap.set(parentId, Math.min(orderMap.get(parentId) ?? Number.POSITIVE_INFINITY, order));
+      parentId = normalizeOptionalString(getNode(parentId)?.frameId).trim();
+    }
+  });
+  state.derived.frameChildFlowOrder = derivedStructureStamp(orderMap);
+  return orderMap;
 }
 
 function getNodeFlowOrderMap() {
@@ -14245,14 +23193,60 @@ function setStatus(message) {
   }, 1800);
 }
 
+const statusTranslationRules = [
+  { pattern: /^Image export maximum set to (.+)\.$/, key: "Image export maximum set to {value}.", names: ["value"] },
+  { pattern: /^Image exported at (.+)\.$/, key: "Image exported at {value}.", names: ["value"] },
+  { pattern: /^(.+) sidebar (collapsed|expanded)\.$/, key: "{side} sidebar {state}.", names: ["side", "state"], translateValues: true },
+  { pattern: /^(.+) sidebar resized\.$/, key: "{side} sidebar resized.", names: ["side"], translateValues: true },
+  { pattern: /^(.+) applied\.$/, key: "{label} applied.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) failed\.$/, key: "{label} failed.", names: ["label"], translateValues: true },
+  { pattern: /^Showing more (.+)\.$/, key: "Showing more {file}.", names: ["file"], translateValues: true },
+  { pattern: /^(.+) hidden from Events Sheet\.$/, key: "{label} hidden from Events Sheet.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) shown in Events Sheet\.$/, key: "{label} shown in Events Sheet.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) renamed to (.+)\.$/, key: "{oldName} renamed to {newName}.", names: ["oldName", "newName"], translateValues: true },
+  { pattern: /^(.+) column hidden\. Data kept\.$/, key: "{label} column hidden. Data kept.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) column shown\.$/, key: "{label} column shown.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) column deleted\.$/, key: "{label} column deleted.", names: ["label"], translateValues: true },
+  { pattern: /^(\d+) nodes deleted and archived outside runtime\.$/, key: "{count} nodes deleted and archived outside runtime.", names: ["count"] },
+  { pattern: /^(.+) opened\.$/, key: "{file} opened.", names: ["file"], translateValues: true },
+  { pattern: /^(.+) node type added\.$/, key: "{label} node type added.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) is a system type and cannot be deleted\.$/, key: "{label} is a system type and cannot be deleted.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) node type deleted\.$/, key: "{label} node type deleted.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) hidden from Node Library\. Data kept\.$/, key: "{label} hidden from Node Library. Data kept.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) restored to Node Library\.$/, key: "{label} restored to Node Library.", names: ["label"], translateValues: true },
+  { pattern: /^Updated (\d+) references?\.$/, key: "Updated {count} references.", names: ["count"] },
+  { pattern: /^Converted Set "(.+)" into onVisit effect on "(.+)"\.$/, key: "Converted Set \"{source}\" into onVisit effect on \"{target}\".", names: ["source", "target"], translateValues: true },
+  { pattern: /^Converted Condition "(.+)" into two gated links\.$/, key: "Converted Condition \"{source}\" into two gated links.", names: ["source"], translateValues: true },
+  { pattern: /^(.+) rule added from selected node\.$/, key: "{rule} rule added from selected node.", names: ["rule"], translateValues: true },
+  { pattern: /^(.+) is a system rule\.$/, key: "{rule} is a system rule.", names: ["rule"], translateValues: true },
+  { pattern: /^(.+) disabled\.$/, key: "{rule} disabled.", names: ["rule"], translateValues: true },
+  { pattern: /^(.+) (enabled|disabled)\.$/, key: "{rule} {state}.", names: ["rule", "state"], translateValues: true },
+  { pattern: /^(.+) focused for editing\.$/, key: "{label} focused for editing.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) focused\.$/, key: "{label} focused.", names: ["label"], translateValues: true },
+  { pattern: /^Branch set: (.+)\.$/, key: "Branch set: {label}.", names: ["label"], translateValues: true },
+  { pattern: /^New project created at (.+)\.$/, key: "New project created at {target}.", names: ["target"] },
+  { pattern: /^Loaded (.+)\.$/, key: "Loaded {target}.", names: ["target"], translateValues: true },
+  { pattern: /^Created (.+)\.$/, key: "Created {target}.", names: ["target"] },
+  { pattern: /^(.+) reordered\.$/, key: "{label} reordered.", names: ["label"], translateValues: true },
+  { pattern: /^Link created: (.+)\.$/, key: "Link created: {label}.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) added\.$/, key: "{label} added.", names: ["label"], translateValues: true },
+  { pattern: /^(.+) deleted\.$/, key: "{label} deleted.", names: ["label"], translateValues: true }
+];
+
 function translateStatusMessage(message) {
   const text = String(message || "");
   const exact = t(text);
   if (exact !== text) return exact;
-  const imageMatch = text.match(/^Image export maximum set to (.+)\.$/);
-  if (imageMatch) return t("Image export maximum set to {value}.", { value: imageMatch[1] });
-  const exportedImageMatch = text.match(/^Image exported at (.+)\.$/);
-  if (exportedImageMatch) return t("Image exported at {value}.", { value: exportedImageMatch[1] });
+  for (const rule of statusTranslationRules) {
+    const match = text.match(rule.pattern);
+    if (!match) continue;
+    const replacements = {};
+    rule.names.forEach((name, index) => {
+      const value = match[index + 1] || "";
+      replacements[name] = rule.translateValues ? t(value) : value;
+    });
+    return t(rule.key, replacements);
+  }
   return text;
 }
 

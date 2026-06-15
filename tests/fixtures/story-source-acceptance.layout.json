@@ -1,0 +1,122 @@
+{
+  "format": "narrative-canvas-story-layout",
+  "version": 1,
+  "exportedAt": "2026-06-12T00:00:00.000Z",
+  "source": {
+    "title": "Story Source Acceptance Play",
+    "notes": "Fixture layout sidecar for portable acceptance."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "title": "Start",
+      "type": "Entry",
+      "typeLabel": "Entry",
+      "frame": false,
+      "x": 40,
+      "y": 120,
+      "width": 260,
+      "height": 180
+    },
+    {
+      "id": "platform_choice",
+      "title": "Platform choice",
+      "type": "Choice",
+      "typeLabel": "Choice",
+      "frame": false,
+      "x": 380,
+      "y": 90,
+      "width": 300,
+      "height": 200
+    },
+    {
+      "id": "corridor",
+      "title": "Corridor",
+      "type": "Choice",
+      "typeLabel": "Choice",
+      "frame": false,
+      "x": 750,
+      "y": 130,
+      "width": 300,
+      "height": 200
+    },
+    {
+      "id": "aboard",
+      "title": "Aboard",
+      "type": "Content",
+      "typeLabel": "Content",
+      "frame": false,
+      "x": 160,
+      "y": 430,
+      "width": 300,
+      "height": 190
+    },
+    {
+      "id": "waiting",
+      "title": "Waiting",
+      "type": "Content",
+      "typeLabel": "Content",
+      "frame": false,
+      "x": 500,
+      "y": 390,
+      "width": 300,
+      "height": 190
+    },
+    {
+      "id": "wrong_car",
+      "title": "Wrong car",
+      "type": "Content",
+      "typeLabel": "Content",
+      "frame": false,
+      "x": 870,
+      "y": 420,
+      "width": 300,
+      "height": 190
+    }
+  ],
+  "links": [
+    {
+      "id": "l0",
+      "from": "start",
+      "to": "platform_choice",
+      "label": "Continue"
+    },
+    {
+      "id": "l1",
+      "from": "platform_choice",
+      "to": "corridor",
+      "label": "Board the train",
+      "choiceIndex": 0,
+      "choiceOptionId": "opt_board"
+    },
+    {
+      "id": "l2",
+      "from": "platform_choice",
+      "to": "waiting",
+      "label": "Wait on the platform",
+      "choiceIndex": 1,
+      "choiceOptionId": "opt_wait"
+    },
+    {
+      "id": "l3",
+      "from": "corridor",
+      "to": "aboard",
+      "label": "Take left door",
+      "choiceIndex": 0,
+      "choiceOptionId": "opt_left"
+    },
+    {
+      "id": "l4",
+      "from": "corridor",
+      "to": "wrong_car",
+      "label": "Take right door",
+      "choiceIndex": 1,
+      "choiceOptionId": "opt_right"
+    }
+  ],
+  "view": {
+    "x": -120,
+    "y": -40,
+    "scale": 0.75
+  }
+}

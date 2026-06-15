@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Narrative Canvas</title>
-    <link rel="stylesheet" href="./canvas.css?v=1.1.0">
+    <link rel="stylesheet" href="./canvas.css?v=20260615-1.1.1">
   </head>
   <body>
     <div class="app-shell">
@@ -99,12 +99,13 @@
             <button class="toolbar-button" data-action="zoom-in" data-files="adventure" title="Zoom in">+</button>
             <button class="toolbar-button" data-action="center-view" data-files="adventure" title="Center canvas">Center</button>
             <button class="toolbar-button primary" data-action="play" data-files="adventure" title="Play from entry">Play</button>
-            <button class="toolbar-button" data-action="export-json" data-files="adventure" title="Export full project JSON">Export JSON</button>
-            <span class="export-image-controls" data-files="adventure" role="group" aria-label="Image export">
-              <button class="toolbar-button export-image-button" data-action="export-image" title="Export canvas as PNG">Image</button>
+          </div>
+          <div class="toolbar-group toolbar-group-right" data-files="adventure">
+            <span class="export-image-controls" role="group" aria-label="Image export">
+              <button class="toolbar-button export-image-button" data-action="export-image" title="Export canvas as PNG">Export PNG</button>
               <label class="export-image-scale-label" title="Image export resolution">
                 <span class="visually-hidden">Image resolution</span>
-                <select id="exportImageScale" class="toolbar-select" title="Image resolution">
+                <select id="exportImageScale" class="toolbar-select" title="Image export resolution">
                   <option value="1">4096 x 4096</option>
                   <option value="2">6144 x 6144</option>
                   <option value="3">8192 x 8192</option>
@@ -215,6 +216,19 @@
       </form>
     </dialog>
 
+    <dialog id="exportReportDialog" class="nc-notice-dialog export-report-dialog" aria-label="Export report">
+      <form method="dialog" class="notice-shell export-report-shell">
+        <header>
+          <span id="exportReportKicker" class="pane-kicker">Export report</span>
+          <h2 id="exportReportTitle">Export report</h2>
+        </header>
+        <div id="exportReportBody" class="export-report-body"></div>
+        <footer class="confirm-actions">
+          <button class="small-button primary" value="confirm">OK</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog id="confirmDialog" class="confirm-dialog">
       <form method="dialog" class="confirm-shell">
         <header>
@@ -302,70 +316,40 @@
           <span class="pane-kicker">Playbook</span>
           <h2>What Playbook.json controls</h2>
         </header>
-        <div class="playbook-help-grid">
-          <section>
-            <h3>Can do</h3>
-            <ul>
-              <li>Store project variables for text such as <code>{traveler}</code>.</li>
-              <li>Batch-edit node Requirements, Effects, and Routing in Script Builder.</li>
-              <li>Gate simple branches with conditions such as <code>flag == true</code>.</li>
-              <li>Control the demo runner with Start Node, Choice Display, End Condition, Visit Tracking, and Debug Mode.</li>
-              <li>Use Advanced JSON for exact edits without changing the canvas schema.</li>
-            </ul>
-          </section>
-          <section>
-            <h3>Cannot do</h3>
-            <ul>
-              <li>Run arbitrary JavaScript.</li>
-              <li>Create canvas links, move nodes, or change layout.</li>
-              <li>Add or delete node fields directly. Use Node Library for schema changes.</li>
-              <li>Replace a game engine runtime or evaluate complex code expressions.</li>
-            </ul>
-          </section>
-        </div>
-  <pre class="playbook-example"><code>{
-  "variables": { "has_badge": false, "trust": 1 },
-  "playRules": {
-    "startNode": { "enabled": true, "value": "Start" },
-    "choiceDisplay": { "enabled": true, "value": "hideUnavailable" },
-    "debugMode": { "enabled": false, "value": false }
-  }
-}</code></pre>
-        <footer class="confirm-actions">
-          <button class="small-button primary" value="confirm">Got it</button>
+        <div class="playbook-help-body" data-playbook-help-body></div>
+        <footer class="confirm-actions playbook-help-footer">
+          <button class="small-button" type="button" data-action="playbook-help-prev">Previous tip</button>
+          <div class="playbook-help-pagination">
+            <span data-playbook-help-page-label>Page 1 of 1</span>
+            <div class="playbook-help-dots" data-playbook-help-dots></div>
+          </div>
+          <button class="small-button" type="button" data-action="playbook-help-next">Next tip</button>
+          <button class="small-button primary" value="confirm">Close</button>
         </footer>
       </form>
     </dialog>
 
-    <dialog id="playRuleDialog" class="nc-notice-dialog playbook-rule-dialog" aria-label="Add play rule">
+    <dialog id="playRuleDialog" class="nc-notice-dialog playbook-rule-dialog" aria-label="Add preview rule">
       <form method="dialog" class="notice-shell playbook-rule-shell">
         <header>
           <span class="pane-kicker">Playbook</span>
-          <h2>Add play rule</h2>
+          <h2>Add preview rule</h2>
         </header>
         <div class="playbook-rule-options">
           <button type="button" data-action="create-play-rule" data-playbook-rule-kind="startNode">
             <strong>Start Node</strong>
-            <span>Choose the exact node title Play starts from.</span>
-          </button>
-          <button type="button" data-action="create-play-rule" data-playbook-rule-kind="choiceDisplay">
-            <strong>Choice Display</strong>
-            <span>Decide how gated choices appear in Play.</span>
+            <span>Pick the first node used by Play preview.</span>
           </button>
           <button type="button" data-action="create-play-rule" data-playbook-rule-kind="endCondition">
             <strong>End Condition</strong>
-            <span>Stop the demo route when a condition becomes true.</span>
-          </button>
-          <button type="button" data-action="create-play-rule" data-playbook-rule-kind="visitTracking">
-            <strong>Visit Tracking</strong>
-            <span>Record visited node titles during Play.</span>
+            <span>Stop Play preview when a condition becomes true.</span>
           </button>
           <button type="button" data-action="create-play-rule" data-playbook-rule-kind="debugMode">
             <strong>Debug Mode</strong>
-            <span>Show variable and condition details while previewing.</span>
+            <span>Show state and condition details in Play preview.</span>
           </button>
         </div>
-        <p class="playbook-rule-allset" data-playbook-rule-allset hidden>All play rules already enabled.</p>
+        <p class="playbook-rule-allset" data-playbook-rule-allset hidden>All preview rules already enabled.</p>
         <footer class="confirm-actions">
           <button class="small-button confirm-cancel" value="cancel" autofocus>Cancel</button>
         </footer>
@@ -439,6 +423,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260604-ui"></script>
+    <script src="./app.js?v=20260615-1.1.1"></script>
   </body>
 </html>

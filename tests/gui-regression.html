@@ -93,6 +93,13 @@
         element.dispatchEvent(new win.Event("change", { bubbles: true }));
       }
 
+      function setControlInputValue(win, element, value) {
+        if (!element) return;
+        element.focus();
+        element.value = value;
+        element.dispatchEvent(new win.Event("input", { bubbles: true }));
+      }
+
       function isElementHidden(win, element) {
         if (!element) return true;
         if (element.closest("[hidden]")) return true;
@@ -204,6 +211,21 @@
         return centerHitReport(doc, element).ok;
       }
 
+      function assertPlaybookJsonButtonCentered(label, doc, rowSelector) {
+        const row = doc.querySelector(rowSelector);
+        const button = row?.querySelector(".playbook-json-row-button");
+        const rowRect = row?.getBoundingClientRect();
+        const buttonRect = button?.getBoundingClientRect();
+        const rowCenterY = rowRect ? rowRect.top + rowRect.height / 2 : 0;
+        const buttonCenterY = buttonRect ? buttonRect.top + buttonRect.height / 2 : 0;
+        const style = button ? doc.defaultView.getComputedStyle(button) : null;
+        assert(
+          `${label}: JSON button is centered in ${rowSelector}`,
+          Boolean(row && button && rowRect && buttonRect && Math.abs(rowCenterY - buttonCenterY) <= 4 && style?.justifySelf === "center" && style?.alignSelf === "center"),
+          rowRect && buttonRect && style ? `row=${rectDetail(rowRect)} button=${rectDetail(buttonRect)} justify=${style.justifySelf} align=${style.alignSelf}` : ""
+        );
+      }
+
       async function keepCanvasElementCentered(win, doc, element) {
         const viewport = doc.querySelector("#canvasViewport");
         if (!viewport || !element) return;
@@ -234,6 +256,8 @@
           .filter((element) => {
             const rect = element.getBoundingClientRect();
             if (rect.width < 8 || rect.height < 8) return false;
+            if (element.matches("[data-port]") && element.closest(".node-stack")?.querySelector(".node.frame")) return false;
+            if (element.matches(".node-resize-handle")) return false;
             if (!isElementCenterInViewport(doc, element)) return false;
             if (!isElementCenterInsideClippingAncestors(doc, element, scope)) return false;
             if (isAllowedCanvasOverlayCoverage(doc, element)) return false;
@@ -381,11 +405,15 @@
         click(doc.querySelector("[data-file-id='variables']"));
         await waitFor(`${label}: Chinese playbook opens`, () => doc.querySelector(".playbook-tabs"));
         const tabText = [...doc.querySelectorAll(".playbook-tab")].map((item) => item.textContent.trim()).join(" | ");
-        assert(`${label}: Chinese playbook tab names are localized`, tabText.includes("变量") && tabText.includes("脚本构建器") && tabText.includes("演示规则"), tabText);
+        assert(`${label}: Chinese playbook tab names are localized`, tabText === "变量定义 | 变量动作 | 脚本构建 | 选项条件 | 演示规则 | 校验", tabText);
+        click(doc.querySelector("[data-action='select-playbook-tab'][data-playbook-tab='rules']"));
+        await waitFor(`${label}: Chinese play rules tab opens`, () => doc.querySelector(".playbook-rule-grid"));
+        const rulesText = doc.querySelector(".playbook-rule-grid")?.textContent || "";
+        assert(`${label}: Chinese visit tracking is nested in debug mode`, rulesText.includes("调试模式") && rulesText.includes("访问记录"), rulesText.slice(0, 240));
         click(doc.querySelector("[data-action='add-play-rule']"));
         await waitFor(`${label}: Chinese add rule dialog opens`, () => doc.querySelector("#playRuleDialog")?.open);
         const dialogText = doc.querySelector("#playRuleDialog")?.textContent || "";
-        assert(`${label}: Chinese add rule dialog is localized`, dialogText.includes("添加演示规则") && dialogText.includes("起始节点") && dialogText.includes("访问记录"), dialogText.slice(0, 240));
+        assert(`${label}: Chinese add rule dialog is localized`, dialogText.includes("添加预览规则") && dialogText.includes("起始节点") && dialogText.includes("调试模式") && !dialogText.includes("访问记录"), dialogText.slice(0, 240));
         click(doc.querySelector("#playRuleDialog .confirm-cancel"));
       }
 
@@ -404,6 +432,9 @@
         const nodeBody = doc.querySelector("[data-node-field='body']");
         setControlValue(win, nodeTitle, "GUI Regression Node Title With Long But Contained Text");
         setControlValue(win, nodeBody, "GUI regression body input accepts long copy without breaking the inspector panel.");
+        if (doc.querySelector("#genericConfirmDialog")?.open) {
+          click(doc.querySelector("#genericConfirmDialog .confirm-cancel"));
+        }
         assert(`${label}: node title input accepts text`, nodeTitle?.value.includes("GUI Regression Node Title"));
         assert(`${label}: node body textarea accepts text`, nodeBody?.value.includes("body input accepts"));
       }
@@ -608,7 +639,20 @@
         const characterId = nameInput?.dataset.characterId || "";
         setControlValue(win, nameInput, "GUI Regression Character With Long Name");
         assert(`${label}: character name accepts text`, nameInput.value.includes("GUI Regression Character"));
-        const card = doc.querySelector(`[data-character-id='${characterId}'][data-character-field='name']`)?.closest(".character-card");
+        let card = doc.querySelector(`[data-character-id='${characterId}'][data-character-field='name']`)?.closest(".character-card");
+        click(card?.querySelector("[data-action='focus-character']"));
+        await waitFor(`${label}: unlinked character focus switches to story`, () => doc.querySelector("#canvasPanel")?.classList.contains("active"));
+        click(doc.querySelector("[data-file-id='characters']"));
+        await waitFor(`${label}: focused unlinked character card returns`, () => Boolean(doc.querySelector(`[data-character-card-id='${characterId}'].focused`)));
+        card = doc.querySelector(`[data-character-card-id='${characterId}']`);
+        click(card?.querySelector("[data-action='clear-character-focus']"));
+        await waitFor(`${label}: focused unlinked character can be cleared`, () => {
+          const focusedCard = doc.querySelector(`[data-character-card-id='${characterId}'].focused`);
+          const focusChip = doc.querySelector("[data-character-filter-bar] [data-action='clear-character-focus']");
+          const focusButton = doc.querySelector(`[data-character-card-id='${characterId}'] [data-action='focus-character']`);
+          return !focusedCard && !focusChip && Boolean(focusButton);
+        });
+        card = doc.querySelector(`[data-character-card-id='${characterId}']`);
         click(card?.querySelector("[data-action='hide-character']"));
         await waitFor(`${label}: character card hide button removes card`, () => !doc.querySelector(`[data-character-id='${characterId}'][data-character-field='name']`));
         const restoreButton = doc.querySelector(`[data-action='show-character'][data-character-id='${characterId}']`);
@@ -623,9 +667,13 @@
         await waitFor(`${label}: playbook opens`, () => doc.querySelector(".playbook-tabs"));
         assertActivePanelFits(`${label}: playbook`, doc);
         assertPlaybookTabsVisible(label, doc);
+        const playbookTabOrder = [...doc.querySelectorAll(".playbook-tab")].map((tab) => tab.dataset.playbookTab).join("|");
+        assert(`${label}: playbook tab order places actions before script`, playbookTabOrder === "variables|actions|script|gates|rules|validation", playbookTabOrder);
         assertVisibleControlsClickable(`${label}: playbook`, doc, "#variablesPanel");
         assertNoUnexpectedTextOverflow(`${label}: playbook`, doc, "#variablesPanel");
 
+        click(doc.querySelector("[data-action='select-playbook-tab'][data-playbook-tab='variables']"));
+        await waitFor(`${label}: variable definitions tab opens`, () => doc.querySelector(".variable-table"));
         click(doc.querySelector("[data-action='add-variable']"));
         await waitFor(`${label}: add variable creates row`, () => doc.querySelector("[data-variable-field='key']"));
         const variableKey = doc.querySelector("[data-variable-field='key']");
@@ -635,12 +683,43 @@
         setControlValue(win, variableValue, "true");
         assert(`${label}: variable row accepts key/value input`, variableKey.value === "gui_flag" && variableValue.value === "true");
 
+        click(doc.querySelector("[data-action='select-playbook-tab'][data-playbook-tab='gates']"));
+        await waitFor(`${label}: choice conditions tab opens`, () => doc.querySelector("[data-gate-field='condition']"));
+        assertPlaybookJsonButtonCentered(label, doc, ".playbook-gate-row:not(.playbook-gate-heading)");
+        const conditionEditor = doc.querySelector("[data-gate-field='condition']");
+        const gateId = conditionEditor?.dataset.gateId || "";
+        assert(`${label}: choice condition gate id resolves`, Boolean(gateId), gateId);
+        setControlValue(win, conditionEditor, "gui_flag || workflow_progress >= 0");
+        await waitFor(`${label}: choice condition code editor updates`, () => doc.querySelector(`[data-gate-id='${gateId}'][data-gate-field='condition']`)?.value.includes("||"));
+        await win.NarrativeCanvasApp.save({ silent: true });
+        const savedNodes = win.NarrativeCanvasApp.getSavedState()?.project?.nodes || [];
+        const gateParts = gateId.split(":");
+        let savedGateCondition = null;
+        if (gateParts[0] === "choice") {
+          const node = savedNodes.find((candidate) => candidate.id === gateParts[1]);
+          const option = (node?.choiceOptions || node?.options || []).find((candidate) => candidate.id === gateParts[2]);
+          savedGateCondition = { mode: option?.requiresMode, expression: option?.requires };
+        } else if (gateParts[0] === "node") {
+          const node = savedNodes.find((candidate) => candidate.id === gateParts[1]);
+          savedGateCondition = { mode: node?.stateLogic?.requirementsMode, expression: node?.stateLogic?.requirements };
+        } else if (gateParts[0] === "condition") {
+          const node = savedNodes.find((candidate) => candidate.id === gateParts[1]);
+          savedGateCondition = { mode: node?.conditionMode, expression: node?.condition };
+        }
+        assert(
+          `${label}: choice condition any relation is saved`,
+          savedGateCondition?.mode === "any" && String(savedGateCondition.expression || "").includes("||"),
+          JSON.stringify(savedGateCondition)
+        );
+
         click(doc.querySelector("[data-action='select-playbook-tab'][data-playbook-tab='script']"));
         await waitFor(`${label}: script builder tab opens`, () => doc.querySelector(".script-node-table"));
+        assertPlaybookJsonButtonCentered(label, doc, ".script-node-row:not(.script-node-heading)");
         const scriptRow = doc.querySelector(".script-node-row:not(.script-node-heading)");
-        setControlValue(win, scriptRow?.querySelector("[data-script-node-field='requirements']"), "gui_flag == true");
-        setControlValue(win, scriptRow?.querySelector("[data-script-node-field='effects']"), "set gui_seen = true");
-        assert(`${label}: script builder inputs accept requirements/effects`, scriptRow?.querySelector("[data-script-node-field='requirements']")?.value.includes("gui_flag"));
+        const scriptRequirementKey = "gui_flag";
+        setControlInputValue(win, scriptRow?.querySelector("[data-script-node-field='requirements']"), scriptRequirementKey);
+        setControlInputValue(win, scriptRow?.querySelector("[data-script-node-field='effects']"), "set gui_flag = true");
+        assert(`${label}: script builder inputs accept requirements/effects`, scriptRow?.querySelector("[data-script-node-field='requirements']")?.value === scriptRequirementKey);
 
         click(doc.querySelector("[data-action='select-playbook-tab'][data-playbook-tab='rules']"));
         await waitFor(`${label}: play rules tab opens`, () => doc.querySelector(".playbook-rule-grid"));
@@ -673,9 +752,12 @@
       }
 
       const projectBaseUrl = new URL("../", window.location.href);
+      const assetVersion = new URL(window.location.href).searchParams.get("run") || String(Date.now());
 
       function assetUrl(path) {
-        return new URL(path, projectBaseUrl).href;
+        const url = new URL(path, projectBaseUrl);
+        url.searchParams.set("run", assetVersion);
+        return url.href;
       }
 
       function scopeCanvasCss(source) {

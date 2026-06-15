@@ -1,0 +1,58 @@
+{
+  "format": "narrative-canvas-state-schema",
+  "version": 1,
+  "exportedAt": "2026-06-12T00:00:00.000Z",
+  "source": {
+    "title": "Project Story Template",
+    "notes": "Replace with the formal project state schema sidecar."
+  },
+  "summary": {
+    "variableCount": 3,
+    "issueCount": 0,
+    "readCount": 0,
+    "writeCount": 0,
+    "interpolationCount": 0,
+    "exportBlockCount": 0,
+    "invalidExpressionCount": 0
+  },
+  "variables": [
+    {
+      "key": "route",
+      "exportKey": "route",
+      "type": "string",
+      "hasInitial": true,
+      "initialValue": "",
+      "statuses": ["ok"],
+      "primaryStatus": "ok",
+      "readBy": [],
+      "writtenBy": [],
+      "interpolatedBy": []
+    },
+    {
+      "key": "momentum",
+      "exportKey": "momentum",
+      "type": "number",
+      "hasInitial": true,
+      "initialValue": 0,
+      "statuses": ["ok"],
+      "primaryStatus": "ok",
+      "readBy": [],
+      "writtenBy": [],
+      "interpolatedBy": []
+    },
+    {
+      "key": "clue_found",
+      "exportKey": "clue_found",
+      "type": "boolean",
+      "hasInitial": true,
+      "initialValue": false,
+      "statuses": ["ok"],
+      "primaryStatus": "ok",
+      "readBy": [],
+      "writtenBy": [],
+      "interpolatedBy": []
+    }
+  ],
+  "invalidExpressions": [],
+  "exportBlocks": []
+}

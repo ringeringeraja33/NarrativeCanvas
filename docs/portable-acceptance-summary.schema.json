@@ -1,0 +1,438 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/narrative-canvas/portable-acceptance-summary.schema.json",
+  "title": "Narrative Canvas Portable Acceptance Summary",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "status",
+    "sourceMode",
+    "inputs",
+    "options",
+    "exportedFiles",
+    "consumers",
+    "warnings",
+    "gate",
+    "fileEvidence",
+    "route",
+    "routeCases",
+    "outputDir"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "narrative-canvas-portable-acceptance"
+    },
+    "version": {
+      "const": 1
+    },
+    "status": {
+      "const": "pass"
+    },
+    "sourceMode": {
+      "enum": ["fixture", "story"]
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["fixture", "story", "layout", "state", "routeCases", "routeTemplate", "report"],
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "type": "string"
+        },
+        "story": {
+          "type": "string"
+        },
+        "layout": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "routeCases": {
+          "type": "string"
+        },
+        "routeTemplate": {
+          "type": "string"
+        },
+        "report": {
+          "type": "string"
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "required": ["autoSidecars", "allowedWarningCodes", "cleanOutput", "keepOutput", "maxWarnings", "minRouteCases", "requireLayout", "requireState", "timeoutMs", "route"],
+      "additionalProperties": false,
+      "properties": {
+        "autoSidecars": {
+          "type": "boolean"
+        },
+        "allowedWarningCodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cleanOutput": {
+          "type": "boolean"
+        },
+        "keepOutput": {
+          "type": "boolean"
+        },
+        "maxWarnings": {
+          "type": ["integer", "null"]
+        },
+        "minRouteCases": {
+          "type": ["integer", "null"]
+        },
+        "requireLayout": {
+          "type": "boolean"
+        },
+        "requireState": {
+          "type": "boolean"
+        },
+        "timeoutMs": {
+          "type": "number"
+        },
+        "route": {
+          "$ref": "#/$defs/routeOptions"
+        }
+      }
+    },
+    "exportedFiles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "consumers": {
+      "type": "object",
+      "required": ["runtimeJson", "yarn", "ink", "twee"],
+      "additionalProperties": false,
+      "properties": {
+        "runtimeJson": {
+          "const": "pass"
+        },
+        "yarn": {
+          "const": "pass"
+        },
+        "ink": {
+          "const": "pass"
+        },
+        "twee": {
+          "const": "pass"
+        }
+      }
+    },
+    "warnings": {
+      "$ref": "#/$defs/warnings"
+    },
+    "gate": {
+      "$ref": "#/$defs/decisionGate"
+    },
+    "fileEvidence": {
+      "$ref": "#/$defs/fileEvidence"
+    },
+    "route": {
+      "type": ["object", "null"],
+      "required": ["runtimeJson", "yarn", "ink", "twee"],
+      "additionalProperties": false,
+      "properties": {
+        "runtimeJson": {
+          "$ref": "#/$defs/routeResult"
+        },
+        "yarn": {
+          "$ref": "#/$defs/routeResult"
+        },
+        "ink": {
+          "$ref": "#/$defs/inkRouteResult"
+        },
+        "twee": {
+          "$ref": "#/$defs/routeResult"
+        }
+      }
+    },
+    "routeCases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/routeCaseResult"
+      }
+    },
+    "outputDir": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "fileEvidence": {
+      "type": "object",
+      "required": ["inputs", "artifacts"],
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fileEvidenceItem"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fileEvidenceItem"
+          }
+        }
+      }
+    },
+    "fileEvidenceItem": {
+      "type": "object",
+      "required": ["role", "path", "bytes", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "decisionGate": {
+      "type": "object",
+      "required": [
+        "decisionGate",
+        "realStorySource",
+        "routeCaseCount",
+        "requiredRouteCaseCount",
+        "routeCaseCountReady",
+        "routeConsumers",
+        "routeAssertionsReady",
+        "layoutRequired",
+        "layoutProvided",
+        "layoutReady",
+        "stateRequired",
+        "stateProvided",
+        "stateReady",
+        "warningThresholdExplicit",
+        "warningsWithinThreshold",
+        "decisionReady"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "decisionGate": {
+          "type": "boolean"
+        },
+        "realStorySource": {
+          "type": "boolean"
+        },
+        "routeCaseCount": {
+          "type": "integer"
+        },
+        "requiredRouteCaseCount": {
+          "type": "integer"
+        },
+        "routeCaseCountReady": {
+          "type": "boolean"
+        },
+        "routeConsumers": {
+          "type": "array",
+          "items": {
+            "enum": ["runtime-json", "yarn", "ink", "twee"]
+          }
+        },
+        "routeAssertionsReady": {
+          "type": "boolean"
+        },
+        "layoutRequired": {
+          "type": "boolean"
+        },
+        "layoutProvided": {
+          "type": "boolean"
+        },
+        "layoutReady": {
+          "type": "boolean"
+        },
+        "stateRequired": {
+          "type": "boolean"
+        },
+        "stateProvided": {
+          "type": "boolean"
+        },
+        "stateReady": {
+          "type": "boolean"
+        },
+        "warningThresholdExplicit": {
+          "type": "boolean"
+        },
+        "warningsWithinThreshold": {
+          "type": ["boolean", "null"]
+        },
+        "decisionReady": {
+          "type": "boolean"
+        }
+      }
+    },
+    "routeOptions": {
+      "type": "object",
+      "required": ["choiceLabels", "minVisits", "expectNode", "expectText", "expectState"],
+      "additionalProperties": false,
+      "properties": {
+        "choiceLabels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "minVisits": {
+          "type": "integer"
+        },
+        "expectNode": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectText": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectState": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expectedState"
+          }
+        }
+      }
+    },
+    "expectedState": {
+      "type": "object",
+      "required": ["key", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": true
+      }
+    },
+    "warnings": {
+      "type": "object",
+      "required": ["count", "allowedCount", "unreviewedCount", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "allowedCount": {
+          "type": "integer"
+        },
+        "unreviewedCount": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "routeResult": {
+      "type": "object",
+      "required": ["visitedCount", "visited", "finalState"],
+      "additionalProperties": false,
+      "properties": {
+        "visitedCount": {
+          "type": "integer"
+        },
+        "visited": {
+          "type": "array",
+          "items": true
+        },
+        "finalState": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "routeCaseResult": {
+      "type": "object",
+      "required": ["name", "options", "runtimeJson", "yarn", "ink", "twee"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/routeOptions"
+        },
+        "runtimeJson": {
+          "$ref": "#/$defs/routeResult"
+        },
+        "yarn": {
+          "$ref": "#/$defs/routeResult"
+        },
+        "ink": {
+          "$ref": "#/$defs/inkRouteResult"
+        },
+        "twee": {
+          "$ref": "#/$defs/routeResult"
+        }
+      }
+    },
+    "inkRouteResult": {
+      "type": "object",
+      "required": ["selectedChoices", "outputText"],
+      "additionalProperties": false,
+      "properties": {
+        "selectedChoices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/inkSelectedChoice"
+          }
+        },
+        "outputText": {
+          "type": "string"
+        }
+      }
+    },
+    "inkSelectedChoice": {
+      "type": "object",
+      "required": ["index", "id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

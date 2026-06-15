@@ -2,3 +2,7 @@
 .claude/
 dist/
 .Rhistory
+*.log
+*.tmp
+*.zip
+acceptance/**/output/

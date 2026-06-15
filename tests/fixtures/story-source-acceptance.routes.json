@@ -1,0 +1,32 @@
+{
+  "format": "narrative-canvas-route-cases",
+  "version": 1,
+  "cases": [
+    {
+      "name": "left-door",
+      "choiceLabels": ["Board the train", "Take left door"],
+      "minVisits": 4,
+      "expectNode": ["Aboard"],
+      "expectText": ["Route: left"],
+      "expectState": [
+        {
+          "key": "route",
+          "value": "left"
+        }
+      ]
+    },
+    {
+      "name": "right-door",
+      "choiceLabels": ["Board the train", "Take right door"],
+      "minVisits": 4,
+      "expectNode": ["Wrong_car"],
+      "expectText": ["Route: right"],
+      "expectState": [
+        {
+          "key": "route",
+          "value": "right"
+        }
+      ]
+    }
+  ]
+}

@@ -46,6 +46,65 @@ function Find-Browser {
   throw "Chrome or Edge was not found. Pass -BrowserPath to a Chromium-based browser."
 }
 
+function Join-ProcessArguments {
+  param([string[]]$Arguments)
+  return ($Arguments | ForEach-Object {
+    $value = [string]$_
+    if ($value -match '[\s"]') {
+      '"' + $value.Replace('"', '\"') + '"'
+    } else {
+      $value
+    }
+  }) -join " "
+}
+
+function Copy-DedupedProcessEnvironment {
+  param([System.Diagnostics.ProcessStartInfo]$StartInfo)
+  $useEnvironment = $null -ne $StartInfo.Environment
+  if ($useEnvironment) { $StartInfo.Environment.Clear() }
+  else { $StartInfo.EnvironmentVariables.Clear() }
+  $seen = @{}
+  $envs = [System.Environment]::GetEnvironmentVariables("Process")
+  foreach ($key in $envs.Keys) {
+    $name = [string]$key
+    $canonical = $name.ToUpperInvariant()
+    if ($seen.ContainsKey($canonical)) { continue }
+    $seen[$canonical] = $true
+    if ($useEnvironment) { $StartInfo.Environment[$name] = [string]$envs[$key] }
+    else { $StartInfo.EnvironmentVariables[$name] = [string]$envs[$key] }
+  }
+}
+
+function Invoke-BrowserDomDump {
+  param(
+    [string]$Browser,
+    [string[]]$Arguments,
+    [string]$StdoutPath,
+    [string]$StderrPath,
+    [int]$TimeoutMs
+  )
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = $Browser
+  $startInfo.Arguments = Join-ProcessArguments $Arguments
+  $startInfo.UseShellExecute = $false
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $startInfo.CreateNoWindow = $true
+  Copy-DedupedProcessEnvironment $startInfo
+  $process = [System.Diagnostics.Process]::new()
+  $process.StartInfo = $startInfo
+  [void]$process.Start()
+  $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+  $stderrTask = $process.StandardError.ReadToEndAsync()
+  if (-not $process.WaitForExit($TimeoutMs)) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    throw "Browser timed out after ${TimeoutMs}ms"
+  }
+  [System.IO.File]::WriteAllText($StdoutPath, $stdoutTask.Result, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($StderrPath, $stderrTask.Result, [System.Text.UTF8Encoding]::new($false))
+  return $process.ExitCode
+}
+
 $browser = Find-Browser $BrowserPath
 $profileDir = Join-Path ([System.IO.Path]::GetTempPath()) ("narrative-canvas-smoke-" + [System.Guid]::NewGuid().ToString("N"))
 $stdoutPath = Join-Path ([System.IO.Path]::GetTempPath()) ("narrative-canvas-smoke-out-" + [System.Guid]::NewGuid().ToString("N") + ".html")
@@ -72,13 +131,7 @@ try {
     $SmokeUrl
   )
 
-  $process = Start-Process -FilePath $browser -ArgumentList $browserArgs -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru -NoNewWindow
-  if (-not $process.WaitForExit($BrowserTimeoutMs)) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    throw "Browser timed out after ${BrowserTimeoutMs}ms"
-  }
-
-  $exitCode = $process.ExitCode
+  $exitCode = Invoke-BrowserDomDump -Browser $browser -Arguments $browserArgs -StdoutPath $stdoutPath -StderrPath $stderrPath -TimeoutMs $BrowserTimeoutMs
   $html = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -Raw -Encoding UTF8 -LiteralPath $stdoutPath } else { "" }
   $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -Raw -Encoding UTF8 -LiteralPath $stderrPath } else { "" }
 

@@ -1,0 +1,111 @@
+{
+  "format": "narrative-canvas-story-layout",
+  "version": 1,
+  "exportedAt": "2026-06-12T00:00:00.000Z",
+  "source": {
+    "title": "Project Story Template",
+    "notes": "Replace with the formal project layout sidecar."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "title": "Start",
+      "type": "Entry",
+      "typeLabel": "Entry",
+      "frame": false,
+      "x": 80,
+      "y": 180,
+      "width": 280,
+      "height": 180
+    },
+    {
+      "id": "first_choice",
+      "title": "First_Choice",
+      "type": "Choice",
+      "typeLabel": "Choice",
+      "frame": false,
+      "x": 440,
+      "y": 160,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "direct_path",
+      "title": "Direct_Path",
+      "type": "Choice",
+      "typeLabel": "Choice",
+      "frame": false,
+      "x": 840,
+      "y": 40,
+      "width": 320,
+      "height": 210
+    },
+    {
+      "id": "quiet_path",
+      "title": "Quiet_Path",
+      "type": "Choice",
+      "typeLabel": "Choice",
+      "frame": false,
+      "x": 840,
+      "y": 360,
+      "width": 320,
+      "height": 210
+    },
+    {
+      "id": "resolution",
+      "title": "Resolution",
+      "type": "Content",
+      "typeLabel": "Content",
+      "frame": false,
+      "x": 1240,
+      "y": 200,
+      "width": 340,
+      "height": 210
+    }
+  ],
+  "links": [
+    {
+      "id": "template_l0",
+      "from": "start",
+      "to": "first_choice",
+      "label": "Continue"
+    },
+    {
+      "id": "template_l1",
+      "from": "first_choice",
+      "to": "direct_path",
+      "label": "Take the direct route",
+      "choiceIndex": 0,
+      "choiceOptionId": "opt_take_direct_route"
+    },
+    {
+      "id": "template_l2",
+      "from": "first_choice",
+      "to": "quiet_path",
+      "label": "Take the quiet route",
+      "choiceIndex": 1,
+      "choiceOptionId": "opt_take_quiet_route"
+    },
+    {
+      "id": "template_l3",
+      "from": "direct_path",
+      "to": "resolution",
+      "label": "Confirm the direct plan",
+      "choiceIndex": 0,
+      "choiceOptionId": "opt_confirm_direct_plan"
+    },
+    {
+      "id": "template_l4",
+      "from": "quiet_path",
+      "to": "resolution",
+      "label": "Use the quiet clue",
+      "choiceIndex": 0,
+      "choiceOptionId": "opt_use_quiet_clue"
+    }
+  ],
+  "view": {
+    "x": -220,
+    "y": -80,
+    "scale": 0.72
+  }
+}

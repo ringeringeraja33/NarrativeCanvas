@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "savedAt": "2026-06-15T00:00:00.000Z",
+  "project": {
+    "title": "Unsupported JS Condition",
+    "notes": "Checks that expressions outside the safe JavaScript subset keep text exports parseable.",
+    "variables": {
+      "score": 1
+    },
+    "nodes": [
+      {
+        "id": "n0",
+        "type": "Entry",
+        "title": "Start",
+        "body": "Score: {score}.",
+        "x": 80,
+        "y": 80
+      },
+      {
+        "id": "n1",
+        "type": "Choice",
+        "title": "Modulo gate",
+        "body": "Choose a guarded branch.",
+        "choices": [
+          "Modulo route"
+        ],
+        "choiceOptions": [
+          {
+            "id": "opt_modulo",
+            "label": "Modulo route",
+            "requires": "score % 2 === 1",
+            "effects": []
+          }
+        ],
+        "x": 340,
+        "y": 80
+      },
+      {
+        "id": "n2",
+        "type": "Content",
+        "title": "Modulo end",
+        "body": "Reached modulo route.",
+        "x": 620,
+        "y": 80
+      }
+    ],
+    "links": [
+      {
+        "id": "l0",
+        "from": "n0",
+        "to": "n1"
+      },
+      {
+        "id": "l1",
+        "from": "n1",
+        "to": "n2",
+        "label": "Modulo route",
+        "choiceIndex": 0,
+        "choiceOptionId": "opt_modulo"
+      }
+    ]
+  },
+  "ui": {
+    "activeFileId": "adventure"
+  }
+}

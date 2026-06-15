@@ -53,14 +53,16 @@
         {
           name: "custom-node-types",
           file: "fixtures/custom-node-types.ncanvas",
-          checks(doc, saved, downloads) {
+          async checks(doc, saved, downloads) {
             const clueType = saved.project.nodeTypes.find((type) => type.type === "Clue");
             const clueNode = saved.project.nodes.find((node) => node.type === "Clue");
             assert("custom: legacy customNodeTypes migrated", Boolean(clueType));
             assert("custom: custom fields preserved", clueNode?.customFields?.evidence === "Moonlit edge");
             assert("custom: full json export downloaded", downloads.some((item) => item.filename === "custom-node-types.json"));
+            const runtimeJson = JSON.parse(await readDownloadText(downloads, "custom-node-types-runtime.json"));
+            assert("custom: runtime report flags custom node type", runtimeJson.report?.warnings?.some((warning) => warning.code === "custom-node-type-runtime-only" && warning.nodeId === "n1"));
           },
-          exports: ["export-json"]
+          exports: ["export-json", "export-runtime-json"]
         },
         {
           name: "characters-cast-chips",
@@ -90,6 +92,309 @@
           exports: []
         },
         {
+          name: "state-runtime-key-play",
+          file: "fixtures/state-runtime-key-play.ncanvas",
+          async checks(doc, saved, downloads, assets) {
+            assert("state key: flat variables saved", saved.project.variables["inventory_coins"] === 3 && saved.project.variables["flag_watch_missing"] === true);
+            const storyMd = await readDownloadText(downloads, "state-runtime-key-play-story.md");
+            assert("state key: story markdown exports readable route", storyMd.includes("# State Runtime Key Play") && storyMd.includes("<!-- narrative-canvas-story-md: v1 -->") && storyMd.includes("Nested coins: {nested_inventory_coins}.") && storyMd.includes("flag_tokens.includes(\"boarding\")") && storyMd.includes("goto: Bribe_accepted"));
+            const storyLayout = JSON.parse(await readDownloadText(downloads, "state-runtime-key-play-layout.json"));
+            const storyLayoutErrors = validateJsonSchemaSubset(storyLayout, assets.storyLayoutSchema);
+            assert("state key: story layout sidecar matches schema", storyLayoutErrors.length === 0, storyLayoutErrors.slice(0, 5).join("; "));
+            assert("state key: story layout sidecar exports node positions", storyLayout.format === "narrative-canvas-story-layout" && storyLayout.nodes.some((node) => node.id === "n1" && node.title === "Bribe check" && Number.isFinite(node.x)) && storyLayout.links.some((link) => link.choiceOptionId === "opt_bribe"));
+            assert("state key: story layout sidecar exports port positions", storyLayout.nodes.some((node) => node.id === "n1" && node.portPositions?.input?.side === "left" && node.portPositions?.output?.side === "right"));
+            const stateSchema = JSON.parse(await readDownloadText(downloads, "state-runtime-key-play-state.schema.json"));
+            const stateSchemaErrors = validateJsonSchemaSubset(stateSchema, assets.stateSchemaSchema);
+            assert("state key: state schema matches schema", stateSchemaErrors.length === 0, stateSchemaErrors.slice(0, 5).join("; "));
+            const coinSchema = stateSchema.variables?.find((variable) => variable.key === "inventory_coins");
+            const nestedCoinSchema = stateSchema.variables?.find((variable) => variable.key === "nested_inventory.coins");
+            assert("state key: state schema sidecar has format marker", stateSchema.format === "narrative-canvas-state-schema" && stateSchema.version === 1 && stateSchema.summary?.variableCount >= 1);
+            assert("state key: state schema tracks coin refs", coinSchema?.type === "number" && coinSchema.initialValue === 3 && coinSchema.readBy.length > 0 && coinSchema.writtenBy.length > 0 && coinSchema.interpolatedBy.length > 0);
+            assert("state key: state schema keeps nested path fallback", nestedCoinSchema?.type === "number" && nestedCoinSchema.exportKey === "nested_inventory_coins" && nestedCoinSchema.initialValue === 3 && nestedCoinSchema.statuses.includes("export-blocked"));
+            const transientVisitKeys = stateSchema.variables?.filter((variable) => String(variable.key).startsWith("visited.")) || [];
+            assert("state key: state schema omits transient visit tracking keys", transientVisitKeys.length === 0, JSON.stringify(transientVisitKeys));
+            const exportProfile = JSON.parse(await readDownloadText(downloads, "state-runtime-key-play-export.profile.json"));
+            const exportProfileErrors = validateJsonSchemaSubset(exportProfile, assets.exportProfileSchema);
+            assert("state key: export profile matches schema", exportProfileErrors.length === 0, exportProfileErrors.slice(0, 5).join("; "));
+            assert("state key: export profile lists portable targets", exportProfile.files.some((file) => file.id === "story-md" && file.name === "state-runtime-key-play-story.md") && exportProfile.files.some((file) => file.id === "runtime-json" && file.schema === "docs/runtime-json.schema.json") && exportProfile.targets.some((target) => target.id === "ink"));
+            assert("state key: export profile keeps mappings and warnings", exportProfile.mappings.variables["nested_inventory.coins"] === "nested_inventory_coins" && !("visited.start" in exportProfile.mappings.variables) && exportProfile.mappings.nodes.n1 === "Bribe_check" && exportProfile.warnings.some((warning) => warning.code === "state-key-name-sanitized"));
+            const runtimeJson = JSON.parse(await readDownloadText(downloads, "state-runtime-key-play-runtime.json"));
+            assert("state key: project defaults to canvas workflow", saved.project.workflowMode === "canvas");
+            assert("state key: runtime json exported variables", runtimeJson.variables.inventory_coins === 3 && runtimeJson.variables.flag_watch_missing === true && runtimeJson.variables.ticket_phrase === "red && blue" && Array.isArray(runtimeJson.variables.flag_tokens) && runtimeJson.variables.flag_tokens.includes("boarding") && runtimeJson.variables.nested_inventory_coins === 3);
+            assert("state key: runtime json keeps export report", Boolean(runtimeJson.report?.variableNameMap?.inventory_coins));
+            assert("state key: runtime json omits transient visit tracking effect", !runtimeJson.nodes.find((node) => node.id === "n0")?.effects?.some((effect) => String(effect.sourceKey || effect.key || "").startsWith("visited.")));
+            const bribeChoiceRuntime = runtimeJson.nodes.find((node) => node.id === "n1")?.choices?.find((choice) => choice.id === "opt_bribe");
+            assert("state key: runtime json omits transient visit condition", bribeChoiceRuntime?.condition && !bribeChoiceRuntime.condition.includes("visited_start"));
+            const keepChoiceRuntime = runtimeJson.nodes.find((node) => node.id === "n1")?.choices?.find((choice) => choice.id === "opt_keep");
+            assert("state key: runtime json bakes playbook choice lock", keepChoiceRuntime?.condition.includes("!(guard_suspicion >= 1)"));
+            const schemaErrors = validateJsonSchemaSubset(runtimeJson, assets.runtimeSchema);
+            assert("state key: runtime json matches schema", schemaErrors.length === 0, schemaErrors.slice(0, 5).join("; "));
+            assert("state key: export report dialog opens", doc.querySelector("#exportReportDialog")?.open);
+            assert("state key: export report dialog has summary", Boolean(doc.querySelector("#exportReportBody .export-report-summary")));
+            doc.querySelector("#exportReportDialog")?.close();
+            assert("project panel omits workflow mode buttons", !doc.querySelector("[data-action='set-workflow-mode']"));
+            const yarn = await readDownloadText(downloads, "state-runtime-key-play.yarn");
+            assert("state key: yarn declares variable", yarn.includes("<<declare $inventory_coins = 3>>") && yarn.includes("<<declare $flag_tokens = \"[\\\"boarding\\\",\\\"watch\\\"]\">>") && yarn.includes("<<declare $nested_inventory_coins = 3>>"));
+            assert("state key: yarn exports grouped condition and jump", yarn.includes("$inventory_coins >= 2") && yarn.includes("$ticket_phrase == \"red && blue\"") && yarn.includes("contains($flag_tokens, \"boarding\")") && yarn.includes("$nested_inventory_coins >= 3") && yarn.includes("not $flag_boarding_denied") && yarn.includes("<<jump Bribe_accepted>>"));
+            assert("state key: yarn omits transient visit condition", !yarn.includes("visited(\"Start\")"));
+            assert("state key: yarn bakes playbook choice lock", yarn.includes("-> Keep moving <<if not ($guard_suspicion >= 1)>>"));
+            const yarnErrors = validateYarnScript(yarn);
+            assert("state key: yarn reference parser accepts export", yarnErrors.length === 0, yarnErrors.slice(0, 5).join("; "));
+            const ink = await readDownloadText(downloads, "state-runtime-key-play.ink");
+            assert("state key: ink declares variable", ink.includes("VAR inventory_coins = 3") && ink.includes("VAR nested_inventory_coins = 3") && ink.includes("LIST flag_tokens_items = flag_tokens_boarding, flag_tokens_watch") && ink.includes("VAR flag_tokens = (flag_tokens_boarding, flag_tokens_watch)"));
+            assert("state key: ink exports grouped sticky choice", ink.includes("inventory_coins >= 2") && ink.includes("ticket_phrase == \"red && blue\"") && ink.includes("(flag_tokens ? flag_tokens_boarding)") && ink.includes("nested_inventory_coins >= 3") && ink.includes("not flag_boarding_denied") && ink.includes("[Slip two coins to the Brakeman]"));
+            assert("state key: ink omits transient visit condition", !ink.includes("(Start > 0)"));
+            assert("state key: ink bakes playbook choice lock", ink.includes("{not (guard_suspicion >= 1)} [Keep moving]"));
+            const inkErrors = validateInkScript(ink);
+            assert("state key: ink reference parser accepts export", inkErrors.length === 0, inkErrors.slice(0, 5).join("; "));
+            const twee = await readDownloadText(downloads, "state-runtime-key-play.twee");
+            assert("state key: twee has story data", twee.includes(":: StoryData") && twee.includes("\"format\": \"SugarCube\"") && twee.includes("\"format-version\": \"2.30.0\""));
+            assert("state key: twee initializes variable", twee.includes("<<set $inventory_coins = 3>>") && twee.includes("<<set $flag_tokens = [\"boarding\",\"watch\"]>>") && twee.includes("<<set $nested_inventory_coins = 3>>"));
+            assert("state key: twee exports gated link and effects", twee.includes("$inventory_coins >= 2") && twee.includes("$ticket_phrase == \"red && blue\"") && twee.includes("$flag_tokens.includes(\"boarding\")") && twee.includes("$nested_inventory_coins >= 3") && twee.includes("!$flag_boarding_denied") && twee.includes("<<link \"Slip two coins to the Brakeman\" \"Bribe_accepted\">>") && twee.includes("<<set $inventory_coins -= 2>>"));
+            assert("state key: twee omits transient visit condition", !twee.includes("visited(\"Start\") > 0"));
+            assert("state key: twee bakes playbook choice lock", twee.includes("<<if !($guard_suspicion >= 1)>>"));
+            const tweeErrors = validateTweeScript(twee);
+            assert("state key: twee reference parser accepts export", tweeErrors.length === 0, tweeErrors.slice(0, 5).join("; "));
+            await waitFor("state key: export-all zip downloaded", () => downloads.some((item) => item.filename === "state-runtime-key-play-export.zip"));
+            const exportAllZip = await getDownloadBlob(downloads, /^state-runtime-key-play-export\.zip$/);
+            const exportAllNames = await listZipEntryNames(exportAllZip);
+            const expectedExportAllNames = [
+              "state-runtime-key-play.json",
+              "state-runtime-key-play-story.md",
+              "state-runtime-key-play-layout.json",
+              "state-runtime-key-play-state.schema.json",
+              "state-runtime-key-play-export.profile.json",
+              "state-runtime-key-play-runtime.json",
+              "state-runtime-key-play.yarn",
+              "state-runtime-key-play.ink",
+              "state-runtime-key-play.twee",
+              "state-runtime-key-play-events.json",
+              "Events Sheet.csv",
+              "Node Fields.csv",
+              "Characters.md",
+              "Characters.json",
+              "Playbook.json"
+            ];
+            assert("state key: export-all includes every structured export", expectedExportAllNames.every((name) => exportAllNames.includes(name)), exportAllNames.join("|"));
+            assert("state key: export-all includes image export", exportAllNames.some((name) => /^state-runtime-key-play-\d+x\d+\.png$/.test(name) || name === "state-runtime-key-play.svg"), exportAllNames.join("|"));
+            doc.defaultView.NarrativeCanvasApp.setLanguage("en", { persist: false, force: true });
+            await waitFor("state key: English UI applies", () => doc.defaultView.NarrativeCanvasApp.getLanguage?.() === "en");
+            clickElement(doc.querySelector("[data-file-id='variables']"));
+            await waitFor("state key: playbook opens", () => doc.querySelector("#variablesPanel")?.classList.contains("active"));
+            clickElement(doc.querySelector("[data-playbook-tab='variables']"));
+            await waitFor("state key: variable groups render", () => doc.querySelectorAll(".variable-group-heading").length > 0);
+            const variableGroups = [...doc.querySelectorAll(".variable-group-heading")].map((node) => node.dataset.variableGroup);
+            assert("state key: variables group by key prefix", variableGroups.includes("inventory") && variableGroups.includes("flag") && variableGroups.includes("guard"));
+            assert("state key: inventory group contains flat key", Boolean(doc.querySelector("[data-variable-group='inventory']")?.nextElementSibling?.querySelector("[data-variable-key='inventory_coins']")));
+            assert("state key: variable rows include JSON buttons", Boolean(doc.querySelector("[data-variable-key='inventory_coins']")?.closest(".variable-row")?.querySelector("[data-action='focus-playbook-json']")));
+            clickElement(doc.querySelector("[data-variable-key='inventory_coins']")?.closest(".variable-row")?.querySelector("[data-action='focus-playbook-json']"));
+            await waitFor("state key: variable JSON button opens Advanced JSON", () => Boolean(doc.querySelector("textarea[data-project-field='variables']")?.value.includes("\"inventory_coins\"")));
+            await waitFor("state key: variable JSON button focuses matching line", () => {
+              const textarea = doc.querySelector("textarea[data-project-field='variables']");
+              return Boolean(textarea?.value.slice(textarea.selectionStart, textarea.selectionEnd).includes("\"inventory_coins\""));
+            });
+            const playbookJsonTextarea = doc.querySelector("textarea[data-project-field='variables']");
+            const selectedJsonLine = playbookJsonTextarea?.value.slice(playbookJsonTextarea.selectionStart, playbookJsonTextarea.selectionEnd) || "";
+            assert("state key: variable JSON button focuses matching line", selectedJsonLine.includes("\"inventory_coins\""), selectedJsonLine);
+            const playbookTabOrder = [...doc.querySelectorAll(".playbook-tab")].map((tab) => tab.textContent.trim()).join("|");
+            assert("state key: playbook tab order places variable actions before script builder", playbookTabOrder === "Variable Definitions|Variable Actions|Script Builder|Choice Conditions|Play Rules|Validation", playbookTabOrder);
+            assert("state key: script builder tab is named", doc.querySelector("[data-playbook-tab='script']")?.textContent.includes("Script Builder"));
+            clickElement(doc.querySelector("[data-playbook-tab='script']"));
+            await waitFor("state key: script builder rows include JSON buttons", () => Boolean(doc.querySelector(".script-node-row:not(.script-node-heading) [data-action='focus-playbook-json']")));
+            assert("state key: variable actions tab is named", doc.querySelector("[data-playbook-tab='actions']")?.textContent.includes("Variable Actions"));
+            clickElement(doc.querySelector("[data-playbook-tab='actions']"));
+            await waitFor("state key: variable actions tab opens", () => Boolean(doc.querySelector(".playbook-actions-section")));
+            const initialActionCount = saved.project.script.actions.length;
+            await waitFor("state key: playbook actions render", () => doc.querySelectorAll(".playbook-action-row:not(.playbook-action-heading)").length === initialActionCount);
+            assert("state key: variable actions tab contains variable actions", doc.querySelector(".playbook-actions-section")?.textContent.includes("Variable Actions"));
+            assert("state key: variable actions table has editor columns", doc.querySelectorAll(".playbook-action-heading span").length === 7);
+            const actionHeadings = [...doc.querySelectorAll(".playbook-action-heading span")].map((node) => node.textContent.trim());
+            assert("state key: action columns put operation before value", actionHeadings.join("|") === "Trigger|Target|Key|Operation|Value|JSON|", actionHeadings.join("|"));
+            const actionRows = [...doc.querySelectorAll(".playbook-action-row:not(.playbook-action-heading)")];
+            assert("state key: variable actions section renders existing actions", actionRows.length === initialActionCount);
+            assert("state key: variable action rows include JSON buttons", actionRows.every((row) => row.querySelector("[data-action='focus-playbook-json']")));
+            assert("state key: variable actions section has no duplicate append toggle", !doc.querySelector("[data-playbook-action-field='append']"));
+            const firstActionText = actionRows[0]?.textContent || "";
+            assert("state key: variable actions section renders legacy gate action", firstActionText.includes("Legacy gate trigger") && firstActionText.includes("Choice Conditions") && firstActionText.includes("Legacy runtime-only action") && firstActionText.includes("lockChoice"), firstActionText);
+            assert("state key: variable actions section omits variable type filters", !doc.querySelector(".playbook-actions-section .playbook-category-chip"));
+            const triggerOptionValues = [...doc.querySelectorAll("[data-playbook-action-field='trigger'] option")].map((option) => option.value);
+            assert("state key: variable action trigger menu omits onChoose", !triggerOptionValues.includes("onChoose"), triggerOptionValues.join("|"));
+            clickElement(doc.querySelector("[data-action='show-playbook-action-draft']"));
+            await waitFor("state key: action draft opens", () => Boolean(doc.querySelector(".playbook-action-draft-row")));
+            let draftKey = doc.querySelector(".playbook-action-draft-row [data-draft-field='key']");
+            draftKey.value = "inventory_coins";
+            draftKey.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
+            await waitFor("state key: number variable action draft uses number input", () => doc.querySelector(".playbook-action-draft-row [data-draft-field='value']")?.type === "number");
+            draftKey = doc.querySelector(".playbook-action-draft-row [data-draft-field='key']");
+            draftKey.value = "traveler";
+            draftKey.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
+            await waitFor("state key: string variable action draft uses text input", () => doc.querySelector(".playbook-action-draft-row [data-draft-field='value']")?.type === "text");
+            const draftValue = doc.querySelector(".playbook-action-draft-row [data-draft-field='value']");
+            draftValue.value = "Manual Traveler";
+            draftValue.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+            clickElement(doc.querySelector("[data-action='commit-playbook-action-draft']"));
+            await waitFor("state key: add action appends editor row", () => doc.querySelectorAll(".playbook-action-row:not(.playbook-action-heading)").length === initialActionCount + 1);
+            const afterActionProject = doc.defaultView.NarrativeCanvasApp.getSavedState().project;
+            const afterActionAdd = afterActionProject.script.actions;
+            const newAction = afterActionAdd[afterActionAdd.length - 1];
+            const newActionValue = afterActionProject.variables[newAction.key];
+            const newActionType = Array.isArray(newActionValue) ? "array" : newActionValue && typeof newActionValue === "object" ? "object" : typeof newActionValue;
+            const allowedOps = {
+              string: ["set"],
+              number: ["set", "add", "subtract"],
+              boolean: ["set", "toggle"],
+              array: ["set", "append", "remove"],
+              object: ["set"]
+            }[newActionType] || ["set"];
+            assert("state key: add action defaults are editable", doc.querySelector(".playbook-tab.active")?.dataset.playbookTab === "actions" && newAction.trigger === "manual" && newAction.category === "Variable" && Object.prototype.hasOwnProperty.call(afterActionProject.variables, newAction.key) && allowedOps.includes(newAction.op) && !("append" in newAction));
+            const newActionControls = [...doc.querySelectorAll(`[data-playbook-action-id='${newAction.id}']`)];
+            const newValueControl = newActionControls.find((control) => control.dataset.playbookActionField === "value");
+            const newOperationControl = newActionControls.find((control) => control.dataset.playbookActionField === "op");
+            if (newActionType === "number") {
+              assert("state key: number action value uses number input", newValueControl?.tagName === "INPUT" && newValueControl?.type === "number", `${newValueControl?.tagName} ${newValueControl?.type}`);
+            }
+            if (newActionType === "boolean" && newAction.op === "set") {
+              const operationLabels = [...(newOperationControl?.querySelectorAll("option") || [])].map((option) => option.textContent.trim());
+              assert("state key: boolean set uses true false value menu", newValueControl?.tagName === "SELECT" && ["true", "false"].every((value) => [...newValueControl.options].some((option) => option.value === value)));
+              assert("state key: boolean toggle is labeled invert", operationLabels.includes("Invert") && !operationLabels.includes("Toggle"), operationLabels.join("|"));
+            }
+            clickElement(doc.querySelector("[data-playbook-tab='gates']"));
+            await waitFor("state key: choice conditions render", () => doc.querySelectorAll(".playbook-gate-row:not(.playbook-gate-heading)").length > 0);
+            const gateHeadings = [...doc.querySelectorAll(".playbook-gate-heading span")].map((node) => node.textContent.trim());
+            assert("state key: choice conditions show JSON column", gateHeadings.join("|") === "Option|Choice condition|On choose effects|JSON", gateHeadings.join("|"));
+            assert("state key: choice condition rows include JSON buttons", [...doc.querySelectorAll(".playbook-gate-row:not(.playbook-gate-heading)")].every((row) => row.querySelector("[data-action='focus-playbook-json']")));
+            const gateEffectCells = [...doc.querySelectorAll(".playbook-gate-effects")];
+            const hasInventorySubtract = gateEffectCells.some((cell) => {
+              const effectsCode = cell.querySelector("[data-gate-field='effects']")?.value || "";
+              return cell.textContent.includes("2 effects")
+                || (cell.textContent.includes("2 effect lines OK") && effectsCode.includes("subtract inventory_coins = 2"));
+            });
+            assert("state key: choice conditions render choice effects", hasInventorySubtract, gateEffectCells.map((node) => node.textContent.trim()).join(" | "));
+            clickElement(doc.querySelector("[data-playbook-tab='validation']"));
+            await waitFor("state key: validation report renders", () => doc.querySelectorAll(".state-report-card").length > 0);
+            assert("state key: validation rows include JSON buttons", Boolean(doc.querySelector(".state-report-status-list [data-action='focus-playbook-json']")));
+            const coinRow = doc.querySelector("[data-state-key='inventory_coins']");
+            assert("state key: validation lists inventory_coins", Boolean(coinRow));
+            assert(
+              "state key: validation shows read/write/template refs",
+              coinRow?.textContent.includes("Bribe check")
+                && coinRow?.textContent.includes("Read by")
+                && coinRow?.textContent.includes("Written by")
+                && coinRow?.textContent.includes("Interpolated by"),
+              coinRow?.textContent || ""
+            );
+            const objectRow = doc.querySelector("[data-state-key='showcase_inventory_object']");
+            assert("state key: validation flags json export risk", objectRow?.dataset.stateStatus === "export-blocked" || Boolean(objectRow?.querySelector(".state-report-status-export-blocked")));
+            clickElement(doc.querySelector("[data-playbook-tab='rules']"));
+            await waitFor("state key: play rules render JSON buttons", () => Boolean(doc.querySelector(".playbook-rule-card [data-action='focus-playbook-json']")));
+            clickElement(doc.querySelector("[data-file-id='adventure']"));
+            await waitFor("state key: canvas returns", () => doc.querySelector("#canvasPanel")?.classList.contains("active"));
+            clickElement(doc.querySelector("[data-action='play']"));
+            await waitFor("state key: play opens", () => doc.querySelector("#playDialog")?.open);
+            assert("state key: start body interpolates key", doc.querySelector("#playBody")?.textContent.includes("Coins before: 3.") && doc.querySelector("#playBody")?.textContent.includes("Nested coins: 3."));
+            const startDebugText = doc.querySelector("#playBody .play-debug")?.textContent || "";
+            assert("state key: debug shows visit tracking when enabled", startDebugText.includes("Visited:") && startDebugText.includes("Start ("), startDebugText);
+            assert("state key: manual action does not run before click", startDebugText.includes('traveler: "Mara"') && doc.defaultView.NarrativeCanvasApp.getSavedState().project.variables.traveler === "Mara", startDebugText);
+            const manualTravelerButton = [...doc.querySelectorAll("#playActions [data-action='play-manual']")].find((button) => button.textContent.includes("traveler"));
+            assert("state key: manual action renders as a button", Boolean(manualTravelerButton), doc.querySelector("#playActions")?.textContent || "");
+            clickElement(manualTravelerButton);
+            await waitFor("state key: manual action updates preview variables only", () => {
+              const text = doc.querySelector("#playBody .play-debug")?.textContent || "";
+              const savedState = doc.defaultView.NarrativeCanvasApp.getSavedState();
+              return text.includes('traveler: "Manual Traveler"') && savedState.project.variables.traveler === "Mara";
+            });
+            const manualDebugText = doc.querySelector("#playBody .play-debug")?.textContent || "";
+            assert("state key: visit tracking logs manual action", manualDebugText.includes("Manual action:") && manualDebugText.includes("traveler = Manual Traveler"), manualDebugText);
+            assert("state key: manual action button stays live after click", Boolean(doc.querySelector("#playActions [data-action='play-manual'][data-play-manual-applied='true']:not(:disabled)")));
+            const debugDetails = doc.querySelector("#playBody .play-debug");
+            debugDetails.open = false;
+            debugDetails.dispatchEvent(new doc.defaultView.Event("toggle", { bubbles: true }));
+
+            clickElement(doc.querySelector("#playActions [data-action='play-next'][data-node-id='n1']"));
+            await waitFor("state key: choice page opens", () => doc.querySelector("#playTitle")?.textContent.includes("Bribe check"));
+            assert("state key: debug collapsed state persists across nodes", doc.querySelector("#playBody .play-debug")?.open === false);
+            const choicePage = doc.querySelector("#playDialog")?.textContent || "";
+            assert("state key: choice body interpolates key", choicePage.includes("Coins before choice: 3."));
+            assert("state key: custom field interpolates key", choicePage.includes("Custom field coins: 3"));
+            assert("state key: gated option is visible", Boolean([...doc.querySelectorAll("#playActions [data-action='play-next']")].find((button) => button.textContent.includes("Slip two coins"))));
+            assert("state key: playbook choice lock hides keep moving", ![...doc.querySelectorAll("#playActions [data-action='play-next']")].some((button) => button.textContent.includes("Keep moving")));
+
+            clickElement([...doc.querySelectorAll("#playActions [data-action='play-next']")].find((button) => button.dataset.choiceOptionId === "opt_bribe"));
+            await waitFor("state key: bribe result opens", () => doc.querySelector("#playTitle")?.textContent.includes("Bribe accepted"));
+            const resultText = doc.querySelector("#playDialog")?.textContent || "";
+            assert("state key: option effects update key", resultText.includes("Coins after: 1."));
+            assert("state key: option effects update scalar key", resultText.includes("Suspicion after: 0."));
+            assert("state key: custom field uses updated key", resultText.includes("Custom field after: 1"));
+            const resultDebugText = doc.querySelector("#playBody .play-debug")?.textContent || "";
+            assert("state key: visit tracking logs selected choice", resultDebugText.includes("Selected choice: Slip two coins") && resultDebugText.includes("Choice effect: Subtract inventory_coins = 2"), resultDebugText);
+            clickElement(doc.querySelector("#playActions [data-action='play-prev']"));
+            await waitFor("state key: previous returns to choice page", () => doc.querySelector("#playTitle")?.textContent.includes("Bribe check"));
+            const rewoundDebugText = doc.querySelector("#playBody .play-debug")?.textContent || "";
+            assert("state key: previous removes later choice operation record", !rewoundDebugText.includes("Selected choice: Slip two coins") && !rewoundDebugText.includes("Choice effect: Subtract inventory_coins = 2"), rewoundDebugText);
+            assert("state key: previous restores preview variables", (doc.querySelector("#playBody")?.textContent || "").includes("Coins before choice: 3."));
+            clickElement([...doc.querySelectorAll("#playActions [data-action='play-next']")].find((button) => button.dataset.choiceOptionId === "opt_bribe"));
+            await waitFor("state key: bribe result reopens after rewind", () => doc.querySelector("#playTitle")?.textContent.includes("Bribe accepted"));
+            const liveState = doc.defaultView.NarrativeCanvasApp.getSavedState();
+            assert("state key: play preview does not mutate variable definitions", liveState.project.variables.inventory_coins === 3 && liveState.project.variables.traveler === "Mara");
+            doc.querySelector("#playDialog")?.close();
+            const entryRequirementState = doc.defaultView.NarrativeCanvasApp.getSavedState();
+            const entryNode = entryRequirementState.project.nodes.find((node) => node.id === "n0");
+            entryNode.stateLogic = { ...(entryNode.stateLogic || {}), requirements: "flag_watch_missing === false" };
+            doc.defaultView.NarrativeCanvasHost.loadProject = async () => JSON.stringify(entryRequirementState);
+            await doc.defaultView.NarrativeCanvasApp.loadVaultProject();
+            clickElement(doc.querySelector("[data-action='play']"));
+            await waitFor("state key: play opens with false entry requirement", () => doc.querySelector("#playDialog")?.open);
+            assert(
+              "state key: false entry requirement does not cut outgoing route",
+              Boolean(doc.querySelector("#playActions [data-action='play-next'][data-node-id='n1']")),
+              doc.querySelector("#playDialog")?.textContent || ""
+            );
+            doc.querySelector("#playDialog")?.close();
+            doc.defaultView.NarrativeCanvasApp.importStoryMarkdownText(storyMd);
+            const importedState = doc.defaultView.NarrativeCanvasApp.getSavedState();
+            const importedProject = importedState.project;
+            const importedChoice = importedProject.nodes.find((node) => node.title === "Bribe check");
+            assert("story markdown import enables text source workflow", importedProject.workflowMode === "textSource");
+            assert("story markdown import preserves title and nodes", importedProject.title === "State Runtime Key Play" && importedProject.nodes.some((node) => node.title === "Start") && importedProject.nodes.some((node) => node.title === "Bribe accepted"));
+            assert("story markdown import preserves choice condition", importedChoice?.choiceOptions?.[0]?.requires.includes("flag_tokens.includes(\"boarding\")") && importedChoice.choiceOptions[0].requires.includes("nested_inventory_coins >= 3"));
+            assert("story markdown import preserves choice effect", importedChoice?.choiceOptions?.[0]?.effects?.some((effect) => effect.op === "subtract" && effect.key === "inventory_coins" && effect.value === "2"));
+            assert("story markdown import preserves route", importedProject.links.some((link) => link.from === "n1" && link.to === "n2" && link.choiceOptionId === "opt_bribe"));
+            doc.defaultView.NarrativeCanvasApp.importStoryLayoutText(JSON.stringify(storyLayout));
+            const layoutRestoredProject = doc.defaultView.NarrativeCanvasApp.getSavedState().project;
+            const layoutSourceNode = storyLayout.nodes.find((node) => node.id === "n1");
+            const layoutRestoredNode = layoutRestoredProject.nodes.find((node) => node.id === "n1");
+            const layoutSourceLink = storyLayout.links.find((link) => link.choiceOptionId === "opt_bribe");
+            const layoutRestoredLink = layoutRestoredProject.links.find((link) => link.choiceOptionId === "opt_bribe");
+            assert("story layout import restores node position", layoutRestoredNode?.x === layoutSourceNode?.x && layoutRestoredNode?.y === layoutSourceNode?.y);
+            assert("story layout import restores port positions", layoutRestoredNode?.ports?.input?.side === layoutSourceNode?.portPositions?.input?.side && layoutRestoredNode?.ports?.input?.t === layoutSourceNode?.portPositions?.input?.t && layoutRestoredNode?.ports?.output?.side === layoutSourceNode?.portPositions?.output?.side && layoutRestoredNode?.ports?.output?.t === layoutSourceNode?.portPositions?.output?.t);
+            assert("story layout import restores link identity", layoutRestoredLink?.id === layoutSourceLink?.id && layoutRestoredLink?.from === "n1" && layoutRestoredLink?.to === "n2");
+            doc.defaultView.NarrativeCanvasApp.importStateSchemaText(JSON.stringify(stateSchema));
+            const restoredVariables = doc.defaultView.NarrativeCanvasApp.getSavedState().project.variables;
+            assert("state schema import restores story variables", restoredVariables.inventory_coins === 3 && restoredVariables.nested_inventory_coins === 3 && Array.isArray(restoredVariables.flag_tokens) && restoredVariables.flag_tokens.includes("boarding"));
+          },
+          exports: ["export-story-md", "export-story-layout", "export-state-schema", "export-profile", "export-runtime-json", "export-yarn", "export-ink", "export-twee", "export-all"]
+        },
+        {
+          name: "unsupported-js-condition",
+          file: "fixtures/unsupported-js-condition.ncanvas",
+          async checks(doc, saved, downloads) {
+            const runtimeJson = JSON.parse(await readDownloadText(downloads, "unsupported-js-condition-runtime.json"));
+            const choice = runtimeJson.nodes.find((node) => node.id === "n1")?.choices?.find((item) => item.id === "opt_modulo");
+            assert("unsupported js: runtime keeps original condition", choice?.condition === "score % 2 === 1", choice?.condition || "");
+            assert("unsupported js: runtime report warns", runtimeJson.report?.warnings?.some((warning) => warning.code === "expression-not-translated" && warning.message.includes("score % 2 === 1")));
+            const yarn = await readDownloadText(downloads, "unsupported-js-condition.yarn");
+            assert("unsupported js: yarn uses false guard", yarn.includes("-> Modulo route <<if false>>"));
+            assert("unsupported js: yarn parser accepts export", validateYarnScript(yarn, { requiredVariable: "score" }).length === 0);
+            const ink = await readDownloadText(downloads, "unsupported-js-condition.ink");
+            assert("unsupported js: ink uses false guard", ink.includes("+ {false} [Modulo route]"));
+            assert("unsupported js: ink parser accepts export", validateInkScript(ink, { requiredVariable: "score" }).length === 0);
+            const twee = await readDownloadText(downloads, "unsupported-js-condition.twee");
+            assert("unsupported js: twee uses false guard", twee.includes("<<if false>>"));
+            assert("unsupported js: twee parser accepts export", validateTweeScript(twee).length === 0);
+          },
+          exports: ["export-runtime-json", "export-yarn", "export-ink", "export-twee"]
+        },
+        {
           name: "export-outside-viewport",
           file: "fixtures/export-outside-viewport.ncanvas",
           async checks(doc, saved, downloads) {
@@ -98,7 +403,7 @@
             const distinctPixels = await countDistinctOpaquePixels(png);
             assert("export: png contains visible non-background content", distinctPixels > 4, `distinct=${distinctPixels}`);
             const svg = doc.defaultView.buildExportSvg();
-            assert("export: HTML button is not shown", !doc.querySelector("[data-action='export-html']"));
+            assert("export: HTML button is removed", !doc.querySelector("[data-action='export-html']"));
             assert("export: near node included", svg.includes("Near Start"));
             assert("export: far node outside viewport included", svg.includes("Far Target"));
             assert("export: link label included", svg.includes("far-link"));
@@ -139,6 +444,15 @@
         record(name, "pass");
       }
 
+      function clickElement(element) {
+        assert("click target exists", Boolean(element));
+        element.dispatchEvent(new element.ownerDocument.defaultView.MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          view: element.ownerDocument.defaultView
+        }));
+      }
+
       function renderReport() {
         const node = document.querySelector("#fixture-report");
         node.textContent = JSON.stringify(report, null, 2);
@@ -153,8 +467,12 @@
         throw new Error(`${name} timed out`);
       }
 
+      const assetVersion = new URL(window.location.href).searchParams.get("run") || String(Date.now());
+
       function assetUrl(path) {
-        return new URL(`../${path}`, window.location.href).href;
+        const url = new URL(`../${path}`, window.location.href);
+        url.searchParams.set("run", assetVersion);
+        return url.href;
       }
 
       async function readDownloadText(downloads, filename) {
@@ -167,6 +485,32 @@
         const item = downloads.find((entry) => pattern.test(entry.filename));
         assert(`download exists: ${pattern}`, Boolean(item));
         return item.blob;
+      }
+
+      async function listZipEntryNames(blob) {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        let eocdOffset = -1;
+        for (let offset = bytes.length - 22; offset >= 0; offset -= 1) {
+          if (view.getUint32(offset, true) === 0x06054b50) {
+            eocdOffset = offset;
+            break;
+          }
+        }
+        assert("zip: end of central directory found", eocdOffset >= 0);
+        const entryCount = view.getUint16(eocdOffset + 10, true);
+        let offset = view.getUint32(eocdOffset + 16, true);
+        const decoder = new TextDecoder();
+        const names = [];
+        for (let index = 0; index < entryCount; index += 1) {
+          assert("zip: central directory header found", view.getUint32(offset, true) === 0x02014b50);
+          const nameLength = view.getUint16(offset + 28, true);
+          const extraLength = view.getUint16(offset + 30, true);
+          const commentLength = view.getUint16(offset + 32, true);
+          names.push(decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength)));
+          offset += 46 + nameLength + extraLength + commentLength;
+        }
+        return names;
       }
 
       async function countDistinctOpaquePixels(blob) {
@@ -198,12 +542,267 @@
       }
 
       async function loadAssets() {
-        const [html, css, appJs] = await Promise.all([
+        const [html, css, appJs, runtimeSchema, stateSchemaSchema, storyLayoutSchema, exportProfileSchema] = await Promise.all([
           fetch(assetUrl("index.html")).then((response) => response.text()),
           fetch(assetUrl("canvas.css")).then((response) => response.text()),
-          fetch(assetUrl("app.js")).then((response) => response.text())
+          fetch(assetUrl("app.js")).then((response) => response.text()),
+          fetch(assetUrl("docs/runtime-json.schema.json")).then((response) => response.json()),
+          fetch(assetUrl("docs/state-schema.schema.json")).then((response) => response.json()),
+          fetch(assetUrl("docs/story-layout.schema.json")).then((response) => response.json()),
+          fetch(assetUrl("docs/export-profile.schema.json")).then((response) => response.json())
         ]);
-        return { html, css, appJs };
+        return { html, css, appJs, runtimeSchema, stateSchemaSchema, storyLayoutSchema, exportProfileSchema };
+      }
+
+      function validateJsonSchemaSubset(value, schema, path = "$", root = schema) {
+        if (schema === true || !schema) return [];
+        if (schema.$ref) {
+          const target = resolveLocalSchemaRef(schema.$ref, root);
+          return target ? validateJsonSchemaSubset(value, target, path, root) : [`${path}: unresolved schema ref ${schema.$ref}`];
+        }
+        const errors = [];
+        if (Object.prototype.hasOwnProperty.call(schema, "const") && value !== schema.const) {
+          errors.push(`${path}: expected const ${JSON.stringify(schema.const)}`);
+        }
+        if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+          errors.push(`${path}: expected one of ${schema.enum.map((item) => JSON.stringify(item)).join(", ")}`);
+        }
+        if (schema.type && !schemaTypeMatches(value, schema.type)) {
+          errors.push(`${path}: expected type ${Array.isArray(schema.type) ? schema.type.join("|") : schema.type}`);
+          return errors;
+        }
+        if (schema.format === "date-time" && typeof value === "string" && Number.isNaN(Date.parse(value))) {
+          errors.push(`${path}: expected date-time string`);
+        }
+        if (typeof schema.minimum === "number" && typeof value === "number" && value < schema.minimum) {
+          errors.push(`${path}: expected minimum ${schema.minimum}`);
+        }
+        if (schema.required && isPlainObject(value)) {
+          schema.required.forEach((key) => {
+            if (!Object.prototype.hasOwnProperty.call(value, key)) errors.push(`${path}: missing ${key}`);
+          });
+        }
+        if (schema.properties && isPlainObject(value)) {
+          Object.entries(schema.properties).forEach(([key, childSchema]) => {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+              errors.push(...validateJsonSchemaSubset(value[key], childSchema, `${path}.${key}`, root));
+            }
+          });
+        }
+        if (schema.additionalProperties === false && isPlainObject(value)) {
+          const allowed = new Set(Object.keys(schema.properties || {}));
+          Object.keys(value).forEach((key) => {
+            if (!allowed.has(key)) errors.push(`${path}: unexpected ${key}`);
+          });
+        } else if (schema.additionalProperties && schema.additionalProperties !== true && isPlainObject(value)) {
+          const allowed = new Set(Object.keys(schema.properties || {}));
+          Object.entries(value).forEach(([key, childValue]) => {
+            if (!allowed.has(key)) {
+              errors.push(...validateJsonSchemaSubset(childValue, schema.additionalProperties, `${path}.${key}`, root));
+            }
+          });
+        }
+        if (schema.items && Array.isArray(value)) {
+          value.forEach((item, index) => {
+            errors.push(...validateJsonSchemaSubset(item, schema.items, `${path}[${index}]`, root));
+          });
+        }
+        return errors;
+      }
+
+      function resolveLocalSchemaRef(ref, root) {
+        if (!ref.startsWith("#/")) return null;
+        return ref.slice(2).split("/").reduce((current, segment) => {
+          const key = segment.replace(/~1/g, "/").replace(/~0/g, "~");
+          return current && Object.prototype.hasOwnProperty.call(current, key) ? current[key] : null;
+        }, root);
+      }
+
+      function schemaTypeMatches(value, expected) {
+        const types = Array.isArray(expected) ? expected : [expected];
+        return types.some((type) => {
+          if (type === "null") return value === null;
+          if (type === "array") return Array.isArray(value);
+          if (type === "object") return isPlainObject(value);
+          if (type === "integer") return Number.isInteger(value);
+          return typeof value === type;
+        });
+      }
+
+      function isPlainObject(value) {
+        return Boolean(value && typeof value === "object" && !Array.isArray(value));
+      }
+
+      function validateYarnScript(source, options = {}) {
+        const errors = [];
+        const nodes = parseYarnNodes(source, errors);
+        const titles = new Set(nodes.map((node) => node.title));
+        if (!nodes.length) errors.push("no Yarn nodes found");
+        nodes.forEach((node) => {
+          if (!node.body.some((line) => line.trim() === "---")) errors.push(`${node.title}: missing body separator`);
+          const commandErrors = validateYarnCommands(node);
+          errors.push(...commandErrors);
+          collectRegexTargets(node.text, /<<jump\s+([A-Za-z_]\w*)\s*>>/g).forEach((target) => {
+            if (!titles.has(target)) errors.push(`${node.title}: missing jump target ${target}`);
+          });
+        });
+        const declarations = collectRegexTargets(source, /<<declare\s+\$([A-Za-z_]\w*)\s*=/g);
+        const requiredVariable = options.requiredVariable === undefined ? "inventory_coins" : options.requiredVariable;
+        if (requiredVariable && !declarations.includes(requiredVariable)) errors.push(`missing ${requiredVariable} declaration`);
+        return errors;
+      }
+
+      function parseYarnNodes(source, errors) {
+        const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
+        const nodes = [];
+        let current = null;
+        lines.forEach((line, index) => {
+          const title = line.match(/^title:\s*(.+?)\s*$/);
+          if (title) {
+            if (current && !current.closed) errors.push(`${current.title}: missing === before line ${index + 1}`);
+            current = { title: title[1].trim(), body: [], text: "", closed: false };
+            nodes.push(current);
+            return;
+          }
+          if (!current) return;
+          if (line.trim() === "===") {
+            current.closed = true;
+            current.text = current.body.join("\n");
+            current = null;
+            return;
+          }
+          current.body.push(line);
+        });
+        if (current && !current.closed) errors.push(`${current.title}: missing === at end`);
+        return nodes;
+      }
+
+      function validateYarnCommands(node) {
+        const errors = [];
+        const commands = [...node.text.matchAll(/<<([^>\n]+)>>/g)].map((match) => match[1].trim());
+        commands.forEach((command) => {
+          if (/^(declare|jump|set|if|else|endif)\b/.test(command)) return;
+          errors.push(`${node.title}: unsupported Yarn command ${command}`);
+        });
+        node.body.forEach((line) => {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("->")) return;
+          if (!/^->\s+.+?(?:\s+<<if\s+.+>>)?$/.test(trimmed)) errors.push(`${node.title}: malformed option line ${trimmed}`);
+        });
+        return errors;
+      }
+
+      function validateInkScript(source, options = {}) {
+        const errors = [];
+        const text = String(source || "").replace(/\r\n/g, "\n");
+        const knots = [...text.matchAll(/^===\s+([A-Za-z_]\w*)\s+===\s*$/gm)].map((match) => match[1]);
+        const knotSet = new Set(knots);
+        if (!knots.length) errors.push("no ink knots found");
+        const requiredVariable = options.requiredVariable === undefined ? "inventory_coins" : options.requiredVariable;
+        if (requiredVariable && !new RegExp(`^VAR\\s+${requiredVariable}\\s*=`, "m").test(text)) errors.push(`missing ${requiredVariable} VAR`);
+        collectRegexTargets(text, /(?:^|\n)\s*->\s+([A-Za-z_]\w*|END)\b/g).forEach((target) => {
+          if (target !== "END" && !knotSet.has(target)) errors.push(`missing divert target ${target}`);
+        });
+        const openBraces = countOccurrences(text, "{");
+        const closeBraces = countOccurrences(text, "}");
+        if (openBraces !== closeBraces) errors.push(`ink brace count mismatch ${openBraces}/${closeBraces}`);
+        [...text.matchAll(/^\s*\+\s+/gm)].forEach((match) => {
+          const line = text.slice(match.index, text.indexOf("\n", match.index) === -1 ? text.length : text.indexOf("\n", match.index));
+          if (!/\[[^\]]+\]/.test(line)) errors.push(`malformed ink choice ${line.trim()}`);
+        });
+        return errors;
+      }
+
+      function validateTweeScript(source) {
+        const errors = [];
+        const passages = parseTweePassages(source, errors);
+        const byName = new Map();
+        passages.forEach((passage) => {
+          if (byName.has(passage.name)) errors.push(`duplicate passage ${passage.name}`);
+          byName.set(passage.name, passage);
+          validateSugarCubeMacroBalance(passage, errors);
+        });
+        ["StoryData", "StoryTitle", "StoryInit"].forEach((name) => {
+          if (!byName.has(name)) errors.push(`missing ${name}`);
+        });
+        const storyData = byName.get("StoryData");
+        if (storyData) {
+          try {
+            const parsed = JSON.parse(storyData.body.trim());
+            if (parsed.format !== "SugarCube") errors.push("StoryData format is not SugarCube");
+            if (!parsed.start) errors.push("StoryData start is missing");
+            if (parsed.start && !byName.has(parsed.start)) errors.push(`start passage missing: ${parsed.start}`);
+          } catch (error) {
+            errors.push(`StoryData JSON invalid: ${error.message}`);
+          }
+        }
+        passages.forEach((passage) => {
+          for (const target of collectTweeTargets(passage.body)) {
+            if (!byName.has(target)) errors.push(`${passage.name}: missing target ${target}`);
+          }
+        });
+        return errors;
+      }
+
+      function parseTweePassages(source, errors) {
+        const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
+        const passages = [];
+        let current = null;
+        lines.forEach((line, index) => {
+          const match = line.match(/^::\s+(.+?)(?:\s+\[[^\]]*\])?(?:\s+\{.*\})?\s*$/);
+          if (match) {
+            if (current) current.body = current.lines.join("\n").trim();
+            current = { name: match[1].trim(), line: index + 1, lines: [], body: "" };
+            passages.push(current);
+            return;
+          }
+          if (!current) {
+            if (line.trim()) errors.push(`content before first passage at line ${index + 1}`);
+            return;
+          }
+          current.lines.push(line);
+        });
+        if (current) current.body = current.lines.join("\n").trim();
+        if (!passages.length) errors.push("no Twee passages found");
+        return passages;
+      }
+
+      function validateSugarCubeMacroBalance(passage, errors) {
+        const body = passage.body || "";
+        [
+          ["<<if", "<</if>>"],
+          ["<<link", "<</link>>"]
+        ].forEach(([open, close]) => {
+          const openCount = countOccurrences(body, open);
+          const closeCount = countOccurrences(body, close);
+          if (openCount !== closeCount) errors.push(`${passage.name}: ${open} count ${openCount} does not match ${close} count ${closeCount}`);
+        });
+      }
+
+      function collectTweeTargets(body) {
+        const targets = [];
+        String(body || "").replace(/<<goto\s+"([^"]+)"\s*>>/g, (_match, target) => {
+          targets.push(target);
+          return _match;
+        });
+        String(body || "").replace(/<<link\s+"(?:[^"\\]|\\.)*"\s+"([^"]+)"\s*>>/g, (_match, target) => {
+          targets.push(target);
+          return _match;
+        });
+        return targets;
+      }
+
+      function countOccurrences(text, pattern) {
+        return String(text || "").split(pattern).length - 1;
+      }
+
+      function collectRegexTargets(text, pattern) {
+        const targets = [];
+        String(text || "").replace(pattern, (_match, target) => {
+          targets.push(target);
+          return _match;
+        });
+        return targets;
       }
 
       function extractBodyHtml(html) {
@@ -288,7 +887,7 @@
           button.click();
         }
 
-        await fixture.checks(doc, JSON.parse(savedText), downloads);
+        await fixture.checks(doc, JSON.parse(savedText), downloads, assets);
 
         win.URL.createObjectURL = originalCreateObjectURL;
         win.URL.revokeObjectURL = originalRevokeObjectURL;

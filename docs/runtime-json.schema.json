@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://narrative-canvas.dev/schemas/runtime-json-v1.schema.json",
+  "title": "Narrative Canvas Runtime JSON v1",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "exportedAt",
+    "source",
+    "startNodeId",
+    "startNode",
+    "variables",
+    "variableNames",
+    "characters",
+    "nodes",
+    "links",
+    "playbook",
+    "report"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "narrative-canvas-runtime"
+    },
+    "version": {
+      "const": 1
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": ["title", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "startNodeId": { "type": "string" },
+    "startNode": { "type": "string" },
+    "variables": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "variableNames": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "characters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/character" }
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "links": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/link" }
+    },
+    "playbook": {
+      "type": "object",
+      "required": ["rules", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/playbookAction" }
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "required": ["warnings", "variableNameMap", "nodeNameMap"],
+      "additionalProperties": false,
+      "properties": {
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/warning" }
+        },
+        "variableNameMap": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "nodeNameMap": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "character": {
+      "type": "object",
+      "required": ["id", "name", "role", "voice", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "voice": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "slug",
+        "title",
+        "type",
+        "typeLabel",
+        "body",
+        "requirements",
+        "condition",
+        "effects",
+        "choices",
+        "conditionBranches",
+        "next",
+        "routing",
+        "cast",
+        "customFields"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "slug": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string" },
+        "typeLabel": { "type": "string" },
+        "body": { "type": "string" },
+        "requirements": { "type": "string" },
+        "condition": { "type": "string" },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/effect" }
+        },
+        "choices": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/choice" }
+        },
+        "conditionBranches": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/conditionBranch" }
+        },
+        "next": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/transition" }
+        },
+        "routing": { "$ref": "#/$defs/routing" },
+        "cast": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/castEntry" }
+        },
+        "customFields": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "required": ["trigger", "op", "sourceKey", "key", "value", "valueSource"],
+      "additionalProperties": false,
+      "properties": {
+        "trigger": { "type": "string" },
+        "op": { "type": "string" },
+        "sourceKey": { "type": "string" },
+        "key": { "type": "string" },
+        "value": true,
+        "valueSource": { "type": "string" }
+      }
+    },
+    "choice": {
+      "type": "object",
+      "required": ["id", "label", "condition", "effects", "targetId", "target", "linkId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "condition": { "type": "string" },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/effect" }
+        },
+        "targetId": { "type": "string" },
+        "target": { "type": "string" },
+        "linkId": { "type": "string" }
+      }
+    },
+    "conditionBranch": {
+      "type": "object",
+      "required": ["branch", "targetId", "target", "linkId", "condition"],
+      "additionalProperties": false,
+      "properties": {
+        "branch": { "enum": ["true", "false"] },
+        "targetId": { "type": "string" },
+        "target": { "type": "string" },
+        "linkId": { "type": "string" },
+        "condition": { "type": "string" }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": ["targetId", "target", "condition", "source"],
+      "additionalProperties": true,
+      "properties": {
+        "targetId": { "type": "string" },
+        "target": { "type": "string" },
+        "linkId": { "type": "string" },
+        "condition": { "type": "string" },
+        "source": { "enum": ["routing", "link"] }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": ["mode", "target", "targetId"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["continue", "end", "goTo"] },
+        "target": { "type": "string" },
+        "targetId": { "type": "string" }
+      }
+    },
+    "castEntry": {
+      "type": "object",
+      "required": ["characterId", "name", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "characterId": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": ["id", "fromId", "from", "toId", "to", "label", "choiceIndex", "choiceOptionId", "condition"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "fromId": { "type": "string" },
+        "from": { "type": "string" },
+        "toId": { "type": "string" },
+        "to": { "type": "string" },
+        "label": { "type": "string" },
+        "choiceIndex": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "choiceOptionId": { "type": "string" },
+        "condition": { "type": "string" }
+      }
+    },
+    "playbookAction": {
+      "type": "object",
+      "required": ["id", "trigger", "op", "target", "category", "key", "stateKey", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "trigger": { "type": "string" },
+        "op": { "type": "string" },
+        "target": { "type": "string" },
+        "category": { "type": "string" },
+        "key": { "type": "string" },
+        "stateKey": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "nodeId": { "type": "string" },
+        "linkId": { "type": "string" },
+        "choiceId": { "type": "string" }
+      }
+    }
+  }
+}

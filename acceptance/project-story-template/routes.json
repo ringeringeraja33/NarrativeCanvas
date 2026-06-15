@@ -1,0 +1,48 @@
+{
+  "format": "narrative-canvas-route-cases",
+  "version": 1,
+  "cases": [
+    {
+      "name": "direct-route",
+      "choiceLabels": ["Take the direct route", "Confirm the direct plan"],
+      "minVisits": 4,
+      "expectNode": ["Resolution"],
+      "expectText": ["Route: direct", "Momentum: 1"],
+      "expectState": [
+        {
+          "key": "route",
+          "value": "direct"
+        },
+        {
+          "key": "momentum",
+          "value": 1
+        },
+        {
+          "key": "clue_found",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "quiet-route",
+      "choiceLabels": ["Take the quiet route", "Use the quiet clue"],
+      "minVisits": 4,
+      "expectNode": ["Resolution"],
+      "expectText": ["Route: quiet", "Clue: true"],
+      "expectState": [
+        {
+          "key": "route",
+          "value": "quiet"
+        },
+        {
+          "key": "momentum",
+          "value": 2
+        },
+        {
+          "key": "clue_found",
+          "value": true
+        }
+      ]
+    }
+  ]
+}

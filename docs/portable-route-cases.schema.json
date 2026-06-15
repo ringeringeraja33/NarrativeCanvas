@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/narrative-canvas/portable-route-cases.schema.json",
+  "title": "Narrative Canvas Portable Route Cases",
+  "type": "object",
+  "required": ["format", "version", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "narrative-canvas-route-cases"
+    },
+    "version": {
+      "const": 1
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/routeCase"
+      }
+    }
+  },
+  "$defs": {
+    "routeCase": {
+      "type": "object",
+      "required": ["name", "choiceLabels", "minVisits", "expectNode", "expectText", "expectState"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "choiceLabels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "minVisits": {
+          "type": "integer"
+        },
+        "expectNode": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectText": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectState": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expectedState"
+          }
+        }
+      }
+    },
+    "expectedState": {
+      "type": "object",
+      "required": ["key", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": true
+      }
+    }
+  }
+}
