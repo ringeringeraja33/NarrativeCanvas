@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "savedAt": "2026-01-01T00:00:00.000Z",
+  "project": {
+    "title": "Untitled",
+    "workflowMode": "canvas",
+    "notes": "",
+    "variables": {},
+    "script": {
+      "nodeTypes": {},
+      "actions": [],
+      "playRules": {
+        "startNode": { "enabled": true, "value": "Start" },
+        "endCondition": { "enabled": false, "value": "" },
+        "visitTracking": { "enabled": false, "value": true },
+        "debugMode": { "enabled": false, "value": false }
+      }
+    },
+    "eventSheet": {
+      "columns": [
+        { "key": "act", "label": "ACT", "width": "110px", "readonly": false, "custom": false },
+        { "key": "chapter", "label": "Chap.", "width": "110px", "readonly": false, "custom": false },
+        { "key": "eventType", "label": "Event Type", "width": "170px", "readonly": false, "custom": false },
+        { "key": "beatList", "label": "Beat", "width": "180px", "readonly": false, "custom": false },
+        { "key": "eventDescription", "label": "Description", "width": "360px", "readonly": false, "custom": false },
+        { "key": "characterEncountered", "label": "Characters", "width": "320px", "readonly": false, "custom": false }
+      ],
+      "hiddenColumns": []
+    },
+    "eventRowOrder": {},
+    "nodeTypes": [
+      { "type": "Entry", "label": "Entry", "badge": "E", "color": "#cdd6f4", "width": 160, "custom": false, "badgeCustom": false, "kind": "node", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": true, "legacy": false },
+      { "type": "Content", "label": "Content", "badge": "C", "color": "#61afef", "width": 200, "custom": false, "badgeCustom": false, "kind": "node", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": false, "legacy": false },
+      { "type": "Dialog", "label": "Dialog", "badge": "D", "color": "#56b6c2", "width": 200, "custom": false, "badgeCustom": false, "kind": "node", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": false, "legacy": false },
+      { "type": "Choice", "label": "Choice", "badge": "C", "color": "#d19a66", "width": 200, "custom": false, "badgeCustom": false, "kind": "node", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": false, "legacy": false },
+      { "type": "Condition", "label": "Condition", "badge": "C", "color": "#e06c75", "width": 190, "custom": false, "badgeCustom": false, "kind": "node", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": true, "eventSheetHidden": false, "system": false, "legacy": true },
+      { "type": "Set", "label": "Set", "badge": "S", "color": "#98c379", "width": 190, "custom": false, "badgeCustom": false, "kind": "node", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": true, "eventSheetHidden": false, "system": false, "legacy": true },
+      { "type": "Marker", "label": "Marker", "badge": "M", "color": "#7fdbca", "width": 170, "custom": false, "badgeCustom": false, "kind": "node", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": false, "legacy": false },
+      { "type": "Event", "label": "Frame", "badge": "F", "color": "#b48cff", "width": 420, "custom": false, "badgeCustom": false, "kind": "frame", "fields": [], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": false, "legacy": false },
+      { "type": "StorySequence", "label": "Story Sequence", "badge": "N", "color": "#b48cff", "width": 540, "custom": false, "badgeCustom": true, "kind": "frame", "fields": [ { "key": "location", "label": "Location" }, { "key": "timeWeather", "label": "Time / Weather" }, { "key": "questEpisode", "label": "Quest Ep." }, { "key": "status", "label": "Status" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": true, "legacy": false },
+      { "type": "Clue", "label": "Clue", "badge": "N", "color": "#d99a3d", "width": 230, "custom": false, "badgeCustom": true, "kind": "node", "fields": [ { "key": "evidence", "label": "Evidence" }, { "key": "owner", "label": "Owner" }, { "key": "outcome", "label": "Outcome" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": true, "legacy": false },
+      { "type": "InterviewNote", "label": "Interview Note", "badge": "N", "color": "#56b6c2", "width": 240, "custom": false, "badgeCustom": true, "kind": "node", "fields": [ { "key": "recorder", "label": "Recorder" }, { "key": "reliability", "label": "Reliability" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": true, "legacy": false },
+      { "type": "LocationFrame", "label": "Location Frame", "badge": "N", "color": "#6f8fcf", "width": 560, "custom": false, "badgeCustom": true, "kind": "frame", "fields": [ { "key": "region", "label": "Region" }, { "key": "mood", "label": "Mood" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": true, "system": true, "legacy": false },
+      { "type": "ConversationFrame", "label": "Conversation Frame", "badge": "N", "color": "#3aa99f", "width": 540, "custom": false, "badgeCustom": true, "kind": "frame", "fields": [ { "key": "participants", "label": "Participants" }, { "key": "summary", "label": "Summary" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": true, "legacy": false },
+      { "type": "InvestigationEvent", "label": "Investigation Event", "badge": "N", "color": "#c678dd", "width": 540, "custom": false, "badgeCustom": true, "kind": "frame", "fields": [ { "key": "clueStatus", "label": "Clue Status" }, { "key": "risk", "label": "Risk" }, { "key": "evidenceOwner", "label": "Evidence Owner" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": false, "eventSheetHidden": false, "system": true, "legacy": false },
+      { "type": "ArchiveNote", "label": "Archive Note", "badge": "N", "color": "#8a8f98", "width": 220, "custom": false, "badgeCustom": true, "kind": "node", "fields": [ { "key": "reason", "label": "Reason" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": true, "eventSheetHidden": false, "system": true, "legacy": false },
+      { "type": "DraftFrame", "label": "Draft Frame", "badge": "N", "color": "#7f848e", "width": 520, "custom": false, "badgeCustom": true, "kind": "frame", "fields": [ { "key": "reason", "label": "Reason" } ], "removedColumns": [], "eventColumnLabels": {}, "hidden": true, "eventSheetHidden": true, "system": true, "legacy": false }
+    ],
+    "customNodeTypes": [],
+    "characters": [],
+    "deletedNodes": [],
+    "nodes": [
+      { "id": "n0", "type": "Entry", "title": "Start", "body": "故事从这里开始。", "x": 80, "y": 80, "frameId": "", "choices": [], "customFields": {}, "ports": { "input": { "side": "top", "t": 0.5 }, "output": { "side": "bottom", "t": 0.5 } } }
+    ],
+    "links": []
+  },
+  "ui": {
+    "selectedNodeId": "n0",
+    "selectedLinkId": null,
+    "panel": "project",
+    "activeFileId": "adventure",
+    "theme": "dark",
+    "exportImageScale": 1,
+    "view": { "x": 0, "y": 0, "scale": 0.5 },
+    "sidebar": { "leftWidth": 449, "rightWidth": 340, "leftCollapsed": false, "rightCollapsed": false },
+    "search": "",
+    "characterSearch": "",
+    "eventSearch": "",
+    "playbookSearch": "",
+    "playbookJsonOpen": false,
+    "playbookTab": "variables"
+  }
+}
