@@ -1331,7 +1331,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003cmeta charset=\"utf-8\"\u003e",
   "    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\u003e",
   "    \u003ctitle\u003eNarrative Canvas\u003c/title\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260615-1.1.1\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260706-1.1.2\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -1484,7 +1484,24 @@ const CANVAS_INDEX_HTML = [
   "            \u003cdiv id=\"matchCount\"\u003e0 / 0\u003c/div\u003e",
   "          \u003c/div\u003e",
   "        \u003c/footer\u003e",
+  "        \u003cbutton class=\"playbook-scroll-top-button\" type=\"button\" data-action=\"scroll-playbook-top\" title=\"Back to top\" aria-label=\"Back to top\"\u003e",
+  "          \u003cspan aria-hidden=\"true\"\u003e↑\u003c/span\u003e",
+  "        \u003c/button\u003e",
   "      \u003c/main\u003e",
+  "",
+  "      \u003cdialog id=\"playDialog\" class=\"play-dialog\"\u003e",
+  "        \u003cform method=\"dialog\" class=\"play-shell\"\u003e",
+  "          \u003cheader class=\"play-header\"\u003e",
+  "            \u003cdiv\u003e",
+  "              \u003cspan class=\"pane-kicker\"\u003eRuntime\u003c/span\u003e",
+  "              \u003ch2 id=\"playTitle\"\u003ePreview\u003c/h2\u003e",
+  "            \u003c/div\u003e",
+  "            \u003cbutton class=\"icon-button\" value=\"close\" aria-label=\"Close preview\"\u003ex\u003c/button\u003e",
+  "          \u003c/header\u003e",
+  "          \u003carticle id=\"playBody\" class=\"play-body\"\u003e\u003c/article\u003e",
+  "          \u003cfooter id=\"playActions\" class=\"play-actions\"\u003e\u003c/footer\u003e",
+  "        \u003c/form\u003e",
+  "      \u003c/dialog\u003e",
   "",
   "      \u003cdiv class=\"sidebar-resizer sidebar-resizer-right\" data-sidebar-resizer=\"right\" role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize right sidebar\"\u003e\u003c/div\u003e",
   "      \u003caside class=\"sidebar sidebar-right\" data-sidebar=\"right\"\u003e",
@@ -1528,20 +1545,6 @@ const CANVAS_INDEX_HTML = [
   "      \u003cbutton data-layer-action=\"back\"\u003eSend to back\u003c/button\u003e",
   "      \u003cbutton class=\"context-menu-danger\" data-action=\"delete-node\"\u003eDelete node\u003c/button\u003e",
   "    \u003c/div\u003e",
-  "",
-  "    \u003cdialog id=\"playDialog\" class=\"play-dialog\"\u003e",
-  "      \u003cform method=\"dialog\" class=\"play-shell\"\u003e",
-  "        \u003cheader class=\"play-header\"\u003e",
-  "          \u003cdiv\u003e",
-  "            \u003cspan class=\"pane-kicker\"\u003eRuntime\u003c/span\u003e",
-  "            \u003ch2 id=\"playTitle\"\u003ePreview\u003c/h2\u003e",
-  "          \u003c/div\u003e",
-  "          \u003cbutton class=\"icon-button\" value=\"close\" aria-label=\"Close preview\"\u003ex\u003c/button\u003e",
-  "        \u003c/header\u003e",
-  "        \u003carticle id=\"playBody\" class=\"play-body\"\u003e\u003c/article\u003e",
-  "        \u003cfooter id=\"playActions\" class=\"play-actions\"\u003e\u003c/footer\u003e",
-  "      \u003c/form\u003e",
-  "    \u003c/dialog\u003e",
   "",
   "    \u003cdialog id=\"exportReportDialog\" class=\"nc-notice-dialog export-report-dialog\" aria-label=\"Export report\"\u003e",
   "      \u003cform method=\"dialog\" class=\"notice-shell export-report-shell\"\u003e",
@@ -1750,7 +1753,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=20260615-1.1.1\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=20260706-1.1.2\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -3046,6 +3049,7 @@ function installNarrativeCanvasApp() {
       "Play Rules": "演示规则",
       "{pages} play pages, {frames} frames": "{pages} 个演示页，{frames} 个框架",
       "Playbook": "演示设置",
+      "Back to top": "回顶部",
       "Project": "项目",
       "Project File": "项目文件",
       "Project name": "项目名称",
@@ -4091,7 +4095,7 @@ function installNarrativeCanvasApp() {
       if (event.target === dom.playbookHelpDialog) dom.playbookHelpDialog.close();
     }, { signal });
     dom.playDialog.addEventListener("toggle", handlePlayDebugToggle, { capture: true, signal });
-    dom.playDialog.addEventListener("close", resetPreviewSessionState, { signal });
+    dom.playDialog.addEventListener("close", handlePreviewPanelClose, { signal });
     dom.exportReportDialog.addEventListener("click", (event) => {
       if (event.target === dom.exportReportDialog) dom.exportReportDialog.close();
     }, { signal });
@@ -4893,6 +4897,8 @@ function installNarrativeCanvasApp() {
       ["#eventsPanel", "aria-label", "Events Sheet"],
       ["#workspaceSearchControls", "aria-label", "Search"],
       ["#mentionPopover", "aria-label", "Character mentions"],
+      [".playbook-scroll-top-button", "title", "Back to top"],
+      [".playbook-scroll-top-button", "aria-label", "Back to top"],
       ["#themeToggle", "title", "Switch theme"]
     ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
 
@@ -11509,6 +11515,7 @@ function installNarrativeCanvasApp() {
     if (action === "create-play-rule") addPlaybookRule(target.dataset.playbookRuleKind);
     if (action === "toggle-playbook-json") togglePlaybookJson();
     if (action === "select-playbook-tab") selectPlaybookTab(target.dataset.playbookTab);
+    if (action === "scroll-playbook-top") scrollPlaybookToTop();
     if (action === "filter-playbook-category") filterPlaybookCategory(target.dataset.playbookCategory);
     if (action === "focus-playbook-json") showPlaybookJsonAtToken(target.dataset.playbookToken);
     if (action === "show-playbook-choice-effect-draft") showPlaybookChoiceEffectDraft(target.dataset.gateId);
@@ -12459,6 +12466,13 @@ function installNarrativeCanvasApp() {
     if (!scope) return;
     event.preventDefault();
     cycleSearchScope(scope);
+    if (typeof target.focus === "function") {
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_error) {
+        target.focus();
+      }
+    }
   }
 
   function handleKeyDown(event) {
@@ -15709,6 +15723,16 @@ function installNarrativeCanvasApp() {
     state.playbookTab = getValidPlaybookTab(tab);
     state.activeFileId = "variables";
     renderPlaybookSurfaces();
+  }
+
+  function scrollPlaybookToTop() {
+    if (!dom.variablesPanel) return;
+    try {
+      dom.variablesPanel.scrollTo({ top: 0, behavior: "auto" });
+    } catch (error) {
+      // Fallback for embedded WebViews with partial Element.scrollTo support.
+    }
+    dom.variablesPanel.scrollTop = 0;
   }
 
   function togglePlaybookRuleHelp(ruleId) {
@@ -21521,6 +21545,50 @@ function installNarrativeCanvasApp() {
     });
   }
 
+  function setPreviewPanelOpen(open) {
+    if (!dom.root) return;
+    if (open) dom.root.setAttribute("data-play-panel", "open");
+    else dom.root.removeAttribute("data-play-panel");
+    requestAnimationFrame(() => {
+      renderTransform();
+      scheduleCanvasViewportRender();
+    });
+  }
+
+  function openPreviewPanel() {
+    if (!dom.playDialog) return;
+    setPreviewPanelOpen(true);
+    if (dom.playDialog.open) return;
+    try {
+      if (typeof dom.playDialog.show === "function") dom.playDialog.show();
+      else dom.playDialog.setAttribute("open", "");
+    } catch (error) {
+      dom.playDialog.setAttribute("open", "");
+    }
+  }
+
+  function handlePreviewPanelClose() {
+    resetPreviewSessionState();
+    setPreviewPanelOpen(false);
+  }
+
+  function focusCanvasOnPreviewNode(node) {
+    if (!node || !dom.viewport) return;
+    requestAnimationFrame(() => {
+      const current = getNode(node.id);
+      if (!current || state.playNodeId !== current.id) return;
+      state.activeFileId = "adventure";
+      state.selectedNodeId = current.id;
+      state.selectedNodeIds = [];
+      state.selectedLinkId = null;
+      state.characterFocusId = null;
+      renderShellState();
+      renderWorkspaceFile();
+      renderInspector();
+      centerCanvasOnNode(current, state.view.scale || DEFAULT_CANVAS_ZOOM);
+    });
+  }
+
   function openPreview() {
     const previewPath = getPreviewPath();
     const entry = getPreviewStartNode(previewPath);
@@ -21539,8 +21607,11 @@ function installNarrativeCanvasApp() {
     state.playManualActionRunIds = new Set();
     state.playVisitedNodeIds = new Set();
     state.playVisitRecords = [];
+    state.activeFileId = "adventure";
+    openPreviewPanel();
+    renderShellState();
+    renderWorkspaceFile();
     renderPreviewNode(entry.id);
-    dom.playDialog.showModal();
   }
 
   function resetPreviewSessionState() {
@@ -21794,6 +21865,7 @@ function installNarrativeCanvasApp() {
       ${customFields}
       ${debugDetails}
     `;
+    focusCanvasOnPreviewNode(node);
 
     if (dialogTurns.length && dialogTurnIndex < dialogTurns.length - 1) {
       const linePrevButton = dialogTurnIndex > 0

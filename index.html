@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Narrative Canvas</title>
-    <link rel="stylesheet" href="./canvas.css?v=20260615-1.1.1">
+    <link rel="stylesheet" href="./canvas.css?v=20260706-1.1.2">
   </head>
   <body>
     <div class="app-shell">
@@ -157,7 +157,24 @@
             <div id="matchCount">0 / 0</div>
           </div>
         </footer>
+        <button class="playbook-scroll-top-button" type="button" data-action="scroll-playbook-top" title="Back to top" aria-label="Back to top">
+          <span aria-hidden="true">↑</span>
+        </button>
       </main>
+
+      <dialog id="playDialog" class="play-dialog">
+        <form method="dialog" class="play-shell">
+          <header class="play-header">
+            <div>
+              <span class="pane-kicker">Runtime</span>
+              <h2 id="playTitle">Preview</h2>
+            </div>
+            <button class="icon-button" value="close" aria-label="Close preview">x</button>
+          </header>
+          <article id="playBody" class="play-body"></article>
+          <footer id="playActions" class="play-actions"></footer>
+        </form>
+      </dialog>
 
       <div class="sidebar-resizer sidebar-resizer-right" data-sidebar-resizer="right" role="separator" aria-orientation="vertical" aria-label="Resize right sidebar"></div>
       <aside class="sidebar sidebar-right" data-sidebar="right">
@@ -201,20 +218,6 @@
       <button data-layer-action="back">Send to back</button>
       <button class="context-menu-danger" data-action="delete-node">Delete node</button>
     </div>
-
-    <dialog id="playDialog" class="play-dialog">
-      <form method="dialog" class="play-shell">
-        <header class="play-header">
-          <div>
-            <span class="pane-kicker">Runtime</span>
-            <h2 id="playTitle">Preview</h2>
-          </div>
-          <button class="icon-button" value="close" aria-label="Close preview">x</button>
-        </header>
-        <article id="playBody" class="play-body"></article>
-        <footer id="playActions" class="play-actions"></footer>
-      </form>
-    </dialog>
 
     <dialog id="exportReportDialog" class="nc-notice-dialog export-report-dialog" aria-label="Export report">
       <form method="dialog" class="notice-shell export-report-shell">
@@ -423,6 +426,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260615-1.1.1"></script>
+    <script src="./app.js?v=20260706-1.1.2"></script>
   </body>
 </html>

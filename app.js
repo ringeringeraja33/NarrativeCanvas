@@ -1288,6 +1288,7 @@ const uiTranslations = {
     "Play Rules": "演示规则",
     "{pages} play pages, {frames} frames": "{pages} 个演示页，{frames} 个框架",
     "Playbook": "演示设置",
+    "Back to top": "回顶部",
     "Project": "项目",
     "Project File": "项目文件",
     "Project name": "项目名称",
@@ -2333,7 +2334,7 @@ function bindEvents() {
     if (event.target === dom.playbookHelpDialog) dom.playbookHelpDialog.close();
   }, { signal });
   dom.playDialog.addEventListener("toggle", handlePlayDebugToggle, { capture: true, signal });
-  dom.playDialog.addEventListener("close", resetPreviewSessionState, { signal });
+  dom.playDialog.addEventListener("close", handlePreviewPanelClose, { signal });
   dom.exportReportDialog.addEventListener("click", (event) => {
     if (event.target === dom.exportReportDialog) dom.exportReportDialog.close();
   }, { signal });
@@ -3135,6 +3136,8 @@ function localizeStaticShell() {
     ["#eventsPanel", "aria-label", "Events Sheet"],
     ["#workspaceSearchControls", "aria-label", "Search"],
     ["#mentionPopover", "aria-label", "Character mentions"],
+    [".playbook-scroll-top-button", "title", "Back to top"],
+    [".playbook-scroll-top-button", "aria-label", "Back to top"],
     ["#themeToggle", "title", "Switch theme"]
   ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
 
@@ -9751,6 +9754,7 @@ function handleAction(target) {
   if (action === "create-play-rule") addPlaybookRule(target.dataset.playbookRuleKind);
   if (action === "toggle-playbook-json") togglePlaybookJson();
   if (action === "select-playbook-tab") selectPlaybookTab(target.dataset.playbookTab);
+  if (action === "scroll-playbook-top") scrollPlaybookToTop();
   if (action === "filter-playbook-category") filterPlaybookCategory(target.dataset.playbookCategory);
   if (action === "focus-playbook-json") showPlaybookJsonAtToken(target.dataset.playbookToken);
   if (action === "show-playbook-choice-effect-draft") showPlaybookChoiceEffectDraft(target.dataset.gateId);
@@ -10729,6 +10733,13 @@ function handleWorkspaceSearchKeyDown(event) {
   if (!scope) return;
   event.preventDefault();
   cycleSearchScope(scope);
+  if (typeof target.focus === "function") {
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_error) {
+      target.focus();
+    }
+  }
 }
 
 function handleKeyDown(event) {
@@ -13979,6 +13990,16 @@ function selectPlaybookTab(tab) {
   state.playbookTab = getValidPlaybookTab(tab);
   state.activeFileId = "variables";
   renderPlaybookSurfaces();
+}
+
+function scrollPlaybookToTop() {
+  if (!dom.variablesPanel) return;
+  try {
+    dom.variablesPanel.scrollTo({ top: 0, behavior: "auto" });
+  } catch (error) {
+    // Fallback for embedded WebViews with partial Element.scrollTo support.
+  }
+  dom.variablesPanel.scrollTop = 0;
 }
 
 function togglePlaybookRuleHelp(ruleId) {
@@ -19804,6 +19825,50 @@ function ensureEventDefaults(node, eventColumns = null) {
   });
 }
 
+function setPreviewPanelOpen(open) {
+  if (!dom.root) return;
+  if (open) dom.root.setAttribute("data-play-panel", "open");
+  else dom.root.removeAttribute("data-play-panel");
+  requestAnimationFrame(() => {
+    renderTransform();
+    scheduleCanvasViewportRender();
+  });
+}
+
+function openPreviewPanel() {
+  if (!dom.playDialog) return;
+  setPreviewPanelOpen(true);
+  if (dom.playDialog.open) return;
+  try {
+    if (typeof dom.playDialog.show === "function") dom.playDialog.show();
+    else dom.playDialog.setAttribute("open", "");
+  } catch (error) {
+    dom.playDialog.setAttribute("open", "");
+  }
+}
+
+function handlePreviewPanelClose() {
+  resetPreviewSessionState();
+  setPreviewPanelOpen(false);
+}
+
+function focusCanvasOnPreviewNode(node) {
+  if (!node || !dom.viewport) return;
+  requestAnimationFrame(() => {
+    const current = getNode(node.id);
+    if (!current || state.playNodeId !== current.id) return;
+    state.activeFileId = "adventure";
+    state.selectedNodeId = current.id;
+    state.selectedNodeIds = [];
+    state.selectedLinkId = null;
+    state.characterFocusId = null;
+    renderShellState();
+    renderWorkspaceFile();
+    renderInspector();
+    centerCanvasOnNode(current, state.view.scale || DEFAULT_CANVAS_ZOOM);
+  });
+}
+
 function openPreview() {
   const previewPath = getPreviewPath();
   const entry = getPreviewStartNode(previewPath);
@@ -19822,8 +19887,11 @@ function openPreview() {
   state.playManualActionRunIds = new Set();
   state.playVisitedNodeIds = new Set();
   state.playVisitRecords = [];
+  state.activeFileId = "adventure";
+  openPreviewPanel();
+  renderShellState();
+  renderWorkspaceFile();
   renderPreviewNode(entry.id);
-  dom.playDialog.showModal();
 }
 
 function resetPreviewSessionState() {
@@ -20077,6 +20145,7 @@ function renderPreviewNode(nodeId, options = {}) {
     ${customFields}
     ${debugDetails}
   `;
+  focusCanvasOnPreviewNode(node);
 
   if (dialogTurns.length && dialogTurnIndex < dialogTurns.length - 1) {
     const linePrevButton = dialogTurnIndex > 0
