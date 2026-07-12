@@ -12,7 +12,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 界面支持英文与中文。网页端右下角提供 `EN / 中` 浮动切换按钮；Obsidian 插件设置提供 `语言` 选项，支持跟随 Obsidian 界面语言。
 
-![Narrative Canvas 主画布](main-canvas-zh.png)
+![Narrative Canvas 主画布](assets/screenshots/main-canvas-zh.png)
 
 ### 安全提醒
 
@@ -102,7 +102,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 ### 事件表
 
-![事件表](events-sheet-zh.png)
+![事件表](assets/screenshots/events-sheet-zh.png)
 
 `框架` 节点默认进入 `事件表`。不同 `框架` 类型分属不同表格。仅用于画布归组的 `框架` 类型，可在节点类型编辑器中启用 `Hide frame rows from Events Sheet`。
 
@@ -112,7 +112,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 ### 角色
 
-![角色页面](characters-zh.png)
+![角色页面](assets/screenshots/characters-zh.png)
 
 `角色` 通过 Cast chips 关联到节点：
 
@@ -129,14 +129,14 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 ### 文档
 
-![Twee 模式下的文档编辑器](document-zh.png)
+![Twee 模式下的文档编辑器](assets/screenshots/document-zh.png)
 
 `Document.md` 是面向项目运行时叙事的整页编辑器，手感与 VSCode 原生编辑区一致。顶部标签栏显示文件名、`纯文本` / `Ink` / `Yarn` / `Twee` 格式切换以及实时同步状态；下方是铺满整块面板的等宽编辑区，带随内容同步的行号栏。`Tab` 与 `Shift+Tab` 缩进/取消缩进，且文本不自动换行，脚本的排版与代码编辑器一致。
 
 直接编辑现有叙事内容即可写回项目：项目标题与备注、节点标题与正文、变量、现有选项、条件、效果和跳转会逐字段比较后增量合并，而画布布局及格式无法表达的元数据保持不变。节点、选项和路线的新增或删除仍在画布或检查器中完成；稳定节点 ID 与正文边界标记会阻止编辑中的半成品误改项目结构。切换格式会把同一个项目重新渲染为纯文本（Story Markdown）、Ink、Yarn 或 Twee 3 / SugarCube。
 
 ### 演示设置
-![演示设置](playbook-zh.png)
+![演示设置](assets/screenshots/playbook-zh.png)
 
 `演示设置`（底层文件 `Playbook.json`）的职责如下：
 

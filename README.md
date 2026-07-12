@@ -12,7 +12,7 @@ It is intended for structure planning, branch validation, pitch preparation, and
 
 The interface supports both English and Chinese. The web app has an `EN / 中文` floating language switch in the lower-right corner, and the Obsidian plugin has a `Language` setting that can follow Obsidian’s language.
 
-![Narrative Canvas main canvas](main-canvas.png)
+![Narrative Canvas main canvas](assets/screenshots/main-canvas.png)
 
 ## Safety Notes
 
@@ -103,7 +103,7 @@ Manual Story order is stored in `storyOrder`. `Re-sort by graph` clears manual o
 
 ### Events Sheet
 
-![Events Sheet](events-sheet.png)
+![Events Sheet](assets/screenshots/events-sheet.png)
 
 `Frame` nodes appear in Events Sheet by default. Different frame types are placed in separate tables. Frame types used only for canvas grouping can enable `Hide frame rows from Events Sheet` in the node type editor.
 
@@ -113,7 +113,7 @@ You can rename, hide, or delete columns. Hidden columns are collected in each ta
 
 ### Characters
 
-![Characters page](characters.png)
+![Characters page](assets/screenshots/characters.png)
 
 `Characters` can be linked to nodes using Cast chips:
 
@@ -130,7 +130,7 @@ Use Character focus to highlight related nodes.
 
 ### Document
 
-![Document editor in Twee mode](document.png)
+![Document editor in Twee mode](assets/screenshots/document.png)
 
 `Document.md` is a full-page, VSCode-style editor for the project's runtime narrative. A slim tab strip shows the file name, a `Plain text` / `Ink` / `Yarn` / `Twee` format switch, and the live sync status; below it an edge-to-edge monospace editor with a synced line-number gutter fills the whole pane. `Tab` and `Shift+Tab` indent and outdent, and lines do not soft-wrap, so scripts read the same as in a code editor.
 
@@ -138,7 +138,7 @@ Edit existing narrative content directly and changes sync back to the project: p
 
 ### Playbook
 
-![Playbook settings](playbook.png)
+![Playbook settings](assets/screenshots/playbook.png)
 
 Think of `Playbook.json` in this way:
 
