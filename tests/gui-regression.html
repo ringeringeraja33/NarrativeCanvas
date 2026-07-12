@@ -561,6 +561,7 @@
         const collapsedFrame = doc.querySelector(`.node.frame[data-node-id='${frameId}']`);
         const collapsedHeader = collapsedFrame?.querySelector(".node-header");
         const collapsedBefore = collapsedFrame?.getBoundingClientRect();
+        const collapsedModelBefore = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === frameId);
         const collapsedHeaderRect = collapsedHeader?.getBoundingClientRect();
         dispatchPointerDrag(win, collapsedHeader, viewport, {
           x: collapsedHeaderRect.left + 80,
@@ -571,10 +572,19 @@
         }, 713);
         await wait(120);
         const collapsedAfter = doc.querySelector(`.node.frame[data-node-id='${frameId}']`)?.getBoundingClientRect();
-        assert(`${label}: collapsed frame header drag moves frame`, collapsedBefore && collapsedAfter && collapsedAfter.left > collapsedBefore.left + 20 && collapsedAfter.top > collapsedBefore.top + 8, collapsedBefore && collapsedAfter ? `before=${rectDetail(collapsedBefore)} after=${rectDetail(collapsedAfter)}` : "");
+        const collapsedModelAfter = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === frameId);
+        assert(
+          `${label}: collapsed frame header drag moves frame`,
+          collapsedModelBefore && collapsedModelAfter && collapsedModelAfter.x > collapsedModelBefore.x + 20 && collapsedModelAfter.y > collapsedModelBefore.y + 8,
+          collapsedModelBefore && collapsedModelAfter
+            ? `model=${collapsedModelBefore.x},${collapsedModelBefore.y} -> ${collapsedModelAfter.x},${collapsedModelAfter.y}; screen=${collapsedBefore ? rectDetail(collapsedBefore) : "none"} -> ${collapsedAfter ? rectDetail(collapsedAfter) : "none"}`
+            : ""
+        );
         click(doc.querySelector(`.node.frame[data-node-id='${frameId}'] [data-action='toggle-frame-collapse']`));
         await waitFor(`${label}: frame expands after drag`, () => !doc.querySelector(`.node.frame.collapsed[data-node-id='${frameId}']`));
+        await wait(100);
         if (doc.querySelector("#genericConfirmDialog")?.open) click(doc.querySelector("#genericConfirmDialog .confirm-cancel"));
+        await waitFor(`${label}: frame drag confirmation is closed`, () => !doc.querySelector("#genericConfirmDialog")?.open);
       }
 
       async function assertEventsInteractions(label, win, doc) {

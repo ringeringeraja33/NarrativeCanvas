@@ -4,7 +4,7 @@ English version: [README.md](README.md)
 
 Changelog and release notes: [GitHub Releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
-<video src="https://github.com/ringeringeraja33/NarrativeCanvas/raw/main/assets/videos/runtime.mov" controls width="800" muted></video>
+<video src="https://github.com/ringeringeraja33/NarrativeCanvas/raw/main/assets/videos/runtime.mp4" controls width="800" muted></video>
 
 Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它将剧情段落、角色对白、选择分支、条件判断、变量变化、路由、角色和笔记组织为可连接、可预览的互动流程，适用于游戏、互动小说、分支剧本、任务链和其他非线性叙事结构。
 
@@ -16,7 +16,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 ### 安全提醒
 
-- `Playbook.json` 是声明式配置。它控制 `演示` 的标题、正文、选项按钮、简单条件和变量写入；不执行任意 JavaScript。
+- `演示设置`（底层文件 `Playbook.json`）是声明式配置。它控制 `演示` 的标题、正文、选项按钮、简单条件和变量写入；不执行任意 JavaScript。
 - `隐藏` 仅隐藏 `事件表` 列并保留数据。`删除` 会从 schema 移除列，并清除显示在 `事件表` 中的 `框架` 节点对应字段值。
 - 删除节点后，相关内容进入运行路径之外的归档数据。重要项目仍建议保留版本。
 - `保存`：保存当前项目。网页端写入浏览器 `localStorage`；Obsidian 端写入当前库里的 `.ncanvas` 项目文件。
@@ -125,10 +125,18 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 `角色聚焦` 高亮相关节点。
 
-### 演示设置
-![Playbook 设置](assets/screenshots/playbook-zh.png)
+### 文档
 
-`Playbook.json` 的职责如下：
+![Twee 模式下的文档编辑器](assets/screenshots/document-zh.png)
+
+`Document.md` 是面向项目运行时叙事的整页编辑器，手感与 VSCode 原生编辑区一致。顶部标签栏显示文件名、`纯文本` / `Ink` / `Yarn` / `Twee` 格式切换以及实时同步状态；下方是铺满整块面板的等宽编辑区，带随内容同步的行号栏。`Tab` 与 `Shift+Tab` 缩进/取消缩进，且文本不自动换行，脚本的排版与代码编辑器一致。
+
+直接编辑现有叙事内容即可写回项目：项目标题与备注、节点标题与正文、变量、现有选项、条件、效果和跳转会逐字段比较后增量合并，而画布布局及格式无法表达的元数据保持不变。节点、选项和路线的新增或删除仍在画布或检查器中完成；稳定节点 ID 与正文边界标记会阻止编辑中的半成品误改项目结构。切换格式会把同一个项目重新渲染为纯文本（Story Markdown）、Ink、Yarn 或 Twee 3 / SugarCube。
+
+### 演示设置
+![演示设置](assets/screenshots/playbook-zh.png)
+
+`演示设置`（底层文件 `Playbook.json`）的职责如下：
 
 **`节点库` 定义节点字段，节点 `检查器` 填写字段值，`演示设置` 定义 `演示` 预览如何读取这些字段。**
 
@@ -162,4 +170,4 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 - **Ink**：导出 `.ink` knot、`VAR` 声明、可重复 `+` 选项、divert 和 `~` 赋值。
 - **Twee**：导出给 Twine / Tweego 使用的 Twee 3 `.twee` passage，使用 SugarCube `StoryData`、`StoryInit`、条件链接、`<<goto>>` 和 `<<set>>`。
 
-这些导出共用同一套节点 slug 和变量名映射。复杂变量、Playbook actions、无法直接映射到目标格式的效果操作不会在导出中丢弃：执行 Story MD、Runtime JSON、Yarn、Ink、Twee 或 `导出全部` 后，界面打开导出报告弹窗，显示警告和被转换过的变量名映射。Runtime JSON 保留完整报告，供下游工具读取。
+这些导出共用同一套节点 slug 和变量名映射。复杂变量、演示设置动作、无法直接映射到目标格式的效果操作不会在导出中丢弃：执行 Story MD、Runtime JSON、Yarn、Ink、Twee 或 `导出全部` 后，界面打开导出报告弹窗，显示警告和被转换过的变量名映射。Runtime JSON 保留完整报告，供下游工具读取。

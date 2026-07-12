@@ -4,7 +4,7 @@ Changelog and release notes: [GitHub Releases](https://github.com/ringeringeraja
 
 [中文版本](README-zh.md)
 
-<video src="https://github.com/ringeringeraja33/NarrativeCanvas/raw/main/assets/videos/runtime.mov" controls width="800" muted></video>
+<video src="https://github.com/ringeringeraja33/NarrativeCanvas/raw/main/assets/videos/runtime.mp4" controls width="800" muted></video>
 
 Narrative Canvas is a node-based workspace for building complex interactive narratives. It unifies beats, dialogue, branching choices, conditions, variable updates, routing, cast and notes into a single connected structure that can be previewed and edited directly.
 
@@ -125,6 +125,14 @@ You can rename, hide, or delete columns. Hidden columns are collected in each ta
 You can also create references in node text with `@Character Name`. Character pages show backlinks in story order, including speaker scenes, present scenes, mentions, ownership, and frame scenes.
 
 Use Character focus to highlight related nodes.
+
+### Document
+
+![Document editor in Twee mode](assets/screenshots/document.png)
+
+`Document.md` is a full-page, VSCode-style editor for the project's runtime narrative. A slim tab strip shows the file name, a `Plain text` / `Ink` / `Yarn` / `Twee` format switch, and the live sync status; below it an edge-to-edge monospace editor with a synced line-number gutter fills the whole pane. `Tab` and `Shift+Tab` indent and outdent, and lines do not soft-wrap, so scripts read the same as in a code editor.
+
+Edit existing narrative content directly and changes sync back to the project: project title and notes, node titles and bodies, variables, existing choices, conditions, effects, and routes are compared field by field before they are merged. Canvas layout and metadata the format cannot express stay unchanged. Add or delete nodes, choices, and routes on the canvas or in the inspector; stable node IDs and body-boundary markers keep incomplete source edits from changing structure. Switching formats re-renders the same project as Plain text (Story Markdown), Ink, Yarn, or Twee 3 / SugarCube.
 
 ### Playbook
 

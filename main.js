@@ -1331,7 +1331,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003cmeta charset=\"utf-8\"\u003e",
   "    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\u003e",
   "    \u003ctitle\u003eNarrative Canvas\u003c/title\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260706-1.1.2\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260711c-1.2.0\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -1366,6 +1366,7 @@ const CANVAS_INDEX_HTML = [
   "            \u003cbutton class=\"small-button\" data-action=\"open-project-file\" type=\"button\"\u003eOpen\u003c/button\u003e",
   "            \u003cbutton class=\"small-button\" data-action=\"reload-project-file\" type=\"button\"\u003eReload\u003c/button\u003e",
   "            \u003cbutton class=\"small-button\" data-action=\"clear-browser-storage\" data-web-only type=\"button\"\u003eClear storage\u003c/button\u003e",
+  "            \u003cbutton class=\"small-button project-file-sample-button\" data-action=\"open-sample-project\" data-web-only type=\"button\"\u003eOpen sample file\u003c/button\u003e",
   "          \u003c/div\u003e",
   "        \u003c/section\u003e",
   "",
@@ -1382,6 +1383,10 @@ const CANVAS_INDEX_HTML = [
   "          \u003cbutton class=\"nc-file-item\" data-file-id=\"characters\"\u003e",
   "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
   "            \u003cspan class=\"nc-file-item-label\"\u003eCharacters.md\u003c/span\u003e",
+  "          \u003c/button\u003e",
+  "          \u003cbutton class=\"nc-file-item\" data-file-id=\"document\"\u003e",
+  "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
+  "            \u003cspan class=\"nc-file-item-label\"\u003eDocument.md\u003c/span\u003e",
   "          \u003c/button\u003e",
   "          \u003cbutton class=\"nc-file-item\" data-file-id=\"variables\"\u003e",
   "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
@@ -1415,6 +1420,7 @@ const CANVAS_INDEX_HTML = [
   "            \u003cstrong id=\"activeFileTab\"\u003eNarrative.canvas\u003c/strong\u003e",
   "          \u003c/div\u003e",
   "          \u003cspan class=\"project-history\" role=\"group\" aria-label=\"History\"\u003e",
+  "            \u003cbutton id=\"fullscreenButton\" class=\"icon-button history-button immersive-toggle-button\" data-action=\"toggle-immersive-fullscreen\" type=\"button\" title=\"Enter immersive fullscreen\" aria-label=\"Enter immersive fullscreen\" aria-pressed=\"false\"\u003e\u003csvg class=\"history-icon immersive-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"\u003e\u003cpath d=\"M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
   "            \u003cbutton id=\"undoButton\" class=\"icon-button history-button\" data-action=\"undo\" type=\"button\" title=\"Undo (Ctrl+Z)\" aria-label=\"Undo\" disabled\u003e↶\u003c/button\u003e",
   "            \u003cbutton id=\"redoButton\" class=\"icon-button history-button\" data-action=\"redo\" type=\"button\" title=\"Redo (Ctrl+Shift+Z or Ctrl+Y)\" aria-label=\"Redo\" disabled\u003e↷\u003c/button\u003e",
   "          \u003c/span\u003e",
@@ -1426,6 +1432,11 @@ const CANVAS_INDEX_HTML = [
   "            \u003cbutton class=\"toolbar-button\" data-action=\"zoom-in\" data-files=\"adventure\" title=\"Zoom in\"\u003e+\u003c/button\u003e",
   "            \u003cbutton class=\"toolbar-button\" data-action=\"center-view\" data-files=\"adventure\" title=\"Center canvas\"\u003eCenter\u003c/button\u003e",
   "            \u003cbutton class=\"toolbar-button primary\" data-action=\"play\" data-files=\"adventure\" title=\"Play from entry\"\u003ePlay\u003c/button\u003e",
+  "          \u003c/div\u003e",
+  "          \u003cdiv id=\"frameCanvasScope\" class=\"frame-canvas-scope\" hidden\u003e",
+  "            \u003cspan class=\"frame-canvas-label\"\u003eFrame canvas\u003c/span\u003e",
+  "            \u003cstrong id=\"frameCanvasTitle\"\u003e\u003c/strong\u003e",
+  "            \u003cbutton id=\"frameCanvasExitButton\" class=\"toolbar-button\" data-action=\"exit-frame-canvas\" type=\"button\" title=\"Exit frame canvas\" aria-label=\"Exit frame canvas\"\u003eExit\u003c/button\u003e",
   "          \u003c/div\u003e",
   "          \u003cdiv class=\"toolbar-group toolbar-group-right\" data-files=\"adventure\"\u003e",
   "            \u003cspan class=\"export-image-controls\" role=\"group\" aria-label=\"Image export\"\u003e",
@@ -1461,6 +1472,7 @@ const CANVAS_INDEX_HTML = [
   "        \u003csection id=\"charactersPanel\" class=\"canvas-workspace-view document-panel\" aria-label=\"Characters\"\u003e\u003c/section\u003e",
   "        \u003csection id=\"variablesPanel\" class=\"canvas-workspace-view document-panel\" aria-label=\"Variables\"\u003e\u003c/section\u003e",
   "        \u003csection id=\"eventsPanel\" class=\"canvas-workspace-view document-panel event-sheet-panel\" aria-label=\"Events Sheet\"\u003e\u003c/section\u003e",
+  "        \u003csection id=\"documentPanel\" class=\"canvas-workspace-view document-panel document-source-panel\" aria-label=\"Document\"\u003e\u003c/section\u003e",
   "",
   "        \u003cfooter class=\"status-bar\"\u003e",
   "          \u003cdiv id=\"statusText\"\u003eReady\u003c/div\u003e",
@@ -1481,12 +1493,21 @@ const CANVAS_INDEX_HTML = [
   "              Find",
   "              \u003cinput id=\"playbookSearchInput\" type=\"search\" data-playbook-search placeholder=\"Find in Playbook\" spellcheck=\"false\"\u003e",
   "            \u003c/label\u003e",
+  "            \u003clabel class=\"workspace-search-box document-search-box\" data-search-scope=\"document\" hidden\u003e",
+  "              Find",
+  "              \u003cinput id=\"documentSearchInput\" type=\"search\" data-document-search placeholder=\"Find in document\" spellcheck=\"false\"\u003e",
+  "            \u003c/label\u003e",
   "            \u003cdiv id=\"matchCount\"\u003e0 / 0\u003c/div\u003e",
   "          \u003c/div\u003e",
   "        \u003c/footer\u003e",
-  "        \u003cbutton class=\"playbook-scroll-top-button\" type=\"button\" data-action=\"scroll-playbook-top\" title=\"Back to top\" aria-label=\"Back to top\"\u003e",
-  "          \u003cspan aria-hidden=\"true\"\u003e↑\u003c/span\u003e",
-  "        \u003c/button\u003e",
+  "        \u003cdiv class=\"workspace-floating-controls\"\u003e",
+  "          \u003cbutton class=\"workspace-toc-button\" type=\"button\" data-action=\"toggle-document-toc\" aria-pressed=\"false\" title=\"Toggle outline\" aria-label=\"Toggle outline\"\u003e",
+  "            \u003cspan aria-hidden=\"true\"\u003e☰\u003c/span\u003e",
+  "          \u003c/button\u003e",
+  "          \u003cbutton class=\"workspace-scroll-top-button playbook-scroll-top-button\" type=\"button\" data-action=\"scroll-workspace-top\" title=\"Back to top\" aria-label=\"Back to top\"\u003e",
+  "            \u003cspan aria-hidden=\"true\"\u003e↑\u003c/span\u003e",
+  "          \u003c/button\u003e",
+  "        \u003c/div\u003e",
   "      \u003c/main\u003e",
   "",
   "      \u003cdialog id=\"playDialog\" class=\"play-dialog\"\u003e",
@@ -1496,10 +1517,15 @@ const CANVAS_INDEX_HTML = [
   "              \u003cspan class=\"pane-kicker\"\u003eRuntime\u003c/span\u003e",
   "              \u003ch2 id=\"playTitle\"\u003ePreview\u003c/h2\u003e",
   "            \u003c/div\u003e",
-  "            \u003cbutton class=\"icon-button\" value=\"close\" aria-label=\"Close preview\"\u003ex\u003c/button\u003e",
+  "            \u003cdiv class=\"play-header-actions\"\u003e",
+  "              \u003cbutton class=\"icon-button play-float-button\" type=\"button\" data-action=\"toggle-play-float\" aria-pressed=\"false\" title=\"Float preview to center\" aria-label=\"Float preview to center\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"M17 17 7 7M7 7v7M7 7h7\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "              \u003cbutton class=\"icon-button\" value=\"close\" aria-label=\"Close preview\"\u003ex\u003c/button\u003e",
+  "            \u003c/div\u003e",
   "          \u003c/header\u003e",
-  "          \u003carticle id=\"playBody\" class=\"play-body\"\u003e\u003c/article\u003e",
-  "          \u003cfooter id=\"playActions\" class=\"play-actions\"\u003e\u003c/footer\u003e",
+  "          \u003cdiv class=\"play-scroll\"\u003e",
+  "            \u003carticle id=\"playBody\" class=\"play-body\"\u003e\u003c/article\u003e",
+  "            \u003cfooter id=\"playActions\" class=\"play-actions\"\u003e\u003c/footer\u003e",
+  "          \u003c/div\u003e",
   "        \u003c/form\u003e",
   "      \u003c/dialog\u003e",
   "",
@@ -1519,31 +1545,59 @@ const CANVAS_INDEX_HTML = [
   "        \u003c/header\u003e",
   "",
   "        \u003cdiv class=\"inspector-tabs\"\u003e",
-  "          \u003cbutton class=\"inspector-tab active\" data-panel=\"project\"\u003eProject\u003c/button\u003e",
-  "          \u003cbutton class=\"inspector-tab\" data-panel=\"node\"\u003eNode\u003c/button\u003e",
-  "          \u003cbutton class=\"inspector-tab\" data-panel=\"story\"\u003eStory\u003c/button\u003e",
+  "          \u003cdiv class=\"inspector-tab-group\"\u003e",
+  "            \u003cbutton class=\"inspector-tab active\" data-panel=\"project\"\u003eProject\u003c/button\u003e",
+  "            \u003cbutton class=\"inspector-float-button\" data-action=\"float-inspector-panel\" data-float-panel=\"project\" type=\"button\" title=\"Open Project in center\" aria-label=\"Open Project in center\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"M17 17 7 7M7 7v7M7 7h7\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "          \u003c/div\u003e",
+  "          \u003cdiv class=\"inspector-tab-group\"\u003e",
+  "            \u003cbutton class=\"inspector-tab\" data-panel=\"node\"\u003eNode\u003c/button\u003e",
+  "            \u003cbutton class=\"inspector-float-button\" data-action=\"float-inspector-panel\" data-float-panel=\"node\" type=\"button\" title=\"Open Node in center\" aria-label=\"Open Node in center\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"M17 17 7 7M7 7v7M7 7h7\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "          \u003c/div\u003e",
+  "          \u003cdiv class=\"inspector-tab-group\"\u003e",
+  "            \u003cbutton class=\"inspector-tab\" data-panel=\"story\"\u003eStory\u003c/button\u003e",
+  "            \u003cbutton class=\"inspector-float-button\" data-action=\"float-inspector-panel\" data-float-panel=\"story\" type=\"button\" title=\"Open Story in center\" aria-label=\"Open Story in center\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"M17 17 7 7M7 7v7M7 7h7\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "          \u003c/div\u003e",
   "        \u003c/div\u003e",
   "",
-  "        \u003csection id=\"projectPanel\" class=\"inspector-panel active\"\u003e\u003c/section\u003e",
-  "        \u003csection id=\"nodePanel\" class=\"inspector-panel\"\u003e\u003c/section\u003e",
-  "        \u003csection id=\"storyPanel\" class=\"inspector-panel\"\u003e\u003c/section\u003e",
+  "        \u003cdiv id=\"inspectorPanels\" class=\"inspector-panels\"\u003e",
+  "          \u003csection id=\"projectPanel\" class=\"inspector-panel active\"\u003e\u003c/section\u003e",
+  "          \u003csection id=\"nodePanel\" class=\"inspector-panel\"\u003e\u003c/section\u003e",
+  "          \u003csection id=\"storyPanel\" class=\"inspector-panel\"\u003e\u003c/section\u003e",
+  "        \u003c/div\u003e",
   "      \u003c/aside\u003e",
+  "",
+  "      \u003cdiv id=\"inspectorFloatOverlay\" class=\"inspector-float-overlay\" hidden\u003e",
+  "        \u003csection class=\"inspector-float-window\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"inspectorFloatTitle\"\u003e",
+  "          \u003cheader class=\"inspector-float-header\"\u003e",
+  "            \u003cdiv\u003e",
+  "              \u003cspan class=\"pane-kicker\"\u003eInspector\u003c/span\u003e",
+  "              \u003ch2 id=\"inspectorFloatTitle\"\u003eProject\u003c/h2\u003e",
+  "            \u003c/div\u003e",
+  "            \u003cbutton class=\"icon-button\" data-action=\"close-floating-inspector\" type=\"button\" title=\"Close centered inspector\" aria-label=\"Close centered inspector\"\u003ex\u003c/button\u003e",
+  "          \u003c/header\u003e",
+  "          \u003cdiv id=\"inspectorFloatBody\" class=\"inspector-float-body\"\u003e\u003c/div\u003e",
+  "        \u003c/section\u003e",
+  "      \u003c/div\u003e",
   "",
   "      \u003cbutton id=\"languageToggle\" class=\"language-toggle-button\" data-web-only data-action=\"toggle-language\" type=\"button\" title=\"Switch language\" aria-label=\"Switch language\"\u003e",
   "        \u003cspan class=\"language-toggle-option\" data-lang=\"en\"\u003eEN\u003c/span\u003e",
   "        \u003cspan class=\"language-toggle-divider\" aria-hidden=\"true\"\u003e/\u003c/span\u003e",
   "        \u003cspan class=\"language-toggle-option\" data-lang=\"zh\"\u003e中\u003c/span\u003e",
   "      \u003c/button\u003e",
-  "    \u003c/div\u003e",
   "",
-  "    \u003cdiv id=\"mentionPopover\" class=\"mention-popover\" hidden role=\"listbox\" aria-label=\"Character mentions\"\u003e\u003c/div\u003e",
+  "      \u003c!-- Canvas overlays live inside .app-shell so they render in immersive/native fullscreen,",
+  "           which fullscreens .app-shell; a sibling here would be hidden by the browser. --\u003e",
+  "      \u003cdiv id=\"mentionPopover\" class=\"mention-popover\" hidden role=\"listbox\" aria-label=\"Character mentions\"\u003e\u003c/div\u003e",
   "",
-  "    \u003cdiv id=\"nodeContextMenu\" class=\"node-context-menu\" hidden\u003e",
-  "      \u003cbutton data-layer-action=\"front\"\u003eBring to front\u003c/button\u003e",
-  "      \u003cbutton data-layer-action=\"forward\"\u003eBring forward\u003c/button\u003e",
-  "      \u003cbutton data-layer-action=\"backward\"\u003eSend backward\u003c/button\u003e",
-  "      \u003cbutton data-layer-action=\"back\"\u003eSend to back\u003c/button\u003e",
-  "      \u003cbutton class=\"context-menu-danger\" data-action=\"delete-node\"\u003eDelete node\u003c/button\u003e",
+  "      \u003cdiv id=\"nodeContextMenu\" class=\"node-context-menu\" hidden role=\"menu\" aria-label=\"Node layer menu\"\u003e",
+  "        \u003cbutton data-layer-action=\"front\"\u003eBring to front\u003c/button\u003e",
+  "        \u003cbutton data-layer-action=\"forward\"\u003eBring forward\u003c/button\u003e",
+  "        \u003cbutton data-layer-action=\"backward\"\u003eSend backward\u003c/button\u003e",
+  "        \u003cbutton data-layer-action=\"back\"\u003eSend to back\u003c/button\u003e",
+  "        \u003cbutton class=\"context-menu-danger\" data-action=\"delete-node\"\u003eDelete node\u003c/button\u003e",
+  "      \u003c/div\u003e",
+  "",
+  "      \u003cdiv id=\"canvasRadialMenu\" class=\"canvas-radial-menu\" role=\"menu\" aria-label=\"Canvas quick menu\" hidden\u003e\u003c/div\u003e",
   "    \u003c/div\u003e",
   "",
   "    \u003cdialog id=\"exportReportDialog\" class=\"nc-notice-dialog export-report-dialog\" aria-label=\"Export report\"\u003e",
@@ -1753,7 +1807,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=20260706-1.1.2\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=20260711c-1.2.0\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -1763,6 +1817,8 @@ function installNarrativeCanvasApp() {
   const BOARD_WIDTH = 4000;
   const BOARD_HEIGHT = 2600;
   const CANVAS_VIEW_PADDING = 48;
+  const CANVAS_FREE_EXPLORE_PADDING = 1200;
+  const CANVAS_PAN_EDGE_PADDING = 320;
   const CANVAS_MIN_ZOOM = 0.025;
   const CANVAS_MAX_ZOOM = 3;
   const DEFAULT_CANVAS_ZOOM = 0.5;
@@ -2127,7 +2183,7 @@ function installNarrativeCanvasApp() {
     const zh = lang === "zh";
     const text = zh ? {
       title: "你的第一个 Narrative Canvas",
-      notes: "内置上手示例。点击 Play 后从入口节点开始，依次检查节点、连线、选项、条件、效果、对话、角色、事件表和 Playbook。示例面向第一次使用编辑工具的文字工作者，重点说明正文、分支和备注的组织方式。",
+      notes: "内置上手示例。点击“演示”后从入口节点开始，依次检查节点、连线、选项、条件、效果、对话、角色、事件表、文档和演示设置。文档把整份运行时叙事显示为可编辑的纯文本 / Ink / Yarn / Twee，并提供语法高亮、目录和查找；修改会增量写回项目。示例面向第一次使用编辑工具的文字工作者，重点说明正文、分支、状态和备注的组织方式。",
       protagonist: "你",
       route: "overview",
       projectFile: "你的第一个画布",
@@ -2156,15 +2212,15 @@ function installNarrativeCanvasApp() {
         { id: "a14", trigger: "onVisit", target: "Clue", op: "add", category: "Variable", key: "type_feature_card_visits", value: "1" },
         { id: "a15", trigger: "onVisit", target: "Dialog", op: "set", category: "Variable", key: "type_dialog_seen", value: "true" },
         { id: "a16", trigger: "onVisit", target: "Content", op: "add", category: "Variable", key: "type_content_visits", value: "1" },
-        { id: "a1", trigger: "onVisit", target: "Playbook 是什么", op: "set", category: "Variable", key: "script_builder_seen", value: "true" },
+        { id: "a1", trigger: "onVisit", target: "演示设置是什么", op: "set", category: "Variable", key: "script_builder_seen", value: "true" },
         { id: "a2", trigger: "onVisit", target: "自定义节点和变量", op: "append", category: "Variable", key: "walkthrough_notes", value: "已读: {title}" },
         { id: "a3", trigger: "onVisit", target: "效果改变了变量", op: "set", category: "Variable", key: "active_feature", value: "{title}" },
-        { id: "a6", trigger: "onVisit", target: "Play 预览", op: "set", category: "Variable", key: "preview_checked", value: "true" },
+        { id: "a6", trigger: "onVisit", target: "演示预览", op: "set", category: "Variable", key: "preview_checked", value: "true" },
         { id: "a7", trigger: "onVisit", target: "你的工作区", op: "set", category: "Variable", key: "current_workspace", value: "{title}" },
         { id: "a9", trigger: "onVisit", target: "整理前的复核", op: "set", category: "Variable", key: "revision_hint", value: "先检查变量引用" },
         { id: "a10", trigger: "onVisit", target: "操作便签", op: "append", category: "Variable", key: "walkthrough_notes", value: "便签提醒: {title}" },
         { id: "a11", trigger: "onVisit", target: "完成练习", op: "set", category: "Variable", key: "sample_complete", value: "true" },
-        { id: "a12", trigger: "manual", target: "Playbook 是什么", op: "toggle", category: "Variable", key: "playbook_seen", value: "" }
+        { id: "a12", trigger: "manual", target: "演示设置是什么", op: "toggle", category: "Variable", key: "playbook_seen", value: "" }
       ],
       sheetLabels: {
         act: "幕",
@@ -2213,52 +2269,52 @@ function installNarrativeCanvasApp() {
         { id: "c1", name: "向导", role: "解说", voice: "在对话节点里说明下一步操作。", notes: "演示对话节点的发言者，以及 Speaker / Present 角色关系。" },
         { id: "c2", name: "角色甲", role: "示例角色", voice: "用于演示角色反链。", notes: "演示角色名与对话发言者的对应关系。" },
         { id: "c3", name: "角色乙", role: "示例角色", voice: "用于演示被提及关系。", notes: "演示 Mentioned 角色关系。" },
-        { id: "c4", name: "校对标记", role: "复核提示", voice: "提示变量和条件的读写位置。", notes: "对应校验、Play 预览和状态复核。" },
+        { id: "c4", name: "校对标记", role: "复核提示", voice: "提示变量和条件的读写位置。", notes: "对应校验、演示预览和状态复核。" },
         { id: "c5", name: "读者", role: "未来的读者", voice: "最终会读到这个故事的人。", notes: "演示“被提及”这一角色关系。" }
       ],
       nodes: {
-        n0: { title: "从这里开始", body: "你第一次打开 Narrative Canvas。这是入口节点。点击 Play 后，演示从这里开始。画布上的每个方块都是节点；连线决定阅读顺序。按连线阅读，每个节点会说明用途和操作。", cast: [{ characterId: "c0", role: "POV" }] },
-        lf1: { title: "你的工作区", body: "这是场景框（位置框）。可用于圈定相关节点，整理画布。场景框不会进入事件表，只用于画布分区。", customFields: { region: "画布分区", mood: "先搭结构，正文随后" } },
+        n0: { title: "从这里开始", body: "你第一次打开 Narrative Canvas。这是入口节点。点击“演示”后，预览从这里开始；演示走到哪个节点，右侧检查器就会跟随到对应节点。画布上的每个方块都是节点，连线决定阅读顺序。", cast: [{ characterId: "c0", role: "POV" }] },
+        lf1: { title: "你的工作区", body: "这是场景框（位置框）。可用于圈定相关节点，整理画布。场景框不会进入事件表，只用于画布分区。点击框架标题栏的框架画布按钮（▣），可把该框架作为聚焦画布单独打开，只显示并编辑框内节点。", customFields: { region: "画布分区", mood: "先搭结构，正文随后" } },
         e1: { title: "第一章：节点和连线", body: "这是会进入事件表的章节框。把同一段内容的节点放入框内，事件表会按幕、章、节拍、地点、状态等字段列出它们。", beatList: "入口 / 自定义节点 / 第一个选择", eventType: "上手导览", eventDescription: "认识内容节点、自定义节点类型和选择分支。", location: "画布工作区", timeWeather: "上手阶段", questEpisode: "导览-01", status: "可浏览" },
         n1: { title: "内容节点", body: "这是常用内容节点。可用于正文、场景说明或设计笔记。连线决定默认阅读顺序；节点标题用于搜索和跳转。", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
-        n2: { title: "自定义节点和变量", body: "这是自定义节点类型。可在左侧节点库新建类型并添加字段；这些字段会出现在事件表中。正文中的花括号会显示变量值，例如项目名「{project_file}」、当前功能「{active_feature}」。", customFields: { evidence: "变量 / 模板 / 自定义字段", owner: "Playbook", outcome: "花括号在正文里读取变量" }, cast: [{ characterId: "c4", role: "Owner" }] },
-        n3: { title: "Playbook 是什么", body: "Playbook 是本项目的控制台：变量定义、节点逻辑、变量动作和演示规则都在这里。脚本构建可批量编辑每个节点的条件、效果和路线，和右侧节点检查器显示的是同一份数据。", customFields: { recorder: "脚本构建", reliability: "与节点检查器同步" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
-        n4: { title: "选择节点", body: "这是选择节点。可添加多个选项；为选项设置可用条件；为选项设置选择后效果。条件成立时选项可用；点击选项后，效果会修改变量。下面三个选项分别演示这些功能。", choices: ["① 一个始终可用的选项", "② 一个会改变变量的选项", "③ 一个有前置条件的选项"], choiceOptions: [
-          { id: "opt_map_story", label: "① 一个始终可用的选项", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "map_story" }] },
-          { id: "opt_write_dialog", label: "② 一个会改变变量的选项", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
-          { id: "opt_open_playbook", label: "③ 一个有前置条件的选项", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
+        n2: { title: "自定义节点和变量", body: "这是自定义节点类型。可在左侧节点库新建类型并添加字段；字段会出现在节点检查器和对应事件表列中。正文中的花括号会显示变量值，例如项目名「{project_file}」、当前功能「{active_feature}」。", customFields: { evidence: "变量 / 模板 / 自定义字段", owner: "演示设置", outcome: "花括号在正文里读取变量" }, cast: [{ characterId: "c4", role: "Owner" }] },
+        n3: { title: "演示设置是什么", body: "演示设置管理运行时变量、脚本构建、选项逻辑、变量动作、演示规则和校验。脚本构建与右侧节点检查器编辑的是同一份节点条件、效果和路线；高级 JSON 用于精确检查底层配置。文档（Document）把同一份有效叙事显示为纯文本、Ink、Yarn 或 Twee，可直接编辑并增量写回项目。", customFields: { recorder: "脚本构建", reliability: "与节点检查器和文档同步" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
+        n4: { title: "选择节点", body: "这是选择节点。可添加多个选项，为每个选项设置可用条件和选择后效果。卡片会自动给选项编号，无需把序号写进选项文字；点击选项后，效果会修改变量。", choices: ["一个始终可用的选项", "一个会改变变量的选项", "一个有前置条件的选项"], choiceOptions: [
+          { id: "opt_map_story", label: "一个始终可用的选项", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "map_story" }] },
+          { id: "opt_write_dialog", label: "一个会改变变量的选项", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
+          { id: "opt_open_playbook", label: "一个有前置条件的选项", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
         n5: { title: "效果改变了变量", body: "所选选项已执行效果，workflow_progress 变为第 {workflow_progress} 步。后续节点和选项可以读取该变量，决定是否出现。", variable: "workflow_progress", value: "1", cast: [{ characterId: "c0", role: "POV" }] },
         n6: { title: "对话节点", body: "这是对话节点。可记录多轮发言，每轮包含说话者和台词。说话者与角色同名时，角色页会把该场景归入对应角色。", turns: [{ speaker: "向导", line: "在对话节点里，每一行就是一次发言。" }, { speaker: "角色甲", line: "说话者使用角色名，角色页会统计每个角色出现的场景。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
-        e2: { title: "第二章：条件和效果", body: "这一段说明条件和效果的配合方式：选项用「选择后效果」改变变量，节点用「条件要求」决定能否通过。", beatList: "选项效果 / 节点效果 / 变量动作", eventType: "状态逻辑", eventDescription: "选项、节点和变量动作都能写状态；校验页汇总每个变量的写入位置和读取位置。", location: "Playbook", timeWeather: "梳理逻辑", questEpisode: "导览-02", status: "进行中" },
+        e2: { title: "第二章：条件和效果", body: "这一段说明条件和效果的配合方式：选项用「选择后效果」改变变量，节点用「条件要求」决定能否通过。", beatList: "选项效果 / 节点效果 / 变量动作", eventType: "状态逻辑", eventDescription: "选项、节点和变量动作都能写状态；校验页汇总每个变量的写入位置和读取位置。", location: "演示设置", timeWeather: "梳理逻辑", questEpisode: "导览-02", status: "进行中" },
         cf1: { title: "对话框", body: "这是对话框（会话框）。可用于圈定一组对话或状态说明节点；折叠后仍保留为画布结构。", customFields: { participants: "向导 / 角色甲 / 校对标记", summary: "变量确定后，检查每条路线在预览中是否可达。" }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
-        n7: { title: "状态写在哪里", body: "状态可写在三个位置：① 选项的「选择后效果」，只在选择该选项时触发；② 节点的「效果」，进入节点时触发；③ Playbook 的「变量动作」，用于跨节点、手动或全局写入。", choices: ["① 写在选项效果里", "② 写在节点效果里", "③ 写在变量动作里"], choiceOptions: [
-          { id: "opt_choice_effects", label: "① 写在选项效果里", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_node_effects", label: "② 写在节点效果里", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
-          { id: "opt_action_rules", label: "③ 写在变量动作里", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
+        n7: { title: "状态写在哪里", body: "状态可写在三个位置：选项的「选择后效果」只在选择该选项时触发；节点的「效果」在进入节点时触发；演示设置中的「变量动作」用于手动、导入或节点行之外的状态写入。", choices: ["写在选项效果里", "写在节点效果里", "写在变量动作里"], choiceOptions: [
+          { id: "opt_choice_effects", label: "写在选项效果里", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_node_effects", label: "写在节点效果里", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
+          { id: "opt_action_rules", label: "写在变量动作里", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
         n8: { title: "变量命名", body: "状态键建议使用小写英文下划线，例如 data_integrity。命名保持一致后，条件、效果、文本模板和校验页会更容易对应。", customFields: { evidence: "状态键命名", owner: "状态逻辑", outcome: "统一条件和效果里的变量名" }, cast: [{ characterId: "c4", role: "Owner" }] },
         n9: { title: "角色和反链", body: "记录节点可保存来源、备注和相关角色。角色页按出场顺序列出每个角色的反链，便于定位角色出现位置。", turns: [{ speaker: "校对标记", line: "请确认每个变量的写入位置和读取位置。" }, { speaker: "角色乙", line: "角色名一致时，角色页会归并相关节点。" }], customFields: { recorder: "校对标记", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Speaker" }, { characterId: "c3", role: "Speaker" }, { characterId: "c0", role: "POV" }] },
         n10: { title: "条件门（节点要求）", body: "section_notes_ready === true || data_integrity >= 2", condition: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
-        e3: { title: "第三章：整理和复核", body: "这一段用于复核章节内容。先确认变量、条件和文本模板，再整理事件表字段；字段记录状态、风险和说明对象。", beatList: "状态索引 / 校验 / Play 预览", eventType: "内容复核", eventDescription: "确认变量、条件、文本模板和节点备注是否一致。", location: "复核面板", timeWeather: "整理阶段", questEpisode: "导览-03", status: "待检查", clueStatus: "进行中", risk: "中", evidenceOwner: "校对标记" },
+        e3: { title: "第三章：整理和复核", body: "这一段用于复核章节内容。先确认变量、条件和文本模板，再整理事件表字段；字段记录状态、风险和说明对象。", beatList: "状态索引 / 校验 / 演示预览", eventType: "内容复核", eventDescription: "确认变量、条件、文本模板和节点备注是否一致。", location: "复核面板", timeWeather: "整理阶段", questEpisode: "导览-03", status: "待检查", clueStatus: "进行中", risk: "中", evidenceOwner: "校对标记" },
         n11: { title: "状态索引", body: "状态索引列出变量初始值、引用位置和当前状态，便于确认哪些节点读取或写入同一变量。", customFields: { evidence: "变量引用", owner: "校验页", outcome: "确认状态读写位置" }, cast: [{ characterId: "c4", role: "Mentioned" }] },
-        n12: { title: "整理前的复核", body: "继续前可以：① 检查状态引用；② 补充节点备注；③ 标记复核完成。", choices: ["① 检查状态引用", "② 补充节点备注", "③ 标记复核完成"], choiceOptions: [
-          { id: "opt_run_validation", label: "① 检查状态引用", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_document_notes", label: "② 补充节点备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
-          { id: "opt_mark_review_ready", label: "③ 标记复核完成", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
+        n12: { title: "整理前的复核", body: "继续前可以检查状态引用、补充节点备注，或标记复核完成。", choices: ["检查状态引用", "补充节点备注", "标记复核完成"], choiceOptions: [
+          { id: "opt_run_validation", label: "检查状态引用", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_document_notes", label: "补充节点备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
+          { id: "opt_mark_review_ready", label: "标记复核完成", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
         ], cast: [{ characterId: "c5", role: "Present" }, { characterId: "c2", role: "Mentioned" }] },
-        n13: { title: "Play 预览", body: "Play 预览用于检查条件、选项显示、访问记录和调试状态。它只验证当前画布内的阅读路线和变量变化。", customFields: { evidence: "预览记录", owner: "Play", outcome: "确认路线与状态变化" }, cast: [{ characterId: "c4", role: "Owner" }, { characterId: "c5", role: "Mentioned" }] },
-        e4: { title: "第四章：完成一次练习", body: "最后一段把前面内容收束为一次练习。每个选项有不同前置条件，用于演示选项条件、选择后效果、指定跳转和结束路线。", beatList: "正文 / Play / 备注 / 完成", eventType: "练习分支", eventDescription: "同一结构支持返回正文、继续预览、整理备注或结束练习。", location: "练习面板", timeWeather: "收束阶段", questEpisode: "导览-04", status: "待定" },
-        n14: { title: "下一步练习", body: "最后一步，选择接下来的练习目标。四个选项各有不同前置条件；条件不满足时，选项会按本节点的「不可用选项」设置显示或隐藏。当前项目「{project_file}」，当前功能「{active_feature}」，资料完整度 {data_integrity}。", choices: ["回到正文节点", "继续 Play 预览", "整理备注", "完成练习"], choiceOptions: [
+        n13: { title: "演示预览", body: "演示预览用于检查条件、选项显示、访问记录和调试状态。演示走到哪个节点，右侧检查器会同步聚焦；演示期间修改当前节点后，后续显示和路线会立即重算。", customFields: { evidence: "预览记录", owner: "演示", outcome: "确认路线与状态变化" }, cast: [{ characterId: "c4", role: "Owner" }, { characterId: "c5", role: "Mentioned" }] },
+        e4: { title: "第四章：完成一次练习", body: "最后一段把前面内容收束为一次练习。每个选项有不同前置条件，用于演示选项条件、选择后效果、指定跳转和结束路线。", beatList: "正文 / 演示 / 备注 / 完成", eventType: "练习分支", eventDescription: "同一结构支持返回正文、继续预览、整理备注或结束练习。", location: "练习面板", timeWeather: "收束阶段", questEpisode: "导览-04", status: "待定" },
+        n14: { title: "下一步练习", body: "最后一步，选择接下来的练习目标。四个选项各有不同前置条件；条件不满足时，选项会按本节点的「不可用选项」设置显示或隐藏。当前项目「{project_file}」，当前功能「{active_feature}」，资料完整度 {data_integrity}。", choices: ["回到正文节点", "继续演示预览", "整理备注", "完成练习"], choiceOptions: [
           { id: "opt_return_content", label: "回到正文节点（需进度和资料完整度达标）", requires: "workflow_progress >= 2 && data_integrity >= 3", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "content_review" }] },
-          { id: "opt_play_preview", label: "继续 Play 预览（需复核完成且已校验）", requires: "revision_ready === true && validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
+          { id: "opt_play_preview", label: "继续演示预览（需复核完成且已校验）", requires: "revision_ready === true && validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
           { id: "opt_organize_notes", label: "整理备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "notes_review" }, { trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }] },
-          { id: "opt_finish_practice", label: "完成练习（需完成复核和 Play 预览）", requires: "revision_ready === true && preview_checked === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
+          { id: "opt_finish_practice", label: "完成练习（需完成复核和演示预览）", requires: "revision_ready === true && preview_checked === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }, { characterId: "c5", role: "Mentioned" }] },
         n15: { title: "回到正文节点", body: "重新进入内容节点，补充正文、场景说明或设计笔记。这是一条结束路线。", routing: { mode: "end" } },
-        n16: { title: "继续 Play 预览", body: "继续使用 Play 预览检查条件、选项显示、访问记录和调试状态。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c5", role: "Speaker" }] },
+        n16: { title: "继续演示预览", body: "继续使用演示预览检查条件、选项显示、访问记录和调试状态。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c5", role: "Speaker" }] },
         n17: { title: "整理备注", body: "把暂存想法放入草稿框，把已确定的信息写入正文节点或事件表字段。这是一条结束路线。", routing: { mode: "end" } },
-        n18: { title: "完成练习", body: "本示例到此结束。你已经完成节点、连线、选项、条件、效果、对话、角色和事件表的基础练习。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
+        n18: { title: "完成练习", body: "本示例到此结束。你已经检查节点、连线、选项、条件、效果、对话、角色、事件表、文档和演示设置。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
         n19: { title: "操作便签", body: "这是标记节点（Marker），用于记录操作提示，不进入玩家路线。首次演示建议顺序：选择第一个选项；选择「写在选项效果里」；选择「检查状态引用」；选择「完成练习」。", routing: { mode: "goTo", target: "下一步练习" } },
         df1: { title: "你的草稿区", body: "这是草稿框，默认在节点菜单中隐藏。可将未确定的设定放在这里；它不进入玩家路线，也不会写入事件表。", customFields: { reason: "保留草稿内容，避免把内部备注当作最终正文。" } }
       },
@@ -2268,7 +2324,7 @@ function installNarrativeCanvasApp() {
       }
     } : {
       title: "Your First Narrative Canvas",
-      notes: "Built-in onboarding sample. Press Play from the entry node to inspect nodes, links, choices, conditions, effects, dialog, characters, the Events Sheet, and Playbook. It is written for a text worker using an editor for the first time, with emphasis on organizing prose, branches, and notes.",
+      notes: "Built-in onboarding sample. Press Play from the entry node to inspect nodes, links, choices, conditions, effects, dialog, characters, the Events Sheet, the Document, and Playbook. The Document shows the whole runtime narrative as editable Plain text / Ink / Yarn / Twee with syntax highlighting, an outline, and find; edits sync back to the project. It is written for a text worker using an editor for the first time, with emphasis on organizing prose, branches, state, and notes.",
       protagonist: "You",
       route: "overview",
       projectFile: "Your first canvas",
@@ -2359,34 +2415,34 @@ function installNarrativeCanvasApp() {
       ],
       nodes: {
         n0: { title: "Start Here", body: "You are opening Narrative Canvas for the first time. This is the entry node. Play starts here. Each box on the canvas is a node; links define reading order. Follow the links and read each node's purpose and operation.", cast: [{ characterId: "c0", role: "POV" }] },
-        lf1: { title: "Your Workspace", body: "This is a Scene Frame (location frame). Use it to group related nodes and organize the canvas. This frame type stays out of the Events Sheet; it is only a canvas region.", customFields: { region: "Canvas region", mood: "Structure first, prose later" } },
+        lf1: { title: "Your Workspace", body: "This is a Scene Frame (location frame). Use it to group related nodes and organize the canvas. This frame type stays out of the Events Sheet; it is only a canvas region. Click the frame-canvas button (▣) on the frame header to open it as a focused frame canvas that shows and edits only the nodes inside.", customFields: { region: "Canvas region", mood: "Structure first, prose later" } },
         e1: { title: "Chapter 1: Nodes and Links", body: "This chapter frame appears in the Events Sheet. Place one section's nodes inside it; the sheet lists them by act, chapter, beat, location, and status.", beatList: "Entry / custom node / first choice", eventType: "Walkthrough", eventDescription: "Meet the Content node, custom node types, and choice branches.", location: "Canvas workspace", timeWeather: "Getting started", questEpisode: "Tour-01", status: "Browsable" },
         n1: { title: "The Content Node", body: "This is the standard Content node. Use it for prose, scene notes, or design notes. Links set default reading order; node titles support search and routing.", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
         n2: { title: "Custom Nodes and Variables", body: "This is a custom node type. Add types and fields in the Node Library on the left; those fields appear in the Events Sheet. Braces render variable values in body text, such as project {project_file} and active feature {active_feature}.", customFields: { evidence: "Variables / templates / custom fields", owner: "Playbook", outcome: "Braces read variables in body text" }, cast: [{ characterId: "c4", role: "Owner" }] },
-        n3: { title: "What Playbook Is", body: "Playbook is this project's control panel: variable definitions, node logic, variable actions, and preview rules all live here. Script Builder batch-edits each node's conditions, effects, and routing; it writes the same data shown in the node inspector on the right.", customFields: { recorder: "Script Builder", reliability: "Synced with the node inspector" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
-        n4: { title: "The Choice Node", body: "This is a Choice node. Add options, set availability conditions, and set on-choose effects. A condition controls whether an option is available; an effect changes variables after selection. The three options below demonstrate these functions.", choices: ["① An always-available option", "② An option that changes a variable", "③ An option with a prerequisite"], choiceOptions: [
-          { id: "opt_map_story", label: "① An always-available option", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "outline_branch" }] },
-          { id: "opt_write_dialog", label: "② An option that changes a variable", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
-          { id: "opt_open_playbook", label: "③ An option with a prerequisite", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
+        n3: { title: "What Playbook Is", body: "Playbook manages runtime variables, Script Builder rows, choice logic, variable actions, preview rules, and validation. Script Builder and the node inspector edit the same conditions, effects, and routing; Advanced JSON exposes the exact configuration. The Document shows the same effective narrative as Plain text, Ink, Yarn, or Twee and incrementally syncs edits back to the project.", customFields: { recorder: "Script Builder", reliability: "Synced with the node inspector and Document" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
+        n4: { title: "The Choice Node", body: "This is a Choice node. Add options, set availability conditions, and set on-choose effects. Cards number options automatically, so option text does not need a typed ordinal.", choices: ["An always-available option", "An option that changes a variable", "An option with a prerequisite"], choiceOptions: [
+          { id: "opt_map_story", label: "An always-available option", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "outline_branch" }] },
+          { id: "opt_write_dialog", label: "An option that changes a variable", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
+          { id: "opt_open_playbook", label: "An option with a prerequisite", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
         n5: { title: "An Effect Changed a Variable", body: "The selected option ran an effect and set workflow_progress to step {workflow_progress}. Later nodes and options can read this variable to decide whether to appear.", variable: "workflow_progress", value: "1", cast: [{ characterId: "c0", role: "POV" }] },
         n6: { title: "The Dialog Node", body: "This is a Dialog node. Record turns; each turn has a speaker and a line. When the speaker matches a character name, the Characters page assigns the scene to that character.", turns: [{ speaker: "Guide", line: "In a dialog node, each line is one turn." }, { speaker: "Character A", line: "Use character names as speakers, and the character page tracks who appears in which scenes." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
         e2: { title: "Chapter 2: Conditions and Effects", body: "This chapter shows how conditions and effects work together: options change variables with on-choose effects, and node requirements decide whether the route can continue.", beatList: "Choice effects / node effects / variable actions", eventType: "State Logic", eventDescription: "Options, nodes, and variable actions all write state; Validation shows where each variable is written and read.", location: "Playbook", timeWeather: "Working out the logic", questEpisode: "Tour-02", status: "In progress" },
         cf1: { title: "The Dialog Frame", body: "This is a Dialog Frame. Use it to group dialog or state explanation nodes; when collapsed, it remains a canvas structure.", customFields: { participants: "Guide / Character A / Revision Note", summary: "Once variables are set, check that each route is reachable in preview." }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
-        n7: { title: "Where State Is Written", body: "State can be written in three places: ① a choice option's on-choose effects, triggered only by that option; ② a node's effects, triggered on entry; ③ Playbook variable actions, used for cross-node, manual, or global writes.", choices: ["① On a choice option's effects", "② On a node's effects", "③ In a variable action"], choiceOptions: [
-          { id: "opt_choice_effects", label: "① On a choice option's effects", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_node_effects", label: "② On a node's effects", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
-          { id: "opt_action_rules", label: "③ In a variable action", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
+        n7: { title: "Where State Is Written", body: "State can be written in a choice option's on-choose effects, a node's on-visit effects, or Playbook variable actions used for manual, imported, or out-of-row writes.", choices: ["On a choice option's effects", "On a node's effects", "In a variable action"], choiceOptions: [
+          { id: "opt_choice_effects", label: "On a choice option's effects", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_node_effects", label: "On a node's effects", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
+          { id: "opt_action_rules", label: "In a variable action", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
         n8: { title: "Naming Variables", body: "Use lower-case snake_case state keys, such as data_integrity. Consistent names make conditions, effects, text templates, and Validation easier to match.", customFields: { evidence: "State-key naming", owner: "State logic", outcome: "Use one variable name across conditions and effects" }, cast: [{ characterId: "c4", role: "Owner" }] },
         n9: { title: "Characters and Backlinks", body: "A note node can store source, remarks, and related characters. The Characters page lists each character's backlinks in story order, making character appearances easy to locate.", turns: [{ speaker: "Revision Note", line: "Confirm where each variable is written and read." }, { speaker: "Character B", line: "Matching character names let the character page group related nodes." }], customFields: { recorder: "Revision Note", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Speaker" }, { characterId: "c3", role: "Speaker" }, { characterId: "c0", role: "POV" }] },
         n10: { title: "A Condition Gate", body: "section_notes_ready === true || data_integrity >= 2", condition: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
         e3: { title: "Chapter 3: Organize and Review", body: "This chapter reviews the content before the final practice step. Confirm variables, conditions, and text templates, then organize the Events Sheet fields; the fields track status, risk, and subject.", beatList: "State index / Validation / Play preview", eventType: "Content Review", eventDescription: "Confirm that variables, conditions, text templates, and node notes match.", location: "Review panel", timeWeather: "Organizing", questEpisode: "Tour-03", status: "Needs check", clueStatus: "Open", risk: "Medium", evidenceOwner: "Revision Note" },
         n11: { title: "State Index", body: "The state index lists initial values, reference locations, and current status for variables, so you can confirm which nodes read or write the same variable.", customFields: { evidence: "Variable references", owner: "Validation", outcome: "Confirm state reads and writes" }, cast: [{ characterId: "c4", role: "Mentioned" }] },
-        n12: { title: "Review Before Continuing", body: "Before continuing: ① check state references; ② add node notes; ③ mark the review complete.", choices: ["① Check state references", "② Add node notes", "③ Mark review complete"], choiceOptions: [
-          { id: "opt_run_validation", label: "① Check state references", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_document_notes", label: "② Add node notes", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
-          { id: "opt_mark_review_ready", label: "③ Mark review complete", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
+        n12: { title: "Review Before Continuing", body: "Before continuing, check state references, add node notes, or mark the review complete.", choices: ["Check state references", "Add node notes", "Mark review complete"], choiceOptions: [
+          { id: "opt_run_validation", label: "Check state references", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_document_notes", label: "Add node notes", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
+          { id: "opt_mark_review_ready", label: "Mark review complete", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
         ], cast: [{ characterId: "c5", role: "Present" }, { characterId: "c2", role: "Mentioned" }] },
         n13: { title: "Play Preview", body: "Play preview checks conditions, option display, visit records, and debug state. It verifies reading routes and variable changes inside the current canvas.", customFields: { evidence: "Preview record", owner: "Play", outcome: "Confirm routes and state changes" }, cast: [{ characterId: "c4", role: "Owner" }, { characterId: "c5", role: "Mentioned" }] },
         e4: { title: "Chapter 4: Complete One Practice Run", body: "The final chapter turns the previous material into one practice run. Each option has a prerequisite and demonstrates choice conditions, on-choose effects, goTo routing, and end routes.", beatList: "Prose / Play / notes / finish", eventType: "Practice Split", eventDescription: "The same structure can return to prose, continue preview, organize notes, or end the practice.", location: "Practice panel", timeWeather: "Wrap-up", questEpisode: "Tour-04", status: "Pending" },
@@ -2669,14 +2725,16 @@ function installNarrativeCanvasApp() {
     adventure: "Narrative.canvas",
     characters: "Characters.md",
     events: "Events Sheet.csv",
-    variables: PLAYBOOK_FILE_NAME
+    variables: PLAYBOOK_FILE_NAME,
+    document: "Document.md"
   };
 
   const fileViewLabels = {
     adventure: "Narrative canvas",
     characters: "Characters",
     events: "Events sheet",
-    variables: "Playbook"
+    variables: "Playbook",
+    document: "Document"
   };
 
   const uiTranslations = {
@@ -2775,7 +2833,7 @@ function installNarrativeCanvasApp() {
       "Action": "动作",
       "Variable Actions": "变量动作",
       "Variable Definitions": "变量定义",
-      "Playbook variable actions": "Playbook 变量动作",
+      "Playbook variable actions": "演示设置变量动作",
       "Variable Actions write defined Variables outside node rows. Node-specific changes belong in Script Builder or the node inspector.": "变量动作仅写入已定义变量；节点局部变化应写入脚本构建或节点检查器。",
       "Variable action added.": "已添加变量动作。",
       "Variable action deleted.": "已删除变量动作。",
@@ -2790,13 +2848,14 @@ function installNarrativeCanvasApp() {
       "Auto references": "自动引用",
       "auto": "自动",
       "Body": "正文",
-      "Build state changes with Playbook categories.": "用 Playbook 分类构建状态变化。",
-      "Build state changes with Playbook state groups.": "用 Playbook 状态分组构建状态变化。",
+      "Build state changes with Playbook categories.": "用演示设置分类构建状态变化。",
+      "Build state changes with Playbook state groups.": "用演示设置状态分组构建状态变化。",
       "Buttons": "按钮",
       "Browser storage": "浏览器存储",
       "A new project file will be created when possible.": "满足创建条件时，新建项目文件。",
       "Cancel": "取消",
       "Canvas": "画布",
+      "Canvas quick menu": "画布快捷菜单",
       "Category": "分类",
       "Center": "居中",
       "Center canvas": "画布居中",
@@ -2811,7 +2870,10 @@ function installNarrativeCanvasApp() {
       "Clear event search": "清除事件搜索",
       "Clear manual drag order and re-sort by the canvas flow": "清除手动拖动顺序，并按画布流程重新排序",
       "Clear manual drag order and re-sort rows by the canvas flow": "清除手动行顺序，并按画布流程重新排序",
+      "Clear browser storage?": "清除浏览器存储？",
+      "Clear browser storage and load a blank project? This deletes the project saved in this browser.": "清除浏览器存储并载入空项目？这会删除当前浏览器中保存的项目。",
       "Clear storage": "清除存储",
+      "Close centered inspector": "关闭居中检查器",
       "Confirm": "确认",
       "Collapse": "折叠",
       "Collapse frame": "折叠框架",
@@ -2823,6 +2885,7 @@ function installNarrativeCanvasApp() {
       "Delete": "删除",
       "Delete character": "删除角色",
       "Delete choice": "删除选项",
+      "Delete frame": "删除框架",
       "Delete link": "删除连线",
       "Delete node": "删除节点",
       "Delete turn": "删除轮次",
@@ -2923,8 +2986,8 @@ function installNarrativeCanvasApp() {
       "Warnings": "警告",
       "Effect \"{op}\" on \"{key}\" is kept in runtime JSON but commented in text exports.": "效果 “{op}” 作用于 “{key}”；Runtime JSON 保留该效果，文本导出以注释形式标记。",
       "Custom node type \"{type}\" exports as rendered text and custom fields; target formats may need a custom loader.": "自定义节点类型 “{type}” 导出为渲染文本和自定义字段；目标格式可能需要自定义 loader。",
-      "Playbook action \"{id}\" ({detail}) is kept in runtime JSON but not emitted to text exports.": "Playbook 动作 “{id}”（{detail}）保留在 Runtime JSON 中，但不写入文本导出。",
-      "{count} Playbook action(s) are included in runtime JSON but not emitted to text exports.": "{count} 个 Playbook 动作包含在 Runtime JSON 中，但不写入文本导出。",
+      "Playbook action \"{id}\" ({detail}) is kept in runtime JSON but not emitted to text exports.": "演示设置动作 “{id}”（{detail}）保留在 Runtime JSON 中，但不写入文本导出。",
+      "{count} Playbook action(s) are included in runtime JSON but not emitted to text exports.": "{count} 个演示设置动作包含在 Runtime JSON 中，但不写入文本导出。",
       "Variable \"{key}\" is an array; runtime JSON and Twee keep it, Yarn exports it as a JSON string for membership predicates, and Ink exports a LIST when items are primitive.": "变量 “{key}” 是数组；Runtime JSON 和 Twee 保留该值，Yarn 将其导出为用于成员判断的 JSON 字符串，Ink 在元素为基础值时导出 LIST。",
       "Variable \"{key}\" is an object; runtime JSON keeps it, Twee initializes it, and Yarn/Ink comment it out.": "变量 “{key}” 是对象；Runtime JSON 保留该值，Twee 初始化该值，Yarn/Ink 将其注释输出。",
       "State key \"{key}\" exports with \".\" converted to \"_\" in portable text formats.": "状态键 “{key}” 导出到可移植文本格式时，“.” 转换为 “_”。",
@@ -2934,6 +2997,8 @@ function installNarrativeCanvasApp() {
       "Variable": "变量",
       "Node": "节点",
       "Expression \"{expression}\" is kept in Runtime JSON; Yarn, Ink, and Twee use a false guard.": "表达式 “{expression}” 保留在 Runtime JSON 中；Yarn、Ink 和 Twee 使用 false 条件保护。",
+      "Exit": "退出",
+      "Exit frame canvas": "退出框架画布",
       "Variable name map": "变量名映射",
       "Only changed names are shown.": "仅显示转换后的名称。",
       "No variable names needed conversion.": "没有变量名需要转换。",
@@ -2942,10 +3007,12 @@ function installNarrativeCanvasApp() {
       "{count} choices": "{count} 个选项",
       "{count} turns — Play steps through each line. Cast Speaker chips auto-fill from speakers below.": "{count} 轮对话 - Play 会逐句播放；Speaker 演员标签会根据下方说话者自动补齐。",
       "Export report is unavailable.": "导出报告不可用。",
+      "Enter immersive fullscreen": "进入沉浸式全屏",
       "Expand": "展开",
       "Expand frame": "展开框架",
       "Expand left sidebar": "展开左侧栏",
       "Expand right sidebar": "展开右侧栏",
+      "Exit immersive fullscreen": "退出沉浸式全屏",
       "File": "文件",
       "Fields, one per line": "字段，每行一个",
       "Files": "文件",
@@ -2956,6 +3023,9 @@ function installNarrativeCanvasApp() {
       "Find in Playbook": "在演示设置中查找",
       "Focus": "聚焦",
       "Frame": "框架",
+      "Frame canvas": "框架画布",
+      "Frame canvas closed.": "已退出框架画布。",
+      "Frame canvas opened.": "已进入框架画布。",
       "Frame membership": "框架归属",
       "Frame membership already matches current canvas.": "框架归属已与当前画布一致。",
       "Frame membership updated.": "框架归属已更新。",
@@ -3004,6 +3074,11 @@ function installNarrativeCanvasApp() {
       "New Canvas": "新画布",
       "New choice": "新选项",
       "New project": "新建项目",
+      "Open Project in center": "在中央打开项目面板",
+      "Open Node in center": "在中央打开节点面板",
+      "Open Story in center": "在中央打开故事面板",
+      "Open sample file": "打开示例文件",
+      "Open the sample file and discard unsaved changes?": "打开示例文件并放弃未保存的更改？",
       "Name the new project": "命名新项目",
       "No .ncanvas selected": "未选择 .ncanvas",
       "No characters yet.": "还没有角色。",
@@ -3041,6 +3116,7 @@ function installNarrativeCanvasApp() {
       "Selected choice": "选择选项",
       "Choice effect": "选项效果",
       "Open": "打开",
+      "Open frame canvas": "打开框架画布",
       "Optional: split this Dialog into multiple turns so a single node carries a back-and-forth exchange.": "可选：将该 Dialog 拆成多轮，让单个节点承载来回对话。",
       "Owned nodes": "拥有的节点",
       "Play": "演示",
@@ -3050,6 +3126,14 @@ function installNarrativeCanvasApp() {
       "{pages} play pages, {frames} frames": "{pages} 个演示页，{frames} 个框架",
       "Playbook": "演示设置",
       "Back to top": "回顶部",
+      "Toggle outline": "切换目录",
+      "Outline": "目录",
+      "Document outline": "文档目录",
+      "No headings yet.": "暂无标题。",
+      "(untitled)": "（未命名）",
+      "Find in document": "在文档中查找",
+      "Float preview to center": "将演示浮动到中央",
+      "Dock preview to the right": "将演示停靠回右侧",
       "Project": "项目",
       "Project File": "项目文件",
       "Project name": "项目名称",
@@ -3186,19 +3270,19 @@ function installNarrativeCanvasApp() {
       "Control the demo runner with Start Node, End Condition, Debug Mode, and the Visit Tracking toggle inside Debug Mode.": "通过起始节点、结束条件、调试模式及其内部的访问记录开关配置演示路线。",
       "Control Play preview with Start Node, End Condition, Debug Mode, and the Visit Tracking toggle inside Debug Mode.": "通过起始节点、结束条件、调试模式及其内部的访问记录开关配置演示预览。",
       "Create canvas links, move nodes, or change layout.": "创建画布连线、移动节点或更改布局。",
-      "Choose the exact node title Play starts from.": "填写 Play 起始节点的精确标题。",
+      "Choose the exact node title Play starts from.": "填写演示起始节点的精确标题。",
       "Choose whether unavailable choices are hidden or disabled.": "设置条件未满足选项的显示方式：隐藏或禁用。",
       "Choose how unavailable choices appear in Play preview: hidden, disabled, or shown.": "设置条件未满足选项在预览中的显示方式：隐藏、禁用或显示。",
-      "Choose the exact node title where Play preview starts. This does not change canvas links or layout.": "填写 Play 预览起始节点的精确标题。该设置只影响 Play 弹窗，不修改画布连线或布局。",
-      "End Play preview when this condition becomes true. Route checks such as route == ending work well here.": "条件成立时结束 Play 预览。常用格式：route == ending。",
+      "Choose the exact node title where Play preview starts. This does not change canvas links or layout.": "填写演示预览起始节点的精确标题。该设置只影响演示弹窗，不修改画布连线或布局。",
+      "End Play preview when this condition becomes true. Route checks such as route == ending work well here.": "条件成立时结束演示预览。常用格式：route == ending。",
       "Record visited nodes while previewing, so you can check whether the route reached the expected scenes.": "预览时记录已访问节点，用于核查路线可达性。",
-      "Show state values and condition results in Play preview, so it is easier to see why a choice appears or disappears.": "在 Play 预览中显示变量值和条件结果，用于定位选项显示原因。",
-      "Playbook keeps runtime state and preview settings. It does not edit the canvas layout.": "Playbook 管理运行时状态和预览设置；画布布局由 Canvas 编辑区维护。",
+      "Show state values and condition results in Play preview, so it is easier to see why a choice appears or disappears.": "在演示预览中显示变量值和条件结果，用于定位选项显示原因。",
+      "Playbook keeps runtime state and preview settings. It does not edit the canvas layout.": "演示设置管理运行时状态和预览设置；画布布局由画布编辑区维护。",
       "Save variables such as route or trust_level for conditions, effects, and text templates.": "声明 route、trust_level 等变量，供条件、效果和文本模板读取。",
       "Batch-edit each node's requirements, effects, and routing.": "批量编辑各节点的进入条件、状态效果和路线。",
-      "Choose how Play preview starts, stops, records visits, and shows debug details.": "配置 Play 预览的起点、结束条件、访问记录和调试信息。",
+      "Choose how Play preview starts, stops, records visits, and shows debug details.": "配置演示预览的起点、结束条件、访问记录和调试信息。",
       "Check missing keys, expression problems, and export risks before handing files off.": "交付前校验缺失 key、表达式错误和导出风险。",
-      "Edit the raw Playbook.json when you need an exact JSON change.": "需要精确修改 JSON 时，编辑 Playbook.json 原文。",
+      "Edit the raw Playbook.json when you need an exact JSON change.": "需要精确修改时，编辑演示设置的高级 JSON（Playbook.json）。",
       "Change canvas links, node positions, or layout.": "修改画布连线、节点位置或布局。",
       "Change node type fields; edit the Node Library schema instead.": "修改节点类型字段；这类结构设置应在节点库中完成。",
       "Act as a game engine. Complex runtime logic still belongs in the target engine.": "替代游戏引擎；复杂运行逻辑应由目标引擎实现。",
@@ -3228,10 +3312,10 @@ function installNarrativeCanvasApp() {
       "Debug Mode and its Visit Tracking toggle help you inspect the route while previewing.": "调试模式及其访问记录开关用于检查预览路线和状态变化。",
       "Visit Tracking runs inside Debug Mode and is discarded when preview closes.": "访问记录仅在调试模式内运行，关闭预览后丢弃。",
       "Enable Debug Mode before Visit Tracking.": "启用访问记录前，请先启用调试模式。",
-      "Record visited nodes while Debug Mode is enabled. The list is discarded when Play preview closes.": "调试模式启用时记录已访问节点；关闭 Play 预览后丢弃列表。",
+      "Record visited nodes while Debug Mode is enabled. The list is discarded when Play preview closes.": "调试模式启用时记录已访问节点；关闭演示预览后丢弃列表。",
       "Validation lists where state keys are read, written, interpolated, and where export needs attention.": "校验页列出每个状态 key 的读取、写入、插值位置和导出注意项。",
       "Validation reports unknown keys, read-only keys, write-only keys, expression errors, and export risks.": "校验页报告未知 key、只读 key、只写 key、表达式错误和导出风险。",
-      "Advanced JSON is for precise Playbook.json edits. It is useful for review, not the main editing path.": "高级 JSON 用于精确编辑 Playbook.json，适用于审查和修正；主要编辑入口为结构化表单。",
+      "Advanced JSON is for precise Playbook.json edits. It is useful for review, not the main editing path.": "高级 JSON 用于精确编辑演示设置文件（Playbook.json），适用于审查和修正；主要编辑入口为结构化表单。",
       "Before exporting to Yarn, Ink, or Twee, review orange and red warnings.": "导出 Yarn、Ink 或 Twee 前，应先检查橙色和红色警告。",
       "Close preview": "关闭演示",
       "Confirm action?": "确认操作？",
@@ -3304,7 +3388,7 @@ function installNarrativeCanvasApp() {
       "Condition node": "Condition 节点",
       "Conditions are not actions.": "条件不是动作。",
       "Delete a state write with the row's x button, or remove the matching effect in the node inspector.": "删除状态写入：点击行尾 x，或在节点检查器中删除对应 effect。",
-      "Each page covers one Playbook feature.": "每页说明一项 Playbook 功能。",
+      "Each page covers one Playbook feature.": "每页说明一项演示设置功能。",
       "For Clue grouping, use clue_ or clue. at the start of the variable key.": "Clue 分组使用 clue_ 或 clue. 作为变量 key 前缀。",
       "If a value must be read by text templates, conditions, variable actions, or exports, put it in Variable Definitions.": "需要被文本模板、条件、变量动作或导出读取的值，应在变量定义中声明。",
       "Choice conditions": "选项条件",
@@ -3359,13 +3443,13 @@ function installNarrativeCanvasApp() {
       "No initial value": "没有初始值",
       "No references": "没有引用",
       "More: {count}": "还有 {count} 个",
-      "Playbook.json stores variables, node logic, and demo runner rules. Variables define state. Use flat underscore variables such as inventory_coins when a value must be read by conditions, effects, or text templates. Script Builder batch-edits node Requirements, Effects, and Routing. Play Rules only control the sample runner: start node, end condition, visit tracking, and debug mode. Unavailable choice display is set on each Choice node. It does not run JavaScript or replace a game engine.": "Playbook.json 保存变量定义、节点逻辑和演示运行规则。变量定义声明状态；需要被条件、效果或文本模板读取的值，应使用 inventory_coins 等扁平下划线变量。脚本构建批量编辑节点条件要求、效果和路线；演示规则仅控制样例演示器的起始节点、结束条件、访问记录和调试模式。不可用选项显示在每个 Choice 节点内单独设置。Playbook.json 不执行 JavaScript，也不替代游戏引擎。",
-      "Playbook.json stores runtime variable definitions, node logic rows, Variable Actions, and Play preview rules. Variable Definitions define state. Script Builder edits node Requirements, Effects, and Routing. Variable Actions keep manual or imported state writes outside node rows. Preview rules only control the Play dialog: start node, end condition, debug details, and temporary visit tracking. Validation checks keys and export risks before you ship files.": "Playbook.json 保存运行时变量定义、节点逻辑行、变量动作和演示预览规则。变量定义声明状态；脚本构建编辑节点条件、效果和路线；变量动作保存手动写入或旧项目导入的节点行外状态写入；预览规则仅控制演示弹窗：起始节点、结束条件、调试细节和临时访问记录。校验页在导出前检查状态键和导出风险。",
-      "Pick the exact node title used as the first Play preview scene.": "填写作为 Play 预览第一幕的精确节点标题。",
+      "Playbook.json stores variables, node logic, and demo runner rules. Variables define state. Use flat underscore variables such as inventory_coins when a value must be read by conditions, effects, or text templates. Script Builder batch-edits node Requirements, Effects, and Routing. Play Rules only control the sample runner: start node, end condition, visit tracking, and debug mode. Unavailable choice display is set on each Choice node. It does not run JavaScript or replace a game engine.": "演示设置文件（Playbook.json）保存变量定义、节点逻辑和演示运行规则。变量定义声明状态；需要被条件、效果或文本模板读取的值，应使用 inventory_coins 等扁平下划线变量。脚本构建批量编辑节点条件要求、效果和路线；演示规则仅控制样例演示器的起始节点、结束条件、访问记录和调试模式。不可用选项显示在每个 Choice 节点内单独设置。演示设置不执行 JavaScript，也不替代游戏引擎。",
+      "Playbook.json stores runtime variable definitions, node logic rows, Variable Actions, and Play preview rules. Variable Definitions define state. Script Builder edits node Requirements, Effects, and Routing. Variable Actions keep manual or imported state writes outside node rows. Preview rules only control the Play dialog: start node, end condition, debug details, and temporary visit tracking. Validation checks keys and export risks before you ship files.": "演示设置文件（Playbook.json）保存运行时变量定义、节点逻辑行、变量动作和演示预览规则。变量定义声明状态；脚本构建编辑节点条件、效果和路线；变量动作保存手动写入或旧项目导入的节点行外状态写入；预览规则仅控制演示弹窗：起始节点、结束条件、调试细节和临时访问记录。校验页在导出前检查状态键和导出风险。",
+      "Pick the exact node title used as the first Play preview scene.": "填写作为演示预览第一幕的精确节点标题。",
       "Previous": "上一页",
       "Previous line": "上一句",
       "Record visited node titles": "记录已访问的节点标题",
-      "Record visited node titles during Play.": "Play 过程中记录已访问节点标题。",
+      "Record visited node titles during Play.": "演示过程中记录已访问节点标题。",
       "Reconnect from output": "从输出端重连",
       "Reconnect to input": "重连到输入端",
       "Choice requirements": "选择要求",
@@ -3432,12 +3516,12 @@ function installNarrativeCanvasApp() {
       "Store project variables for text such as {protagonist}.": "声明项目变量，例如文本中的 {protagonist}。",
       "Use flat underscore variables such as inventory_coins when conditions, effects, and text templates need the same value.": "条件、效果和文本模板需要读取同一个值时，使用 inventory_coins 这类扁平下划线变量。",
       "Stop the demo route when a condition becomes true.": "条件成立时停止演示路线。",
-      "Stop Play preview when a condition becomes true.": "条件成立时停止 Play 预览。",
+      "Stop Play preview when a condition becomes true.": "条件成立时停止演示预览。",
       "Store runtime variables for conditions, effects, and text templates.": "声明供条件、效果和文本模板使用的运行时变量。",
       "Unsaved changes": "未保存改动",
       "Visit Tracking": "访问记录",
-      "What Playbook controls": "Playbook 管理范围",
-      "Use Advanced JSON for exact edits without changing the canvas schema.": "使用高级 JSON 精确编辑 Playbook，不修改画布结构。",
+      "What Playbook controls": "演示设置管理范围",
+      "Use Advanced JSON for exact edits without changing the canvas schema.": "使用高级 JSON 精确编辑演示设置，不修改画布结构。",
       "Use Validation before exporting to find unknown keys and runtime-only export risks.": "导出前使用校验页检查未知键和 Runtime JSON 专属导出风险。",
       "{count} hidden": "{count} 个隐藏",
       "{count} selected": "已选择 {count} 个",
@@ -3453,9 +3537,9 @@ function installNarrativeCanvasApp() {
       "Routing": "路线",
       "Variables": "变量",
       "Visited": "访问记录",
-      "What can Playbook.json do?": "查看 Playbook.json 说明",
+      "What can Playbook.json do?": "查看演示设置说明",
       "What does this rule do?": "查看这条规则的说明",
-      "This Play preview rule controls how the Play dialog behaves.": "该演示预览规则配置 Play 弹窗行为。",
+      "This Play preview rule controls how the Play dialog behaves.": "该演示预览规则配置演示弹窗行为。",
       "Ink exported.": "Ink 已导出。",
       "Yarn exported.": "Yarn 已导出。",
       "Zoom": "缩放",
@@ -3495,7 +3579,7 @@ function installNarrativeCanvasApp() {
       "Node Inspector": "节点检查器",
       "Node selection required": "需要选择节点",
       "Node Type": "节点类型",
-      "Playbook help": "Playbook 帮助",
+      "Playbook help": "演示设置帮助",
       "Ready": "就绪",
       "Redo": "重做",
       "Redo (Ctrl+Shift+Z or Ctrl+Y)": "重做（Ctrl+Shift+Z 或 Ctrl+Y）",
@@ -3521,6 +3605,10 @@ function installNarrativeCanvasApp() {
       "Could not open project picker.": "无法打开项目选择器。",
       "No saved project to reload.": "没有可重新加载的已保存项目。",
       "Could not clear browser storage.": "无法清除浏览器存储。",
+      "Browser storage cleared. Blank project saved.": "浏览器存储已清除，空项目已保存。",
+      "Browser storage cleared. Blank project loaded.": "浏览器存储已清除，空项目已载入。",
+      "Node layer": "节点层级",
+      "Node layer menu": "节点层级菜单",
       "Node layer updated.": "节点图层已更新。",
       "Node layers updated.": "节点图层已更新。",
       "Connection canceled.": "连接已取消。",
@@ -3553,8 +3641,8 @@ function installNarrativeCanvasApp() {
       "Set and Condition Play rules added.": "Set 和 Condition 演示规则已添加。",
       "Variable key already exists.": "变量键已存在。",
       "Node type name is required.": "节点类型名称不能为空。",
-      "Playbook JSON updated.": "Playbook JSON 已更新。",
-      "Playbook JSON is invalid.": "Playbook JSON 无效。",
+      "Playbook JSON updated.": "演示设置 JSON 已更新。",
+      "Playbook JSON is invalid.": "演示设置 JSON 无效。",
       "Node duplicated.": "节点已复制。",
       "Node deleted and archived outside runtime.": "节点已删除，并归档在运行时之外。",
       "Link deleted.": "连线已删除。",
@@ -3623,7 +3711,25 @@ function installNarrativeCanvasApp() {
       "Loaded {target}.": "已加载 {target}。",
       "Created {target}.": "已创建 {target}。",
       "{label} reordered.": "{label} 已重新排序。",
-      "Link created: {label}.": "连线已创建：{label}。"
+      "Link created: {label}.": "连线已创建：{label}。",
+      "Document": "文档",
+      "Plain text": "纯文本",
+      "Source": "文档源",
+      "Project document": "项目文档",
+      "Document format": "文档格式",
+      "Project document source": "项目文档源",
+      "Synced": "已同步",
+      "Syncing": "同步中",
+      "Source error": "源文件有误",
+      "Edit narrative content here. Recognized nodes, choices, conditions, effects, routes, and variables sync to the project; canvas layout and unsupported metadata stay unchanged.": "可在此编辑现有叙事内容。可识别的节点、选项、条件、效果、跳转和变量会同步到项目；节点、选项和路线的增删仍在画布或检查器中完成，画布布局及该格式无法表达的元数据保持不变。",
+      "Document cannot be empty.": "文档不能为空。",
+      "No editable nodes were found.": "未找到可编辑节点。",
+      "Document node structure is incomplete. Add or delete nodes on the canvas.": "文档节点结构不完整；请在画布中新增或删除节点。",
+      "Document node IDs are missing or duplicated.": "文档中的节点 ID 缺失或重复。",
+      "Document body markers are incomplete.": "文档中的正文边界标记不完整。",
+      "Add or delete choices in the node inspector; Document edits existing choices.": "请在节点检查器中新增或删除选项；文档仅编辑现有选项。",
+      "Add or delete routes on the canvas; Document edits existing routes.": "请在画布中新增或删除路线；文档仅编辑现有路线。",
+      "Document changes synced to project.": "文档修改已同步到项目。"
     }
   };
 
@@ -3740,7 +3846,18 @@ function installNarrativeCanvasApp() {
     canvasRenderVersion: 1,
     canvasRenderedVersion: 0,
     documentRenderVersion: 1,
-    documentRenderedVersions: { characters: 0, events: 0, variables: 0 },
+    documentRenderedVersions: { characters: 0, events: 0, variables: 0, document: 0 },
+    documentFormat: "plain",
+    documentDraft: "",
+    documentDraftFormat: "",
+    documentApplyTimer: null,
+    documentApplyStatus: "synced",
+    documentLastError: "",
+    documentSearch: "",
+    documentSearchMatches: [],
+    documentSearchIndex: 0,
+    documentTocOpen: false,
+    documentHighlightFrame: null,
     autoSaveTimer: null,
     characterBacklinkExpandedIds: new Set(),
     choiceOptionExpandedIds: new Set(),
@@ -3759,6 +3876,7 @@ function installNarrativeCanvasApp() {
     inlineEditPointerNodeId: null,
     lastNodeClick: { id: null, time: 0 },
     playNodeId: null,
+    playFloating: false,
     playPath: [],
     playStepIndex: 0,
     playSteps: [],
@@ -3768,6 +3886,12 @@ function installNarrativeCanvasApp() {
     playVisitRecords: [],
     playManualActionRunIds: new Set(),
     playDebugOpen: true,
+    playRefreshFrame: null,
+    immersiveFullscreen: false,
+    nodePanelPointerDown: false,
+    floatingInspectorPanel: "",
+    frameCanvasId: "",
+    frameCanvasReturnView: null,
     search: "",
     eventRowDrag: null,
     eventColumnResize: null,
@@ -3871,6 +3995,7 @@ function installNarrativeCanvasApp() {
     dom.charactersPanel = dom.scope.querySelector("#charactersPanel");
     dom.variablesPanel = dom.scope.querySelector("#variablesPanel");
     dom.eventsPanel = dom.scope.querySelector("#eventsPanel");
+    dom.documentPanel = dom.scope.querySelector("#documentPanel");
     dom.content = dom.scope.querySelector("#canvasContent");
     dom.frameLayer = dom.scope.querySelector("#frameLayer");
     dom.nodeLayer = dom.scope.querySelector("#nodeLayer");
@@ -3883,6 +4008,7 @@ function installNarrativeCanvasApp() {
     dom.customNodeFields = dom.scope.querySelector("#customNodeFields");
     dom.customNodeColor = dom.scope.querySelector("#customNodeColor");
     dom.zoomReadout = dom.scope.querySelector("#zoomReadout");
+    dom.fullscreenButton = dom.scope.querySelector("#fullscreenButton");
     dom.undoButton = dom.scope.querySelector("#undoButton");
     dom.redoButton = dom.scope.querySelector("#redoButton");
     dom.themeToggle = dom.scope.querySelector("#themeToggle");
@@ -3895,9 +4021,16 @@ function installNarrativeCanvasApp() {
     dom.newProjectNameInput = dom.scope.querySelector("#newProjectNameInput");
     dom.newProjectPathPreview = dom.scope.querySelector("#newProjectPathPreview");
     dom.workspaceToolbar = dom.scope.querySelector("#workspaceToolbar");
+    dom.frameCanvasScope = dom.scope.querySelector("#frameCanvasScope");
+    dom.frameCanvasTitle = dom.scope.querySelector("#frameCanvasTitle");
+    dom.frameCanvasExitButton = dom.scope.querySelector("#frameCanvasExitButton");
     dom.projectPanel = dom.scope.querySelector("#projectPanel");
     dom.nodePanel = dom.scope.querySelector("#nodePanel");
     dom.storyPanel = dom.scope.querySelector("#storyPanel");
+    dom.inspectorPanels = dom.scope.querySelector("#inspectorPanels");
+    dom.inspectorFloatOverlay = dom.scope.querySelector("#inspectorFloatOverlay");
+    dom.inspectorFloatBody = dom.scope.querySelector("#inspectorFloatBody");
+    dom.inspectorFloatTitle = dom.scope.querySelector("#inspectorFloatTitle");
     dom.inspectorTitle = dom.scope.querySelector("#inspectorTitle");
     dom.statusText = dom.scope.querySelector("#statusText");
     dom.workspaceSearchControls = dom.scope.querySelector("#workspaceSearchControls");
@@ -3905,6 +4038,7 @@ function installNarrativeCanvasApp() {
     dom.characterSearchInput = dom.scope.querySelector("#characterSearchInput");
     dom.eventSearchInput = dom.scope.querySelector("#eventSearchInput");
     dom.playbookSearchInput = dom.scope.querySelector("#playbookSearchInput");
+    dom.documentSearchInput = dom.scope.querySelector("#documentSearchInput");
     dom.matchCount = dom.scope.querySelector("#matchCount");
     dom.fileInput = dom.scope.querySelector("#fileInput");
     dom.activeFileTab = dom.scope.querySelector("#activeFileTab");
@@ -3913,6 +4047,7 @@ function installNarrativeCanvasApp() {
     dom.hint = dom.scope.querySelector("#selectionHint");
     dom.minimap = dom.scope.querySelector("#minimap");
     dom.nodeContextMenu = dom.scope.querySelector("#nodeContextMenu");
+    dom.canvasRadialMenu = dom.scope.querySelector("#canvasRadialMenu");
     dom.mentionPopover = dom.scope.querySelector("#mentionPopover");
     dom.nodeIconDialog = dom.scope.querySelector("#nodeIconDialog");
     dom.nodeIconInput = dom.scope.querySelector("#nodeIconInput");
@@ -4030,9 +4165,18 @@ function installNarrativeCanvasApp() {
     window.addEventListener("keydown", handleGlobalHistoryKeyDown, { capture: true, signal });
     window.addEventListener("blur", hideNodeContextMenu, { signal });
     window.addEventListener("resize", handleWindowResize, { signal });
+    document.addEventListener("fullscreenchange", handleFullscreenChange, { signal });
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange, { signal });
 
     dom.nodeContextMenu.addEventListener("pointerdown", handleNodeContextMenuPointerDown, { signal });
     dom.nodeContextMenu.addEventListener("click", handleNodeContextMenuClick, { signal });
+    dom.nodePanel?.addEventListener("pointerdown", () => { state.nodePanelPointerDown = true; }, { capture: true, signal });
+    window.addEventListener("pointerup", () => { state.nodePanelPointerDown = false; }, { capture: true, signal });
+    window.addEventListener("pointercancel", () => { state.nodePanelPointerDown = false; }, { capture: true, signal });
+    dom.canvasRadialMenu?.addEventListener("click", handleCanvasRadialMenuClick, { signal });
+    dom.inspectorFloatOverlay?.addEventListener("click", (event) => {
+      if (event.target === dom.inspectorFloatOverlay) closeFloatingInspector();
+    }, { signal });
     dom.viewport.addEventListener("scroll", handleViewportScroll, { signal });
     dom.viewport.addEventListener("pointerdown", handleViewportPointerDown, { signal });
     dom.viewport.addEventListener("pointermove", handleViewportPointerMove, { signal });
@@ -4136,12 +4280,23 @@ function installNarrativeCanvasApp() {
       window.cancelAnimationFrame(state.canvasViewportRenderFrame);
       state.canvasViewportRenderFrame = null;
     }
+    if (state.playRefreshFrame) {
+      window.cancelAnimationFrame(state.playRefreshFrame);
+      state.playRefreshFrame = null;
+    }
     clearAutoSaveTimer();
     clearStatusTimer();
     clearStoryPanelRenderTimer();
+    clearDocumentApplyTimer();
     state.sidebar.resizing = null;
+    state.immersiveFullscreen = false;
+    closeFloatingInspector({ restoreFocus: false });
+    state.frameCanvasId = "";
+    state.frameCanvasReturnView = null;
     dom.root?.classList.remove("sidebar-resizing");
     dom.root?.removeAttribute("data-sidebar-resizing");
+    dom.root?.removeAttribute("data-immersive");
+    dom.root?.removeAttribute("data-frame-canvas");
     hideNodeContextMenu();
     initialized = false;
     resetRuntimeState();
@@ -4184,6 +4339,176 @@ function installNarrativeCanvasApp() {
   function handleWindowResize() {
     hideNodeContextMenu();
     scheduleCanvasViewportRender();
+  }
+
+  function handleFullscreenChange() {
+    const active = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    if (active) {
+      if (!state.immersiveFullscreen) {
+        state.immersiveFullscreen = true;
+        renderShellState();
+        handleWindowResize();
+      }
+      return;
+    }
+    if (state.immersiveFullscreen) {
+      state.immersiveFullscreen = false;
+      renderShellState();
+      handleWindowResize();
+    }
+  }
+
+  function renderImmersiveFullscreenState() {
+    const active = Boolean(state.immersiveFullscreen);
+    if (active) dom.root?.setAttribute("data-immersive", "true");
+    else dom.root?.removeAttribute("data-immersive");
+    if (!dom.fullscreenButton) return;
+    const label = t(active ? "Exit immersive fullscreen" : "Enter immersive fullscreen");
+    dom.fullscreenButton.innerHTML = getImmersiveFullscreenIcon(active);
+    dom.fullscreenButton.title = label;
+    dom.fullscreenButton.setAttribute("aria-label", label);
+    dom.fullscreenButton.setAttribute("aria-pressed", String(active));
+  }
+
+  function getImmersiveFullscreenIcon(active) {
+    const path = active
+      ? "M9 3v6H3M15 3v6h6M21 15h-6v6M3 15h6v6"
+      : "M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5";
+    return `<svg class="history-icon immersive-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${path}"></path></svg>`;
+  }
+
+  async function toggleImmersiveFullscreen() {
+    const next = !state.immersiveFullscreen;
+    state.immersiveFullscreen = next;
+    renderShellState();
+    handleWindowResize();
+    if (next) {
+      await requestNativeFullscreen(dom.root || document.documentElement);
+      setStatus(t("Enter immersive fullscreen"));
+      return;
+    }
+    await exitNativeFullscreen();
+    setStatus(t("Exit immersive fullscreen"));
+  }
+
+  async function requestNativeFullscreen(element) {
+    const request = element?.requestFullscreen || element?.webkitRequestFullscreen;
+    if (!request) return false;
+    try {
+      await request.call(element);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function exitNativeFullscreen() {
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!fullscreenElement) return false;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (!exit) return false;
+    try {
+      await exit.call(document);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function getActiveFrameCanvas() {
+    const node = getNode(state.frameCanvasId);
+    return node && isFrameNode(node) ? node : null;
+  }
+
+  function isFrameCanvasActive() {
+    return Boolean(getActiveFrameCanvas());
+  }
+
+  function clearInvalidFrameCanvas() {
+    if (!state.frameCanvasId) return false;
+    if (getActiveFrameCanvas()) return false;
+    state.frameCanvasId = "";
+    state.frameCanvasReturnView = null;
+    return true;
+  }
+
+  function renderFrameCanvasScopeState() {
+    clearInvalidFrameCanvas();
+    const frame = getActiveFrameCanvas();
+    const active = Boolean(frame && isCanvasFileActive());
+    if (dom.root) {
+      if (active) dom.root.setAttribute("data-frame-canvas", "true");
+      else dom.root.removeAttribute("data-frame-canvas");
+    }
+    if (!dom.frameCanvasScope) return;
+    dom.frameCanvasScope.hidden = !active;
+    if (dom.frameCanvasTitle) {
+      dom.frameCanvasTitle.textContent = active ? getNodeDisplayTitle(frame, t("Frame")) : "";
+      dom.frameCanvasTitle.title = active ? getNodeDisplayTitle(frame, t("Frame")) : "";
+    }
+  }
+
+  function enterFrameCanvas(frameId) {
+    const frame = getNode(frameId);
+    if (!frame || !isFrameNode(frame)) return;
+    hideNodeContextMenu();
+    state.frameCanvasReturnView = {
+      view: { ...state.view },
+      scrollLeft: dom.viewport?.scrollLeft || 0,
+      scrollTop: dom.viewport?.scrollTop || 0
+    };
+    state.frameCanvasId = frame.id;
+    state.activeFileId = "adventure";
+    state.selectedNodeId = frame.id;
+    state.selectedNodeIds = [];
+    state.selectedLinkId = null;
+    state.characterFocusId = null;
+    state.connectingFrom = null;
+    state.connectingTo = null;
+    state.reconnectingLinkId = null;
+    state.reconnectingEnd = null;
+    invalidateCanvasSurface();
+    renderAll();
+    requestAnimationFrame(() => {
+      centerView(false);
+      setStatus(t("Frame canvas opened."));
+    });
+  }
+
+  function exitFrameCanvas(options = {}) {
+    if (!state.frameCanvasId) return;
+    hideNodeContextMenu();
+    if (expandFrameCanvasFramesToFit(state.frameCanvasId)) setProjectDirty(true);
+    const previousView = state.frameCanvasReturnView;
+    state.frameCanvasId = "";
+    state.frameCanvasReturnView = null;
+    state.connectingFrom = null;
+    state.connectingTo = null;
+    state.reconnectingLinkId = null;
+    state.reconnectingEnd = null;
+    invalidateCanvasSurface();
+    if (previousView?.view) {
+      state.view = normalizeView(previousView.view);
+      if (dom.viewport) {
+        dom.viewport.scrollLeft = Number(previousView.scrollLeft) || 0;
+        dom.viewport.scrollTop = Number(previousView.scrollTop) || 0;
+      }
+    }
+    if (options.render !== false) {
+      renderAll();
+      setStatus(t("Frame canvas closed."));
+    }
+  }
+
+  function getFrameCanvasNodeIdSet(frameId = state.frameCanvasId) {
+    const frame = getNode(frameId);
+    if (!frame || !isFrameNode(frame)) return null;
+    return new Set(getFrameDescendantNodes(frame.id).map((node) => node.id));
+  }
+
+  function isNodeWithinFrameCanvas(node, frameId = state.frameCanvasId) {
+    if (!node || !frameId) return false;
+    return node.id === frameId || isFrameDescendantOf(node, frameId);
   }
 
   function renderSidebarState() {
@@ -4441,7 +4766,9 @@ function installNarrativeCanvasApp() {
       width: node.width,
       height: node.height,
       hasWidth: Object.prototype.hasOwnProperty.call(node, "width"),
-      hasHeight: Object.prototype.hasOwnProperty.call(node, "height")
+      hasHeight: Object.prototype.hasOwnProperty.call(node, "height"),
+      frameId: normalizeOptionalString(node.frameId).trim(),
+      hasFrameId: Object.prototype.hasOwnProperty.call(node, "frameId")
     };
   }
 
@@ -4477,7 +4804,9 @@ function installNarrativeCanvasApp() {
         && entry.width === next.width
         && entry.height === next.height
         && entry.hasWidth === next.hasWidth
-        && entry.hasHeight === next.hasHeight;
+        && entry.hasHeight === next.hasHeight
+        && entry.frameId === next.frameId
+        && entry.hasFrameId === next.hasFrameId;
     });
   }
 
@@ -4505,6 +4834,7 @@ function installNarrativeCanvasApp() {
     state.history.applying = false;
     state.history.current = "";
     setProjectDirty(true);
+    markProjectStructureChanged();
     renderAll();
     renderHistoryButtons();
     setStatus(`${label} applied.`);
@@ -4519,6 +4849,8 @@ function installNarrativeCanvasApp() {
     else delete node.width;
     if (snapshot.hasHeight) node.height = snapshot.height;
     else delete node.height;
+    if (snapshot.hasFrameId) node.frameId = normalizeOptionalString(snapshot.frameId).trim();
+    else delete node.frameId;
   }
 
   function undoHistory() {
@@ -4730,6 +5062,7 @@ function installNarrativeCanvasApp() {
     dom.themeHost?.setAttribute("data-theme", state.theme);
     dom.themeHost?.setAttribute("lang", state.language === "zh" ? "zh-CN" : "en");
     localizeStaticShell();
+    renderImmersiveFullscreenState();
     renderSidebarState();
     if (dom.themeToggle) {
       const isDark = state.theme === "dark";
@@ -4775,6 +5108,7 @@ function installNarrativeCanvasApp() {
     dom.webOnlyActions.forEach((element) => {
       element.hidden = Boolean(window.NarrativeCanvasHost);
     });
+    renderFrameCanvasScopeState();
     renderHistoryButtons();
   }
 
@@ -4831,11 +5165,14 @@ function installNarrativeCanvasApp() {
       ["[data-action='open-project-file']", "Open"],
       ["[data-action='reload-project-file']", "Reload"],
       ["[data-action='clear-browser-storage']", "Clear storage"],
+      ["[data-action='open-sample-project']", "Open sample file"],
       ["[data-action='add-custom-node-type']", "Add"],
       ["[data-action='zoom-out']", "-"],
       ["[data-action='zoom-in']", "+"],
       ["[data-action='center-view']", "Center"],
       ["[data-action='play']", "Play"],
+      [".frame-canvas-label", "Frame canvas"],
+      ["#frameCanvasExitButton", "Exit"],
       ["[data-action='export-json']", "Project .json"],
       ["[data-action='export-story-md']", "Story .md"],
       ["[data-action='import-story-md']", "Import story .md"],
@@ -4885,6 +5222,18 @@ function installNarrativeCanvasApp() {
       ["[data-sidebar-resizer='left']", "aria-label", "Resize left sidebar"],
       ["[data-sidebar-resizer='right']", "aria-label", "Resize right sidebar"],
       [".project-history", "aria-label", "History"],
+      ["#fullscreenButton", "title", "Enter immersive fullscreen"],
+      ["#fullscreenButton", "aria-label", "Enter immersive fullscreen"],
+      ["[data-float-panel='project']", "title", "Open Project in center"],
+      ["[data-float-panel='project']", "aria-label", "Open Project in center"],
+      ["[data-float-panel='node']", "title", "Open Node in center"],
+      ["[data-float-panel='node']", "aria-label", "Open Node in center"],
+      ["[data-float-panel='story']", "title", "Open Story in center"],
+      ["[data-float-panel='story']", "aria-label", "Open Story in center"],
+      ["[data-action='close-floating-inspector']", "title", "Close centered inspector"],
+      ["[data-action='close-floating-inspector']", "aria-label", "Close centered inspector"],
+      ["#frameCanvasExitButton", "title", "Exit frame canvas"],
+      ["#frameCanvasExitButton", "aria-label", "Exit frame canvas"],
       ["#undoButton", "title", "Undo (Ctrl+Z)"],
       ["#undoButton", "aria-label", "Undo"],
       ["#redoButton", "title", "Redo (Ctrl+Shift+Z or Ctrl+Y)"],
@@ -4895,10 +5244,14 @@ function installNarrativeCanvasApp() {
       ["#charactersPanel", "aria-label", "Characters"],
       ["#variablesPanel", "aria-label", "Variables"],
       ["#eventsPanel", "aria-label", "Events Sheet"],
+      ["#documentPanel", "aria-label", "Document"],
       ["#workspaceSearchControls", "aria-label", "Search"],
       ["#mentionPopover", "aria-label", "Character mentions"],
       [".playbook-scroll-top-button", "title", "Back to top"],
       [".playbook-scroll-top-button", "aria-label", "Back to top"],
+      [".workspace-toc-button", "title", "Toggle outline"],
+      [".workspace-toc-button", "aria-label", "Toggle outline"],
+      ["[data-document-toc-panel]", "aria-label", "Document outline"],
       ["#themeToggle", "title", "Switch theme"]
     ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
 
@@ -4906,11 +5259,13 @@ function installNarrativeCanvasApp() {
     localizeLabelText(".character-search-box", "Find");
     localizeLabelText(".event-search-box", "Find");
     localizeLabelText(".playbook-search-box", "Find");
+    localizeLabelText(".document-search-box", "Find");
     [
       ["#queryInput", "Find nodes"],
       ["#characterSearchInput", "Find character"],
       ["#eventSearchInput", "Find event"],
       ["#playbookSearchInput", "Find in Playbook"],
+      ["#documentSearchInput", "Find in document"],
       ["#customNodeName", "Name"],
       ["#customNodeFields", "Fields, one per line"]
     ].forEach(([selector, key]) => localizeAttr(selector, "placeholder", key));
@@ -4993,13 +5348,13 @@ function installNarrativeCanvasApp() {
     if (state.language === "zh") {
       return [
         {
-          title: "Playbook 管理范围",
-          lead: "Playbook 管理运行状态、节点逻辑、选项逻辑、演示预览规则和校验信息；画布布局、节点位置和连线仍在画布中维护。",
+          title: "演示设置管理范围",
+          lead: "演示设置管理运行状态、节点逻辑、选项逻辑、演示预览规则和校验信息；画布布局、节点位置和连线仍在画布中维护。",
           sections: [
             {
-              heading: "适合放在 Playbook 的内容",
+              heading: "适合放在演示设置中的内容",
               items: [
-                "变量定义：供条件、效果、文本模板和 Play 预览复用的状态键。",
+                "变量定义：供条件、效果、文本模板和演示预览复用的状态键。",
                 "变量动作：手动触发、全局记录、旧项目导入保留的状态写入。",
                 "脚本构建：节点条件要求、节点效果和路线。",
                 "选项条件：Choice 选项的可用条件和选择时效果。",
@@ -5007,7 +5362,7 @@ function installNarrativeCanvasApp() {
               ]
             },
             {
-              heading: "不适合放在 Playbook 的内容",
+              heading: "不适合放在演示设置中的内容",
               items: [
                 "节点位置、框架尺寸、连线形状和画布布局。",
                 "节点类型字段结构；这些应在节点库维护。",
@@ -5116,7 +5471,7 @@ function installNarrativeCanvasApp() {
           ],
           code: [
             "选项:",
-            "打开 Playbook",
+            "打开演示设置",
             "",
             "选择条件:",
             "script_builder_seen === true",
@@ -5128,15 +5483,15 @@ function installNarrativeCanvasApp() {
         },
         {
           title: "演示预览规则",
-          lead: "演示预览规则只影响 Play 对话框，用于测试路线，不改变画布结构。",
+          lead: "演示预览规则只影响演示弹窗，用于测试路线，不改变画布结构。",
           sections: [
             {
               heading: "规则说明",
               items: [
-                "起始节点：填写 Play 预览起始节点的精确标题；该设置只影响 Play 弹窗。",
-                "结束条件：表达式为 true 时停止 Play 预览。",
-                "调试模式：在 Play 预览中显示变量值、条件结果、路线和调试细节。",
-                "访问记录：位于调试模式内；调试模式开启时可记录已访问节点，关闭 Play 预览后丢弃。"
+                "起始节点：填写演示预览起始节点的精确标题；该设置只影响演示弹窗。",
+                "结束条件：表达式为 true 时停止演示预览。",
+                "调试模式：在演示预览中显示变量值、条件结果、路线和调试细节。",
+                "访问记录：位于调试模式内；调试模式开启时可记录已访问节点，关闭演示预览后丢弃。"
               ]
             }
           ],
@@ -5150,7 +5505,7 @@ function installNarrativeCanvasApp() {
         },
         {
           title: "校验与 JSON",
-          lead: "校验页用于演示前检查状态引用。Advanced JSON 用于精确编辑 Playbook.json。",
+          lead: "校验页用于演示前检查状态引用。高级 JSON 用于精确编辑演示设置文件（Playbook.json）。",
           sections: [
             {
               heading: "校验内容",
@@ -5444,7 +5799,11 @@ function installNarrativeCanvasApp() {
       dom.playbookSearchInput.value = state.playbookSearch || "";
     }
 
-    const hasSearch = activeFile === "adventure" || activeFile === "characters" || activeFile === "events" || activeFile === "variables";
+    if (dom.documentSearchInput && dom.documentSearchInput.value !== state.documentSearch) {
+      dom.documentSearchInput.value = state.documentSearch || "";
+    }
+
+    const hasSearch = activeFile === "adventure" || activeFile === "characters" || activeFile === "events" || activeFile === "variables" || activeFile === "document";
     if (dom.workspaceSearchControls) dom.workspaceSearchControls.hidden = !hasSearch;
     dom.scope.querySelectorAll("[data-search-scope]").forEach((element) => {
       element.hidden = element.dataset.searchScope !== activeFile;
@@ -5519,6 +5878,7 @@ function installNarrativeCanvasApp() {
       state.saveError = false;
       renderProjectFileStatus();
       scheduleAutoSave();
+      scheduleOpenPreviewRefresh();
       return;
     }
 
@@ -5615,11 +5975,13 @@ function installNarrativeCanvasApp() {
     setWorkspacePanelActive(dom.charactersPanel, activeFile === "characters");
     setWorkspacePanelActive(dom.variablesPanel, activeFile === "variables");
     setWorkspacePanelActive(dom.eventsPanel, activeFile === "events");
+    setWorkspacePanelActive(dom.documentPanel, activeFile === "document");
 
     if (activeFile === "adventure") renderCanvasSurface();
     if (activeFile === "characters") renderDocumentSurface("characters");
     if (activeFile === "variables") renderDocumentSurface("variables");
     if (activeFile === "events") renderDocumentSurface("events");
+    if (activeFile === "document") renderDocumentSurface("document");
   }
 
   function setWorkspacePanelActive(panel, active) {
@@ -5640,6 +6002,7 @@ function installNarrativeCanvasApp() {
     if (fileId === "characters") renderCharactersPage();
     if (fileId === "variables") renderVariablesPage(options);
     if (fileId === "events") renderEventsSheetPage();
+    if (fileId === "document") renderProjectDocumentPage();
     markDocumentSurfaceRendered(fileId);
   }
 
@@ -5654,7 +6017,530 @@ function installNarrativeCanvasApp() {
     if (fileId === "characters") return dom.charactersPanel;
     if (fileId === "variables") return dom.variablesPanel;
     if (fileId === "events") return dom.eventsPanel;
+    if (fileId === "document") return dom.documentPanel;
     return null;
+  }
+
+  function renderProjectDocumentPage() {
+    if (!dom.documentPanel) return;
+    const format = normalizeDocumentFormat(state.documentFormat);
+    if (state.documentDraftFormat !== format || state.documentApplyStatus === "synced") {
+      state.documentDraft = buildProjectDocumentSource(format);
+      state.documentDraftFormat = format;
+    }
+    const formatButtons = [
+      ["plain", "Plain text"],
+      ["ink", "Ink"],
+      ["yarn", "Yarn"],
+      ["twee", "Twee"]
+    ].map(([value, label]) => `
+      <button class="document-format-button${format === value ? " active" : ""}" data-action="set-document-format" data-document-format="${value}" type="button" aria-pressed="${format === value}">${t(label)}</button>
+    `).join("");
+    const editorHint = t("Edit narrative content here. Recognized nodes, choices, conditions, effects, routes, and variables sync to the project; canvas layout and unsupported metadata stay unchanged.");
+    dom.documentPanel.innerHTML = `
+      <div class="document-source-shell" data-document-toc="${state.documentTocOpen ? "open" : "closed"}">
+        <div class="document-editor-toolbar">
+          <div class="document-editor-identity">
+            <span class="document-editor-filename" title="${escapeAttr(editorHint)}">${escapeHtml(fileViews.document)}</span>
+            <div class="document-format-switch" role="group" aria-label="${escapeAttr(t("Document format"))}">${formatButtons}</div>
+          </div>
+          <span class="document-sync-status" data-document-sync-status data-status="${escapeAttr(state.documentApplyStatus)}">${escapeHtml(getDocumentSyncStatusLabel())}</span>
+        </div>
+        <div class="document-editor-main">
+          <div class="document-editor-surface">
+            <div class="document-editor-gutter" data-document-gutter aria-hidden="true"></div>
+            <div class="document-editor-input">
+              <div class="document-editor-highlight" data-document-highlight aria-hidden="true"></div>
+              <div class="document-editor-search-layer" data-document-search-layer aria-hidden="true"></div>
+              <textarea class="document-source-editor" data-document-source="project" spellcheck="false" wrap="off" aria-label="${escapeAttr(t("Project document source"))}" title="${escapeAttr(editorHint)}">${escapeHtml(state.documentDraft)}</textarea>
+            </div>
+          </div>
+          <aside class="document-toc-panel" data-document-toc-panel aria-label="${escapeAttr(t("Document outline"))}"></aside>
+        </div>
+      </div>
+    `;
+    bindDocumentEditor();
+  }
+
+  function bindDocumentEditor() {
+    const editor = dom.documentPanel?.querySelector("[data-document-source]");
+    if (!editor) return;
+    renderDocumentHighlight(editor);
+    syncDocumentEditorGutter(editor);
+    updateDocumentSearchMatches();
+    renderDocumentSearchLayer(editor);
+    renderDocumentToc();
+    updateDocumentTocButton();
+    editor.addEventListener("scroll", () => {
+      syncDocumentEditorGutter(editor);
+      syncDocumentOverlayScroll(editor);
+    }, { passive: true });
+  }
+
+  function syncDocumentEditorGutter(editor) {
+    if (!editor) return;
+    const gutter = editor.closest(".document-editor-surface")?.querySelector("[data-document-gutter]");
+    if (!gutter) return;
+    const lineCount = Math.max(1, editor.value.split("\n").length);
+    if (Number(gutter.dataset.lineCount) !== lineCount) {
+      // Plain text on a white-space:pre gutter — one text node instead of thousands of elements.
+      const numbers = new Array(lineCount);
+      for (let line = 1; line <= lineCount; line += 1) numbers[line - 1] = line;
+      gutter.textContent = numbers.join("\n");
+      gutter.dataset.lineCount = String(lineCount);
+    }
+    gutter.scrollTop = editor.scrollTop;
+  }
+
+  function syncDocumentOverlayScroll(editor) {
+    const input = editor?.closest(".document-editor-input");
+    if (!input) return;
+    const transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
+    const highlight = input.querySelector("[data-document-highlight]");
+    const searchLayer = input.querySelector("[data-document-search-layer]");
+    if (highlight) highlight.style.transform = transform;
+    if (searchLayer) searchLayer.style.transform = transform;
+  }
+
+  // Colorize the draft in a layer behind the transparent textarea (VSCode-style highlighting).
+  function renderDocumentHighlight(editor) {
+    const highlight = editor?.closest(".document-editor-input")?.querySelector("[data-document-highlight]");
+    if (!highlight) return;
+    highlight.innerHTML = highlightDocumentSource(editor.value, normalizeDocumentFormat(state.documentFormat));
+    syncDocumentOverlayScroll(editor);
+  }
+
+  function scheduleDocumentHighlight(editor) {
+    if (state.documentHighlightFrame) return;
+    state.documentHighlightFrame = window.requestAnimationFrame(() => {
+      state.documentHighlightFrame = null;
+      renderDocumentHighlight(editor);
+      // Refresh the outline in the same frame so an open TOC tracks edits without
+      // re-parsing the whole document on every keystroke.
+      if (state.documentTocOpen) renderDocumentToc();
+    });
+  }
+
+  const DOCUMENT_TOKEN_CACHE = {};
+
+  function getDocumentTokenEntry(format) {
+    if (DOCUMENT_TOKEN_CACHE[format]) return DOCUMENT_TOKEN_CACHE[format];
+    const defs = buildDocumentTokenDefs(format);
+    const combined = new RegExp(defs.map((def) => `(${def.src})`).join("|"), "g");
+    const entry = { defs, combined };
+    DOCUMENT_TOKEN_CACHE[format] = entry;
+    return entry;
+  }
+
+  function buildDocumentTokenDefs(format) {
+    if (format === "ink") {
+      return [
+        { src: "^\\s*=+[^\\n]*", cls: "tok-key" },
+        { src: "^\\s*[*+]\\s", cls: "tok-choice" },
+        { src: "^\\s*(?:VAR|CONST|LIST|INCLUDE|EXTERNAL)\\b", cls: "tok-keyword" },
+        { src: "^\\s*~[^\\n]*", cls: "tok-op" },
+        { src: "//[^\\n]*", cls: "tok-comment" },
+        { src: "->\\s*[\\w.]+", cls: "tok-op" },
+        { src: "\\{[^}]*\\}", cls: "tok-var" }
+      ];
+    }
+    if (format === "yarn") {
+      return [
+        { src: "^(?:---|===)\\s*$", cls: "tok-op" },
+        { src: "^[A-Za-z_][\\w ]*:\\s", cls: "tok-key" },
+        { src: "^\\s*->\\s", cls: "tok-choice" },
+        { src: "//[^\\n]*", cls: "tok-comment" },
+        { src: "<<[^>]*>>", cls: "tok-op" },
+        { src: "\\{[^}]*\\}", cls: "tok-var" }
+      ];
+    }
+    if (format === "twee") {
+      return [
+        { src: "^::\\s+[^\\n]*", cls: "tok-key" },
+        { src: "<<[^>]*>>", cls: "tok-op" },
+        { src: "<!--[^\\n]*?-->", cls: "tok-comment" },
+        { src: "/\\*[^\\n]*?\\*/", cls: "tok-comment" },
+        { src: "\\$[A-Za-z_]\\w*", cls: "tok-var" },
+        { src: "\\[[^\\]]*\\]", cls: "tok-choice" }
+      ];
+    }
+    return [
+      { src: "^#{1,6}\\s[^\\n]*", cls: "tok-heading" },
+      { src: "^\\s*>[^\\n]*", cls: "tok-quote" },
+      { src: "^\\s*[-*]\\s", cls: "tok-list" },
+      { src: "<!--[^\\n]*?-->", cls: "tok-comment" },
+      { src: "`[^`]*`", cls: "tok-code" },
+      { src: "\\*\\*[^*]+\\*\\*", cls: "tok-strong" },
+      { src: "\\{[^}]+\\}", cls: "tok-var" }
+    ];
+  }
+
+  function highlightDocumentSource(text, format) {
+    const entry = getDocumentTokenEntry(format);
+    return text.split("\n").map((line) => tokenizeDocumentLine(line, entry)).join("\n");
+  }
+
+  function tokenizeDocumentLine(line, entry) {
+    if (!line) return "";
+    const { combined, defs } = entry;
+    combined.lastIndex = 0;
+    let out = "";
+    let last = 0;
+    let match;
+    while ((match = combined.exec(line))) {
+      if (match.index > last) out += escapeHtml(line.slice(last, match.index));
+      let groupIndex = 1;
+      while (groupIndex <= defs.length && match[groupIndex] === undefined) groupIndex += 1;
+      const cls = defs[groupIndex - 1]?.cls || "";
+      out += `<span class="${cls}">${escapeHtml(match[0])}</span>`;
+      last = match.index + match[0].length;
+      if (match[0].length === 0) combined.lastIndex += 1;
+    }
+    if (last < line.length) out += escapeHtml(line.slice(last));
+    return out;
+  }
+
+  // --- Document search (same find behavior as the other workspace tabs) ---
+
+  function getDocumentSearchMatchOffsets() {
+    return (state.documentSearchMatches || []).map((range) => range.start);
+  }
+
+  function updateDocumentSearchMatches() {
+    const query = (state.documentSearch || "").trim().toLowerCase();
+    const matches = [];
+    if (query) {
+      const text = (state.documentDraft || "").toLowerCase();
+      let from = 0;
+      while (from <= text.length - query.length) {
+        const idx = text.indexOf(query, from);
+        if (idx < 0) break;
+        matches.push({ start: idx, end: idx + query.length });
+        from = idx + Math.max(1, query.length);
+      }
+    }
+    state.documentSearchMatches = matches;
+    if (state.documentSearchIndex >= matches.length) state.documentSearchIndex = matches.length ? matches.length - 1 : -1;
+  }
+
+  function renderDocumentSearchLayer(editor) {
+    const layer = editor?.closest(".document-editor-input")?.querySelector("[data-document-search-layer]");
+    if (!layer) return;
+    const matches = state.documentSearchMatches || [];
+    if (!matches.length) {
+      layer.innerHTML = "";
+      return;
+    }
+    const text = editor.value;
+    let html = "";
+    let last = 0;
+    matches.forEach((range, index) => {
+      if (range.start > last) html += escapeHtml(text.slice(last, range.start));
+      const cls = index === state.documentSearchIndex ? "doc-search-hit current" : "doc-search-hit";
+      html += `<span class="${cls}">${escapeHtml(text.slice(range.start, range.end))}</span>`;
+      last = range.end;
+    });
+    if (last < text.length) html += escapeHtml(text.slice(last));
+    layer.innerHTML = html;
+    syncDocumentOverlayScroll(editor);
+  }
+
+  function focusDocumentSearchMatch(offset) {
+    const editor = dom.documentPanel?.querySelector("[data-document-source]");
+    if (!editor) return;
+    renderDocumentSearchLayer(editor);
+    const lineHeight = getDocumentEditorLineHeight(editor);
+    const lineIndex = editor.value.slice(0, offset).split("\n").length - 1;
+    const target = Math.max(0, lineIndex * lineHeight - editor.clientHeight / 2);
+    editor.scrollTop = target;
+    syncDocumentEditorGutter(editor);
+    syncDocumentOverlayScroll(editor);
+  }
+
+  function getDocumentEditorLineHeight(editor) {
+    const parsed = parseFloat(getComputedStyle(editor).lineHeight);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    const fontSize = parseFloat(getComputedStyle(editor).fontSize) || 13;
+    return fontSize * 1.6;
+  }
+
+  // --- Document outline (table of contents) ---
+
+  function buildDocumentOutline() {
+    const format = normalizeDocumentFormat(state.documentFormat);
+    const lines = (state.documentDraft || "").split("\n");
+    const items = [];
+    lines.forEach((line, index) => {
+      if (format === "ink") {
+        let match = /^\s*==+\s*(?:function\s+)?([^=]+?)\s*=*\s*$/.exec(line);
+        if (match) { items.push({ line: index, level: 1, text: match[1].trim() }); return; }
+        match = /^\s*=\s*([\w ]+?)\s*$/.exec(line);
+        if (match) items.push({ line: index, level: 2, text: match[1].trim() });
+        return;
+      }
+      if (format === "yarn") {
+        const match = /^title:\s*(.*)$/.exec(line);
+        if (match) items.push({ line: index, level: 1, text: match[1].trim() });
+        return;
+      }
+      if (format === "twee") {
+        const match = /^::\s+(.+?)(?:\s+\[[^\]]*\])?\s*$/.exec(line);
+        if (match) items.push({ line: index, level: 1, text: match[1].trim() });
+        return;
+      }
+      const match = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (match) items.push({ line: index, level: match[1].length, text: match[2].trim() });
+    });
+    return items;
+  }
+
+  function renderDocumentToc() {
+    const panel = dom.documentPanel?.querySelector("[data-document-toc-panel]");
+    if (!panel) return;
+    const items = buildDocumentOutline();
+    if (!items.length) {
+      panel.innerHTML = `
+        <div class="document-toc-title">${escapeHtml(t("Outline"))}</div>
+        <div class="document-toc-empty">${escapeHtml(t("No headings yet."))}</div>
+      `;
+      return;
+    }
+    panel.innerHTML = `
+      <div class="document-toc-title">${escapeHtml(t("Outline"))}</div>
+      <ul class="document-toc-list">
+        ${items.map((item) => `
+          <li>
+            <button type="button" class="document-toc-item" data-action="jump-document-toc" data-toc-line="${item.line}" data-toc-level="${item.level}">
+              ${escapeHtml(item.text || t("(untitled)"))}
+            </button>
+          </li>
+        `).join("")}
+      </ul>
+    `;
+  }
+
+  function toggleDocumentToc() {
+    if (state.activeFileId !== "document") return;
+    state.documentTocOpen = !state.documentTocOpen;
+    const shell = dom.documentPanel?.querySelector(".document-source-shell");
+    if (shell) shell.dataset.documentToc = state.documentTocOpen ? "open" : "closed";
+    renderDocumentToc();
+    updateDocumentTocButton();
+    const editor = dom.documentPanel?.querySelector("[data-document-source]");
+    if (editor) window.requestAnimationFrame(() => {
+      syncDocumentEditorGutter(editor);
+      syncDocumentOverlayScroll(editor);
+    });
+  }
+
+  function updateDocumentTocButton() {
+    const button = dom.scope?.querySelector(".workspace-toc-button");
+    if (!button) return;
+    button.setAttribute("aria-pressed", String(Boolean(state.documentTocOpen)));
+  }
+
+  function jumpToDocumentOutline(lineIndex) {
+    const editor = dom.documentPanel?.querySelector("[data-document-source]");
+    if (!editor || !Number.isFinite(lineIndex)) return;
+    const lineHeight = getDocumentEditorLineHeight(editor);
+    editor.scrollTop = Math.max(0, lineIndex * lineHeight - lineHeight);
+    const offset = getDocumentLineStartOffset(editor.value, lineIndex);
+    try {
+      editor.focus({ preventScroll: true });
+      editor.setSelectionRange(offset, offset);
+    } catch (_error) {
+      // no-op for embedded WebViews without selection support
+    }
+    syncDocumentEditorGutter(editor);
+    syncDocumentOverlayScroll(editor);
+  }
+
+  function getDocumentLineStartOffset(text, lineIndex) {
+    let offset = 0;
+    const lines = text.split("\n");
+    for (let index = 0; index < lineIndex && index < lines.length; index += 1) {
+      offset += lines[index].length + 1;
+    }
+    return offset;
+  }
+
+  function scrollActiveWorkspaceTop() {
+    const panels = {
+      characters: dom.charactersPanel,
+      events: dom.eventsPanel,
+      variables: dom.variablesPanel,
+      document: dom.documentPanel
+    };
+    const panel = panels[state.activeFileId];
+    if (!panel) return;
+    try {
+      panel.scrollTo({ top: 0, behavior: "auto" });
+    } catch (_error) {
+      // Fallback for embedded WebViews with partial Element.scrollTo support.
+    }
+    panel.scrollTop = 0;
+    const editor = panel.querySelector?.("[data-document-source]");
+    if (editor) {
+      editor.scrollTop = 0;
+      syncDocumentEditorGutter(editor);
+      syncDocumentOverlayScroll(editor);
+    }
+  }
+
+  function handleDocumentSourceKeyDown(event) {
+    const target = event.target;
+    if (!target?.hasAttribute?.("data-document-source")) return false;
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return false;
+    event.preventDefault();
+    const indent = "  ";
+    const value = target.value;
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    if (start === end && !event.shiftKey) {
+      target.value = value.slice(0, start) + indent + value.slice(end);
+      target.selectionStart = target.selectionEnd = start + indent.length;
+    } else {
+      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+      const selection = value.slice(lineStart, end);
+      if (event.shiftKey) {
+        const outdented = selection.replace(/^( {1,2}|\t)/gm, "");
+        target.value = value.slice(0, lineStart) + outdented + value.slice(end);
+        const firstLineTrim = selection.length - selection.replace(/^( {1,2}|\t)/, "").length;
+        target.selectionStart = Math.max(lineStart, start - firstLineTrim);
+        target.selectionEnd = end - (selection.length - outdented.length);
+      } else {
+        const indented = selection.replace(/^/gm, indent);
+        target.value = value.slice(0, lineStart) + indented + value.slice(end);
+        target.selectionStart = start + indent.length;
+        target.selectionEnd = end + (indented.length - selection.length);
+      }
+    }
+    state.documentDraft = target.value;
+    state.documentDraftFormat = state.documentFormat;
+    state.documentApplyStatus = "pending";
+    state.documentLastError = "";
+    updateDocumentSyncStatus();
+    syncDocumentEditorGutter(target);
+    scheduleDocumentHighlight(target);
+    updateDocumentSearchMatches();
+    renderDocumentSearchLayer(target);
+    scheduleDocumentSourceApply();
+    return true;
+  }
+
+  function normalizeDocumentFormat(value) {
+    return ["plain", "ink", "yarn", "twee"].includes(value) ? value : "plain";
+  }
+
+  function buildProjectDocumentSource(format = state.documentFormat) {
+    const document = buildRuntimeExportDocument();
+    if (format === "ink") return buildInkScript(document, { documentSource: true });
+    if (format === "yarn") return buildYarnScript(document, { documentSource: true });
+    if (format === "twee") return buildProjectDocumentTweeSource(document);
+    return buildStoryMarkdown(document, { documentSource: true });
+  }
+
+  function buildProjectDocumentTweeSource(document) {
+    return buildTweeScript(document, { documentSource: true });
+  }
+
+  function setDocumentFormat(value) {
+    const nextFormat = normalizeDocumentFormat(value);
+    if (nextFormat === state.documentFormat) return;
+    if (!flushDocumentSourceApply()) return;
+    state.documentFormat = nextFormat;
+    state.documentDraft = "";
+    state.documentDraftFormat = "";
+    state.documentApplyStatus = "synced";
+    state.documentLastError = "";
+    renderDocumentSurface("document", { force: true });
+  }
+
+  function scheduleDocumentSourceApply() {
+    clearDocumentApplyTimer();
+    state.documentApplyTimer = window.setTimeout(() => {
+      state.documentApplyTimer = null;
+      applyDocumentSourceDraft();
+    }, 320);
+  }
+
+  function clearDocumentApplyTimer() {
+    if (!state.documentApplyTimer) return;
+    window.clearTimeout(state.documentApplyTimer);
+    state.documentApplyTimer = null;
+  }
+
+  function flushDocumentSourceApply() {
+    clearDocumentApplyTimer();
+    if (state.documentApplyStatus !== "pending") return state.documentApplyStatus !== "error";
+    return applyDocumentSourceDraft();
+  }
+
+  function applyDocumentSourceDraft() {
+    try {
+      const baseline = parseProjectDocumentSource(buildProjectDocumentSource(state.documentFormat), state.documentFormat);
+      const parsed = parseProjectDocumentSource(state.documentDraft, state.documentFormat);
+      validateDocumentSourceStructure(parsed, baseline);
+      const result = mergeProjectDocumentSource(parsed, baseline);
+      state.documentApplyStatus = "synced";
+      state.documentLastError = "";
+      setProjectDirty(true);
+      if (result.structureChanged) markProjectStructureChanged({ nodeTypes: true });
+      invalidateCharacterRenderContext();
+      renderProjectPanel();
+      renderStoryPanel();
+      // A `# Heading` edit updates state.project.title; refresh the shell so the top-left
+      // project name and the project-file/filename display track it. renderShellState only
+      // touches chrome (not the Document editor), so the caret and scroll are preserved.
+      renderShellState();
+      updateDocumentSyncStatus();
+      setStatus("Document changes synced to project.");
+      return true;
+    } catch (error) {
+      state.documentApplyStatus = "error";
+      state.documentLastError = error instanceof Error ? error.message : String(error);
+      updateDocumentSyncStatus();
+      setStatus(`Document source error: ${state.documentLastError}`);
+      return false;
+    }
+  }
+
+  function validateDocumentSourceStructure(parsed, baseline) {
+    const parsedNodes = parsed.nodes || [];
+    const baselineNodes = baseline.nodes || [];
+    if (parsedNodes.length !== baselineNodes.length) throw new Error(t("Document node structure is incomplete. Add or delete nodes on the canvas."));
+    const parsedIds = parsedNodes.map((node) => node.id).filter(Boolean);
+    if (parsedIds.length !== parsedNodes.length || new Set(parsedIds).size !== parsedIds.length) {
+      throw new Error(t("Document node IDs are missing or duplicated."));
+    }
+    const parsedById = new Map(parsedNodes.map((node) => [node.id, node]));
+    baselineNodes.forEach((baselineNode) => {
+      const node = parsedById.get(baselineNode.id);
+      if (!node) throw new Error(t("Document node structure is incomplete. Add or delete nodes on the canvas."));
+      if (!node.hasBodyMarkers) throw new Error(t("Document body markers are incomplete."));
+      if ((node.choices || []).length !== (baselineNode.choices || []).length) {
+        throw new Error(t("Add or delete choices in the node inspector; Document edits existing choices."));
+      }
+      const routes = node.next?.length ? node.next : node.branches || [];
+      const baselineRoutes = baselineNode.next?.length ? baselineNode.next : baselineNode.branches || [];
+      if (routes.length !== baselineRoutes.length) {
+        throw new Error(t("Add or delete routes on the canvas; Document edits existing routes."));
+      }
+    });
+  }
+
+  function getDocumentSyncStatusLabel() {
+    if (state.documentApplyStatus === "pending") return t("Syncing");
+    if (state.documentApplyStatus === "error") return t("Source error");
+    return t("Synced");
+  }
+
+  function updateDocumentSyncStatus() {
+    const status = dom.documentPanel?.querySelector("[data-document-sync-status]");
+    if (!status) return;
+    status.dataset.status = state.documentApplyStatus;
+    status.textContent = getDocumentSyncStatusLabel();
+    status.title = state.documentLastError || "";
   }
 
   function getDocumentRenderLimit(fileId) {
@@ -9143,44 +10029,19 @@ function installNarrativeCanvasApp() {
 
   function normalizeCanvasViewScroll() {
     if (!dom.viewport) return;
-    // For each axis: when the scaled board is wider/taller than the viewport (i.e. the user
-    // needs to scroll), force view.x/y to 0 and transfer any positive offset into the scroll
-    // position. With view.x>0 the layer sits inside a wasted padding gap and scrolling all
-    // the way to scrollLeft=0 keeps the leftmost board column hidden behind that gap. When
-    // the board fits inside the viewport we keep view.x positive so the centering done by
-    // centerView still places small projects in the middle.
-    const viewportWidth = dom.viewport.clientWidth || 0;
-    const viewportHeight = dom.viewport.clientHeight || 0;
     const scale = Math.max(CANVAS_MIN_ZOOM, state.view.scale || DEFAULT_CANVAS_ZOOM);
-    const scaledBoardWidth = BOARD_WIDTH * scale;
-    const scaledBoardHeight = BOARD_HEIGHT * scale;
+    const bounds = getCanvasScrollableBoardBounds();
+    const minPixelX = state.view.x + bounds.left * scale;
+    const minPixelY = state.view.y + bounds.top * scale;
     let shiftX = 0;
     let shiftY = 0;
-    if (scaledBoardWidth > viewportWidth) {
-      if (state.view.x !== 0) {
-        shiftX = state.view.x;
-        state.view.x = 0;
-      }
-    } else if (state.view.x < 0) {
-      shiftX = state.view.x;
-      state.view.x = 0;
-    }
-    if (scaledBoardHeight > viewportHeight) {
-      if (state.view.y !== 0) {
-        shiftY = state.view.y;
-        state.view.y = 0;
-      }
-    } else if (state.view.y < 0) {
-      shiftY = state.view.y;
-      state.view.y = 0;
-    }
+    if (minPixelX < CANVAS_VIEW_PADDING) shiftX = CANVAS_VIEW_PADDING - minPixelX;
+    if (minPixelY < CANVAS_VIEW_PADDING) shiftY = CANVAS_VIEW_PADDING - minPixelY;
     if (shiftX || shiftY) {
-      syncCanvasScrollBounds();
-      // Visual position is preserved by pulling the scroll position the opposite direction.
-      // Browser will clamp into [0, maxScroll] which is exactly what we want — a negative
-      // request becomes 0 (leftmost edge of the layer flush with the viewport).
-      dom.viewport.scrollLeft -= shiftX;
-      dom.viewport.scrollTop -= shiftY;
+      state.view.x += shiftX;
+      state.view.y += shiftY;
+      dom.viewport.scrollLeft += shiftX;
+      dom.viewport.scrollTop += shiftY;
     }
   }
 
@@ -9189,18 +10050,50 @@ function installNarrativeCanvasApp() {
     const viewportWidth = dom.viewport?.clientWidth || 0;
     const viewportHeight = dom.viewport?.clientHeight || 0;
     const scale = Math.max(CANVAS_MIN_ZOOM, state.view.scale || DEFAULT_CANVAS_ZOOM);
+    const bounds = getCanvasScrollableBoardBounds();
+    const right = state.view.x + bounds.right * scale;
+    const bottom = state.view.y + bounds.bottom * scale;
     const width = Math.ceil(Math.max(
       viewportWidth + CANVAS_VIEW_PADDING,
-      BOARD_WIDTH + CANVAS_VIEW_PADDING * 2,
-      state.view.x + BOARD_WIDTH * scale + CANVAS_VIEW_PADDING
+      right + CANVAS_FREE_EXPLORE_PADDING,
+      (dom.viewport?.scrollLeft || 0) + viewportWidth + CANVAS_FREE_EXPLORE_PADDING
     ));
     const height = Math.ceil(Math.max(
       viewportHeight + CANVAS_VIEW_PADDING,
-      BOARD_HEIGHT + CANVAS_VIEW_PADDING * 2,
-      state.view.y + BOARD_HEIGHT * scale + CANVAS_VIEW_PADDING
+      bottom + CANVAS_FREE_EXPLORE_PADDING,
+      (dom.viewport?.scrollTop || 0) + viewportHeight + CANVAS_FREE_EXPLORE_PADDING
     ));
+    setCanvasScrollAreaSize(width, height);
+  }
+
+  function extendCanvasScrollBoundsForPan(left, top) {
+    if (!dom.content || !dom.viewport) return;
+    const viewportWidth = dom.viewport.clientWidth || 0;
+    const viewportHeight = dom.viewport.clientHeight || 0;
+    const currentWidth = dom.content.offsetWidth || 0;
+    const currentHeight = dom.content.offsetHeight || 0;
+    const width = Math.ceil(Math.max(currentWidth, left + viewportWidth + CANVAS_FREE_EXPLORE_PADDING));
+    const height = Math.ceil(Math.max(currentHeight, top + viewportHeight + CANVAS_FREE_EXPLORE_PADDING));
+    if (width !== currentWidth || height !== currentHeight) setCanvasScrollAreaSize(width, height);
+  }
+
+  function setCanvasScrollAreaSize(width, height) {
     dom.content.style.width = `${width}px`;
     dom.content.style.height = `${height}px`;
+    [dom.frameLayer, dom.linkLayer, dom.nodeLayer, dom.marqueeLayer].forEach((layer) => {
+      if (!layer) return;
+      layer.style.width = `${width}px`;
+      layer.style.height = `${height}px`;
+    });
+  }
+
+  function getCanvasScrollableBoardBounds() {
+    const projectBounds = getProjectBounds();
+    const left = Math.min(0, projectBounds.x);
+    const top = Math.min(0, projectBounds.y);
+    const right = Math.max(BOARD_WIDTH, projectBounds.x + projectBounds.width);
+    const bottom = Math.max(BOARD_HEIGHT, projectBounds.y + projectBounds.height);
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
   }
 
   function renderNodes(renderContext = getCanvasRenderContext()) {
@@ -9213,7 +10106,7 @@ function installNarrativeCanvasApp() {
       .filter((item) => visibleNodeIds.has(item.node.id))
       .forEach(({ node, order }) => {
       const markup = renderCanvasNodeMarkup(node, query, focusedCharacterId, order);
-      if (isDefaultFrameLayerNode(node)) frameMarkup.push(markup);
+      if (isFrameNode(node)) frameMarkup.push(markup);
       else nodeMarkup.push(markup);
     });
     if (dom.frameLayer) dom.frameLayer.innerHTML = frameMarkup.join("");
@@ -9255,13 +10148,13 @@ function installNarrativeCanvasApp() {
             <button class="node-icon" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(node.type)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" data-icon-size="${getNodeIconSize(icon)}" title="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(node.type) }))}" aria-label="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(node.type) }))}">${escapeHtml(icon)}</button>
             <span class="node-type">${escapeHtml(getNodeTypeLabel(node.type))}</span>
               <span class="node-id">${escapeHtml(node.id || getNodeDisplayId(node))}</span>
+            ${isFrame ? `<button class="frame-canvas-button" type="button" data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" title="${escapeAttr(t("Open frame canvas"))}" aria-label="${escapeAttr(t("Open frame canvas"))}">▣</button>` : ""}
             ${isFrame ? `<button class="frame-collapse-button" type="button" data-action="toggle-frame-collapse" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" title="${escapeAttr(isFrameCollapsed(node) ? t("Expand frame") : t("Collapse frame"))}" aria-label="${escapeAttr(isFrameCollapsed(node) ? t("Expand frame") : t("Collapse frame"))}">${isFrameCollapsed(node) ? "+" : "-"}</button>` : ""}
           </div>
           <div class="node-body">
             ${renderNodeTitle(node, inlineEditField)}
             ${renderNodeCastChips(node)}
-            ${renderNodeText(node, inlineEditField)}
-            ${hasNodeChoices(node) ? `<div class="node-meta">${t("{count} choices", { count: node.choices.length })}</div>` : ""}
+            ${renderNodeCardContent(node, inlineEditField)}
           </div>
           <button class="node-resize-handle right" data-resize-handle="e" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize width"))}" aria-label="${escapeAttr(t("Resize width"))}"></button>
           <button class="node-resize-handle bottom" data-resize-handle="s" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize height"))}" aria-label="${escapeAttr(t("Resize height"))}"></button>
@@ -9271,10 +10164,6 @@ function installNarrativeCanvasApp() {
         <button class="port output ${node.id === state.connectingFrom ? "active" : ""}" style="${outputPortStyle}" data-port="output" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Output"))}" aria-label="${escapeAttr(t("Output port"))}"></button>
       </div>
     `;
-  }
-
-  function isDefaultFrameLayerNode(node) {
-    return isFrameNode(node) && getNodeLayerOrder(node, state.project.nodes.indexOf(node)) < REGULAR_LAYER_BASE;
   }
 
   function renderNodeTitle(node, inlineEditField) {
@@ -9289,6 +10178,46 @@ function installNarrativeCanvasApp() {
       return `<textarea class="node-inline-editor node-inline-text" data-inline-node-field="${escapeAttr(inlineEditField)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" aria-label="Edit node content">${escapeHtml(getInlineNodeFieldValue(node, inlineEditField))}</textarea>`;
     }
     return `<div class="node-text">${escapeHtml(displayBody(node))}</div>`;
+  }
+
+  function renderNodeCardContent(node, inlineEditField) {
+    if (inlineEditField) return renderNodeText(node, inlineEditField);
+    if (node?.type === "Choice") return renderChoiceNodeCardContent(node);
+    if (node?.type === "Dialog" && Array.isArray(node.turns) && node.turns.length) return renderDialogNodeCardContent(node);
+    return `${renderNodeText(node, inlineEditField)}${hasNodeChoices(node) ? `<div class="node-meta">${t("{count} choices", { count: node.choices.length })}</div>` : ""}`;
+  }
+
+  function renderChoiceNodeCardContent(node) {
+    const options = Array.isArray(node.choiceOptions) && node.choiceOptions.length
+      ? node.choiceOptions.map((option) => normalizeOptionalString(option?.label)).filter(Boolean)
+      : (Array.isArray(node.choices) ? node.choices.map(normalizeOptionalString).filter(Boolean) : []);
+    return `
+      ${node.body ? `<div class="node-text node-text-summary">${escapeHtml(displayBody(node))}</div>` : ""}
+      <ol class="node-choice-preview" aria-label="${escapeAttr(t("Choices"))}">
+        ${options.map((label, index) => {
+          const displayLabel = stripChoiceDisplayOrdinal(label);
+          return `<li title="${escapeAttr(label)}"><span class="node-choice-index" aria-hidden="true">${index + 1}</span><span class="node-choice-label">${escapeHtml(displayLabel)}</span></li>`;
+        }).join("")}
+      </ol>
+    `;
+  }
+
+  function stripChoiceDisplayOrdinal(value) {
+    const source = normalizeOptionalString(value).trim();
+    const stripped = source.replace(/^(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|\(\d+\)|\d+[.)、:：])\s*/, "").trim();
+    return stripped || source;
+  }
+
+  function renderDialogNodeCardContent(node) {
+    return `
+      <div class="node-dialog-preview" aria-label="${escapeAttr(t("Dialog"))}">
+        ${node.turns.map((turn) => {
+          const speaker = normalizeOptionalString(turn?.speaker).trim();
+          const line = normalizeOptionalString(turn?.line);
+          return `<div class="node-dialog-line">${speaker ? `<strong>${escapeHtml(speaker)}</strong><span aria-hidden="true">: </span>` : ""}<span>${escapeHtml(line)}</span></div>`;
+        }).join("")}
+      </div>
+    `;
   }
 
   function getInlineEditableField(node) {
@@ -9389,6 +10318,13 @@ function installNarrativeCanvasApp() {
 
   function getCanvasRenderContext(query = state.search.trim().toLowerCase()) {
     const matchNodeIds = query ? getCanvasSearchMatchIdSet(query) : null;
+    const activeFrame = getActiveFrameCanvas();
+    if (matchNodeIds && activeFrame) {
+      matchNodeIds.forEach((id) => {
+        const node = getNode(id);
+        if (!isNodeWithinFrameCanvas(node, activeFrame.id)) matchNodeIds.delete(id);
+      });
+    }
     return {
       query,
       matchNodeIds,
@@ -9446,8 +10382,11 @@ function installNarrativeCanvasApp() {
   function getCanvasVisibleNodeIds(query = state.search.trim().toLowerCase(), matchNodeIds = null) {
     const bounds = getCanvasViewportBounds();
     const ids = new Set();
+    const activeFrame = getActiveFrameCanvas();
+    const frameCanvasNodeIds = activeFrame ? getFrameCanvasNodeIdSet(activeFrame.id) : null;
     state.project.nodes.forEach((node) => {
-      if (isNodeHiddenByCollapsedFrame(node)) return;
+      if (frameCanvasNodeIds && !frameCanvasNodeIds.has(node.id)) return;
+      if (isNodeHiddenByCollapsedFrame(node, activeFrame?.id || "")) return;
       if (shouldForceCanvasNodeRender(node, query, matchNodeIds) || boundsIntersect(getNodeBounds(node), bounds)) {
         ids.add(node.id);
       }
@@ -9459,11 +10398,11 @@ function installNarrativeCanvasApp() {
     return Boolean(node && isFrameNode(node) && node.collapsed);
   }
 
-  function isNodeHiddenByCollapsedFrame(node) {
-    return Boolean(getCollapsedFrameForNode(node));
+  function isNodeHiddenByCollapsedFrame(node, ignoredFrameId = "") {
+    return Boolean(getCollapsedFrameForNode(node, ignoredFrameId));
   }
 
-  function getCollapsedFrameForNode(node) {
+  function getCollapsedFrameForNode(node, ignoredFrameId = "") {
     if (!node) return null;
     const nodeMap = getNodeIndex();
     let current = normalizeOptionalString(node.frameId).trim();
@@ -9473,18 +10412,26 @@ function installNarrativeCanvasApp() {
       seen.add(current);
       const frame = nodeMap.get(current);
       if (!frame || !isFrameNode(frame)) return null;
-      if (isFrameCollapsed(frame)) return frame;
+      if (!isCollapsedFrameIgnoredForCanvas(frame.id, ignoredFrameId) && isFrameCollapsed(frame)) return frame;
       current = normalizeOptionalString(frame.frameId).trim();
     }
     return null;
   }
 
-  function getRenderedLinkEndpoints(link, nodeMap = getNodeIndex()) {
+  function isCollapsedFrameIgnoredForCanvas(frameId, activeFrameId) {
+    if (!frameId || !activeFrameId) return false;
+    if (frameId === activeFrameId) return true;
+    const activeFrame = getNode(activeFrameId);
+    return Boolean(activeFrame && isFrameDescendantOf(activeFrame, frameId));
+  }
+
+  function getRenderedLinkEndpoints(link, nodeMap = getNodeIndex(), options = {}) {
     const rawFrom = nodeMap.get(link.from);
     const rawTo = nodeMap.get(link.to);
     if (!rawFrom || !rawTo) return null;
-    const fromFrame = getCollapsedFrameForNode(rawFrom);
-    const toFrame = getCollapsedFrameForNode(rawTo);
+    const ignoredFrameId = options.ignoredCollapsedFrameId || "";
+    const fromFrame = getCollapsedFrameForNode(rawFrom, ignoredFrameId);
+    const toFrame = getCollapsedFrameForNode(rawTo, ignoredFrameId);
     if (fromFrame && toFrame && fromFrame.id === toFrame.id) return null;
     const from = fromFrame || rawFrom;
     const to = toFrame || rawTo;
@@ -9665,6 +10612,7 @@ function installNarrativeCanvasApp() {
   function renderLinks(renderContext = getCanvasRenderContext()) {
     const visibleNodeIds = renderContext.visibleNodeIds;
     const nodeMap = renderContext.nodeMap;
+    const activeFrame = getActiveFrameCanvas();
     const linkSvg = [
       `<defs>
         <marker id="arrow-head" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="5" markerHeight="5" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
@@ -9674,9 +10622,10 @@ function installNarrativeCanvasApp() {
     ];
 
     state.project.links.forEach((link) => {
-      const endpoints = getRenderedLinkEndpoints(link, nodeMap);
+      const endpoints = getRenderedLinkEndpoints(link, nodeMap, { ignoredCollapsedFrameId: activeFrame?.id || "" });
       if (!endpoints) return;
       const { from, to } = endpoints;
+      if (isFrameCanvasActive() && (!visibleNodeIds.has(from.id) || !visibleNodeIds.has(to.id))) return;
       if (link.id !== state.selectedLinkId && !visibleNodeIds.has(from.id) && !visibleNodeIds.has(to.id)) return;
       const fromPoint = getOutputPoint(from);
       const toPoint = getInputPoint(to);
@@ -9707,6 +10656,7 @@ function installNarrativeCanvasApp() {
     renderProjectPanel();
     renderNodePanel(activeNode);
     renderStoryPanel();
+    renderFloatingInspectorState();
   }
 
   function renderInspectorTabs() {
@@ -9718,6 +10668,51 @@ function installNarrativeCanvasApp() {
     dom.scope.querySelectorAll(".inspector-panel").forEach((panel) => {
       panel.classList.toggle("active", panel.id === `${state.panel}Panel`);
     });
+  }
+
+  function getInspectorPanelElement(panel) {
+    if (panel === "project") return dom.projectPanel;
+    if (panel === "node") return dom.nodePanel;
+    if (panel === "story") return dom.storyPanel;
+    return null;
+  }
+
+  function restoreInspectorPanels() {
+    if (!dom.inspectorPanels) return;
+    [dom.projectPanel, dom.nodePanel, dom.storyPanel].filter(Boolean).forEach((panel) => dom.inspectorPanels.append(panel));
+  }
+
+  function renderFloatingInspectorState() {
+    const panel = validPanels.has(state.floatingInspectorPanel) ? state.floatingInspectorPanel : "";
+    if (!panel || !dom.inspectorFloatOverlay || !dom.inspectorFloatBody) return;
+    const panelElement = getInspectorPanelElement(panel);
+    if (!panelElement) return;
+    if (panelElement.parentElement !== dom.inspectorFloatBody) dom.inspectorFloatBody.append(panelElement);
+    dom.inspectorFloatOverlay.hidden = false;
+    if (dom.inspectorFloatTitle) {
+      const node = panel === "node" ? getNode(state.selectedNodeId) : null;
+      dom.inspectorFloatTitle.textContent = node ? node.title || t("Node") : t(titleCase(panel));
+    }
+  }
+
+  function openFloatingInspector(panel) {
+    if (!validPanels.has(panel)) return;
+    if (state.floatingInspectorPanel && state.floatingInspectorPanel !== panel) restoreInspectorPanels();
+    state.floatingInspectorPanel = panel;
+    state.panel = panel;
+    renderInspector();
+    dom.inspectorFloatOverlay?.querySelector(".inspector-float-window")?.focus?.();
+  }
+
+  function closeFloatingInspector(options = {}) {
+    const previousPanel = state.floatingInspectorPanel;
+    state.floatingInspectorPanel = "";
+    restoreInspectorPanels();
+    if (dom.inspectorFloatOverlay) dom.inspectorFloatOverlay.hidden = true;
+    renderInspectorTabs();
+    if (options.restoreFocus !== false && previousPanel) {
+      dom.scope?.querySelector?.(`[data-panel="${CSS.escape(previousPanel)}"]`)?.focus?.();
+    }
   }
 
   function renderProjectExportControls() {
@@ -9801,8 +10796,16 @@ function installNarrativeCanvasApp() {
     dom.nodePanel.classList.remove("is-empty");
     if (!node) {
       dom.nodePanel.replaceChildren();
+      delete dom.nodePanel.dataset.renderedNodeId;
       return;
     }
+    // Rebuilding the panel resets the inspector scroll position; keep it when
+    // re-rendering the same node so long editors (dialog turns, choice options)
+    // don't jump back to the top after every committed edit.
+    const scroller = dom.nodePanel.closest(".inspector-panel");
+    const keepScroll = dom.nodePanel.dataset.renderedNodeId === node.id;
+    const scrollTop = keepScroll && scroller ? scroller.scrollTop : 0;
+    dom.nodePanel.dataset.renderedNodeId = node.id;
     const meta = getNodeMeta(node.type);
     const legacyBanner = meta.legacy ? `
       <div class="legacy-node-banner" role="note">
@@ -9834,12 +10837,14 @@ function installNarrativeCanvasApp() {
           ${renderCustomFields(node)}
         `}
         <div class="button-row">
+          ${isFrameNode(node) ? `<button class="small-button" data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}">${t("Open frame canvas")}</button>` : ""}
           <button class="small-button" data-action="duplicate-node">${t("Duplicate")}</button>
           <button class="small-button danger-button" data-action="delete-node">${t("Delete node")}</button>
           <button class="small-button" data-action="focus-node">${t("Focus")}</button>
         </div>
       </div>
     `;
+    if (keepScroll && scroller) scroller.scrollTop = scrollTop;
   }
 
   function renderNodeDialogTurnsField(node) {
@@ -9851,7 +10856,6 @@ function installNarrativeCanvasApp() {
       <section class="dialog-turns-editor">
         <header>
           <span>${t("Turns")}</span>
-          <button class="small-button" type="button" data-action="add-dialog-turn">${t("Add turn")}</button>
         </header>
         <div class="dialog-turns-hint">${escapeHtml(headerHint)}</div>
         <div class="dialog-turns-list">
@@ -9867,6 +10871,9 @@ function installNarrativeCanvasApp() {
               </div>
             </div>
           `).join("")}
+        </div>
+        <div class="dialog-turns-footer">
+          <button class="small-button" type="button" data-action="add-dialog-turn">${t("Add turn")}</button>
         </div>
         <datalist id="dialogTurnSpeakerOptions">
           ${getCharacters().map((char) => `<option value="${escapeAttr(char.name)}"></option>`).join("")}
@@ -10622,9 +11629,7 @@ function installNarrativeCanvasApp() {
       <section class="choice-options-editor nc-collapsible${expanded ? " expanded" : ""}">
         <header class="nc-collapsible-header">
           ${renderNodeSectionToggle("choices", t("Choices"), expanded)}
-          ${expanded
-            ? `<button class="small-button" type="button" data-action="add-choice-option">${t("Add choice")}</button>`
-            : `<span class="nc-section-count">${options.length}</span>`}
+          <span class="nc-section-count">${options.length}</span>
         </header>
         ${expanded ? `
         <label class="field">
@@ -10636,6 +11641,9 @@ function installNarrativeCanvasApp() {
         <div class="choice-options-hint">${escapeHtml(t("Each option is available when its condition is met; selecting it runs its Effects. Empty Requires = always available."))}</div>
         <div class="choice-options-list">
           ${options.length === 0 ? `<div class="nc-empty-state">${t("No choices yet.")}</div>` : options.map((opt, index) => renderChoiceOptionCard(opt, index)).join("")}
+        </div>
+        <div class="choice-options-footer">
+          <button class="small-button" type="button" data-action="add-choice-option">${t("Add choice")}</button>
         </div>
         ` : ""}
       </section>
@@ -10874,6 +11882,7 @@ function installNarrativeCanvasApp() {
           <span class="story-item-title">${escapeHtml(formatStoryIndex(sequence))} ${escapeHtml(getNodeDisplayTitle(node, label))}</span>
           <span class="story-item-meta">${escapeHtml(label)} ${escapeHtml(getNodeDisplayId(node))}${entry.children.length ? ` - ${escapeHtml(t("{count} inside", { count: entry.children.length }))}` : ""}</span>
         </div>
+        ${isFrameNode(node) ? `<button class="story-collapse-button" data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Open frame canvas"))}" aria-label="${escapeAttr(t("Open frame canvas"))}">▣</button>` : ""}
         ${isFrameNode(node) ? `<button class="story-collapse-button" data-action="toggle-frame-collapse" data-node-id="${escapeAttr(node.id)}">${collapsed ? "+" : "-"}</button>` : ""}
         <button class="story-focus-button" data-action="focus-canvas-node" data-node-id="${escapeAttr(node.id)}">${t("Focus")}</button>
       </div>
@@ -10914,11 +11923,17 @@ function installNarrativeCanvasApp() {
   }
 
   function renderMinimap() {
+    const bounds = getCanvasScrollableBoardBounds();
+    const width = Math.max(bounds.width, 1);
+    const height = Math.max(bounds.height, 1);
+    const activeFrame = getActiveFrameCanvas();
+    const nodeIds = activeFrame ? getFrameCanvasNodeIdSet(activeFrame.id) : null;
     dom.minimap.innerHTML = state.project.nodes
+      .filter((node) => !nodeIds || nodeIds.has(node.id))
       .map((node) => {
         const meta = getNodeMeta(node.type);
-        const x = Math.max(2, Math.min(164, node.x / BOARD_WIDTH * 180));
-        const y = Math.max(2, Math.min(106, node.y / BOARD_HEIGHT * 118));
+        const x = Math.max(2, Math.min(164, (node.x - bounds.left) / width * 180));
+        const y = Math.max(2, Math.min(106, (node.y - bounds.top) / height * 118));
         return `<span class="minimap-node" data-minimap-node-id="${escapeAttr(node.id)}" style="left:${x}px; top:${y}px; --node-color:${meta.color}"></span>`;
       })
       .join("");
@@ -11012,8 +12027,9 @@ function installNarrativeCanvasApp() {
   function patchLinkElementRefs(refs) {
     if (!refs || !refs.length) return;
     const nodeMap = getNodeIndex();
+    const activeFrame = getActiveFrameCanvas();
     refs.forEach(({ link, els }) => {
-      const endpoints = getRenderedLinkEndpoints(link, nodeMap);
+      const endpoints = getRenderedLinkEndpoints(link, nodeMap, { ignoredCollapsedFrameId: activeFrame?.id || "" });
       if (!endpoints) return;
       const { from, to } = endpoints;
       const a = getOutputPoint(from);
@@ -11035,8 +12051,11 @@ function installNarrativeCanvasApp() {
     if (!node || !dom.minimap) return false;
     const element = dom.minimap.querySelector(`[data-minimap-node-id="${CSS.escape(node.id)}"]`);
     if (!element) return false;
-    element.style.left = `${Math.max(2, Math.min(164, node.x / BOARD_WIDTH * 180))}px`;
-    element.style.top = `${Math.max(2, Math.min(106, node.y / BOARD_HEIGHT * 118))}px`;
+    const bounds = getCanvasScrollableBoardBounds();
+    const width = Math.max(bounds.width, 1);
+    const height = Math.max(bounds.height, 1);
+    element.style.left = `${Math.max(2, Math.min(164, (node.x - bounds.left) / width * 180))}px`;
+    element.style.top = `${Math.max(2, Math.min(106, (node.y - bounds.top) / height * 118))}px`;
     return true;
   }
 
@@ -11053,6 +12072,7 @@ function installNarrativeCanvasApp() {
   // marker/geometry fields; rebuilding the Story panel is expensive on huge graphs.
   function resyncCanvasAfterInteraction(nodeId = null) {
     if (!isCanvasFileActive()) return;
+    renderTransform();
     const node = getNode(nodeId);
     if (node) {
       if (!patchMinimapNode(node)) renderMinimap();
@@ -11101,7 +12121,9 @@ function installNarrativeCanvasApp() {
     if (!isNarrativeCanvasTarget(target)) return;
     const nodeId = getCanvasNodeIdFromTargetForClick(target, event);
     if (state.ignoreNextCanvasClick) {
-      const shouldIgnore = state.ignoreNextCanvasClickTargetId == null || state.ignoreNextCanvasClickTargetId === nodeId;
+      const isCanvasReleaseClick = Boolean(dom.viewport?.contains(target));
+      const shouldIgnore = isCanvasReleaseClick
+        && (state.ignoreNextCanvasClickTargetId == null || state.ignoreNextCanvasClickTargetId === nodeId);
       state.ignoreNextCanvasClick = false;
       state.ignoreNextCanvasClickTargetId = null;
       if (shouldIgnore) return true;
@@ -11271,13 +12293,25 @@ function installNarrativeCanvasApp() {
   }
 
   function handleGlobalMenuDismiss(event) {
+    if (isCanvasRadialMenuOpen() && !dom.canvasRadialMenu.contains(event.target)) {
+      hideCanvasRadialMenu();
+    }
     if (!isNodeContextMenuOpen()) return;
     if (dom.nodeContextMenu.contains(event.target)) return;
     hideNodeContextMenu();
   }
 
   function handleGlobalMenuKeyDown(event) {
-    if (event.key !== "Escape" || !isNodeContextMenuOpen()) return;
+    if (event.key !== "Escape") return;
+    if (state.floatingInspectorPanel) {
+      closeFloatingInspector();
+      return;
+    }
+    if (isCanvasRadialMenuOpen()) {
+      hideCanvasRadialMenu();
+      return;
+    }
+    if (!isNodeContextMenuOpen()) return;
     hideNodeContextMenu();
   }
 
@@ -11392,7 +12426,8 @@ function installNarrativeCanvasApp() {
       hideNodeContextMenu();
       return;
     }
-    const linkElement = event.target.closest("[data-link-id]");
+    const target = getCanvasCoveredHeaderTarget(event) || event.target;
+    const linkElement = target.closest("[data-link-id]");
     if (linkElement) {
       event.preventDefault();
       const link = getLink(linkElement.dataset.linkId);
@@ -11401,8 +12436,20 @@ function installNarrativeCanvasApp() {
       return;
     }
 
-    const nodeElement = event.target.closest(".node[data-node-id]");
-    if (!nodeElement) {
+    // Resolve the node under the pointer through the node-stack wrapper too, not just the
+    // .node element: the input/output port buttons sit over the node's top border and header,
+    // so a right-click there would otherwise miss the node and fall through to the radial menu.
+    const directNodeElement = target.closest(".node[data-node-id]");
+    const stackElement = directNodeElement ? null : target.closest(".node-stack[data-node-stack-id]");
+    const resolvedNodeId = directNodeElement?.dataset.nodeId || stackElement?.dataset.nodeStackId || "";
+    const elementNode = resolvedNodeId ? getNode(resolvedNodeId) : null;
+    // Frames split right-click by region: the header title bar (including its top border, where
+    // the input port overlaps) opens the layer menu, while the frame body behaves like blank
+    // canvas (radial menu).
+    const overNodeHeader = Boolean(target.closest(".node-header")) || isPointerOverNodeHeaderRegion(elementNode, event.clientX, event.clientY);
+    const frameBodyClick = Boolean(elementNode && isFrameNode(elementNode) && !overNodeHeader);
+    const frameNode = elementNode ? null : getFrameNodeAtClientPoint(event.clientX, event.clientY);
+    if (!elementNode && !frameNode) {
       const nearestLink = getNearestLinkAtClientPoint(event.clientX, event.clientY);
       if (nearestLink) {
         event.preventDefault();
@@ -11411,13 +12458,26 @@ function installNarrativeCanvasApp() {
       }
     }
 
-    if (!nodeElement) {
+    if (frameBodyClick || (!elementNode && frameNode)) {
+      event.preventDefault();
+      showCanvasRadialMenu(event.clientX, event.clientY);
+      return;
+    }
+
+    if (!elementNode) {
+      const surfaceTargets = [dom.viewport, dom.content, dom.frameLayer, dom.nodeLayer, dom.linkLayer, dom.marqueeLayer];
+      const insideLinkLayer = Boolean(dom.linkLayer && dom.linkLayer.contains(event.target));
+      if (surfaceTargets.includes(event.target) || insideLinkLayer) {
+        event.preventDefault();
+        showCanvasRadialMenu(event.clientX, event.clientY);
+        return;
+      }
       hideNodeContextMenu();
       return;
     }
 
     event.preventDefault();
-    const node = getNode(nodeElement.dataset.nodeId);
+    const node = elementNode;
     if (!node) return;
     state.activeFileId = "adventure";
     state.selectedNodeId = node.id;
@@ -11428,6 +12488,21 @@ function installNarrativeCanvasApp() {
     renderLinks();
     renderInspector();
     showNodeContextMenu(node.id, event.clientX, event.clientY);
+  }
+
+  function getFrameNodeAtClientPoint(clientX, clientY) {
+    if (!dom.viewport || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    const viewportRect = dom.viewport.getBoundingClientRect();
+    if (clientX < viewportRect.left || clientX > viewportRect.right || clientY < viewportRect.top || clientY > viewportRect.bottom) return null;
+    const point = screenToBoard(clientX, clientY);
+    const visibleIds = getCanvasRenderContext().visibleNodeIds;
+    const frames = getCanvasLayerItems()
+      .filter(({ node }) => isFrameNode(node) && visibleIds.has(node.id) && !isNodeHiddenByCollapsedFrame(node, getActiveFrameCanvas()?.id || ""))
+      .reverse();
+    return frames.find(({ node }) => {
+      const size = nodeLayoutSize(node);
+      return point.x >= node.x && point.x <= node.x + size.width && point.y >= node.y && point.y <= node.y + size.height;
+    })?.node || null;
   }
 
   function openLinkContextMenu(link, clientX, clientY) {
@@ -11443,6 +12518,10 @@ function installNarrativeCanvasApp() {
 
   function handleAction(target) {
     const action = target.dataset.action;
+    if (action === "set-document-format") {
+      setDocumentFormat(target.dataset.documentFormat);
+      return;
+    }
     if (action === "undo") {
       undoHistory();
       return;
@@ -11451,8 +12530,40 @@ function installNarrativeCanvasApp() {
       redoHistory();
       return;
     }
+    if (action === "toggle-immersive-fullscreen") {
+      void toggleImmersiveFullscreen();
+      return;
+    }
+    if (action === "float-inspector-panel") {
+      openFloatingInspector(target.dataset.floatPanel);
+      return;
+    }
+    if (action === "close-floating-inspector") {
+      closeFloatingInspector();
+      return;
+    }
+    if (action === "toggle-play-float") {
+      togglePlayFloat();
+      return;
+    }
+    if (action === "toggle-document-toc") {
+      toggleDocumentToc();
+      return;
+    }
+    if (action === "jump-document-toc") {
+      jumpToDocumentOutline(Number(target.dataset.tocLine));
+      return;
+    }
+    if (action === "open-frame-canvas") {
+      enterFrameCanvas(target.dataset.nodeId || state.contextNodeId);
+      return;
+    }
+    if (action === "exit-frame-canvas") {
+      exitFrameCanvas();
+      return;
+    }
     const historyBefore = shouldRecordAction(action) ? getHistorySnapshot() : null;
-    if (action === "add-node") addNode(target.dataset.type);
+    if (action === "add-node") addNode(target.dataset.type, readNodeSpawnPoint(target));
     if (action === "add-custom-node-type") addCustomNodeType();
     if (action === "edit-node-type") editNodeType(target.dataset.nodeType);
     if (action === "restore-node-type") restoreNodeType(target.dataset.nodeType);
@@ -11467,6 +12578,7 @@ function installNarrativeCanvasApp() {
     if (action === "open-project-file") openProjectFileFromUi();
     if (action === "reload-project-file") reloadProjectFileFromUi();
     if (action === "clear-browser-storage") clearBrowserStorageFromUi();
+    if (action === "open-sample-project") openSampleProjectFromUi();
     if (action === "add-character") addCharacter();
     if (action === "hide-character") hideCharacter(target.dataset.characterId);
     if (action === "show-character") showCharacter(target.dataset.characterId);
@@ -11515,7 +12627,7 @@ function installNarrativeCanvasApp() {
     if (action === "create-play-rule") addPlaybookRule(target.dataset.playbookRuleKind);
     if (action === "toggle-playbook-json") togglePlaybookJson();
     if (action === "select-playbook-tab") selectPlaybookTab(target.dataset.playbookTab);
-    if (action === "scroll-playbook-top") scrollPlaybookToTop();
+    if (action === "scroll-playbook-top" || action === "scroll-workspace-top") scrollActiveWorkspaceTop();
     if (action === "filter-playbook-category") filterPlaybookCategory(target.dataset.playbookCategory);
     if (action === "focus-playbook-json") showPlaybookJsonAtToken(target.dataset.playbookToken);
     if (action === "show-playbook-choice-effect-draft") showPlaybookChoiceEffectDraft(target.dataset.gateId);
@@ -11603,6 +12715,12 @@ function installNarrativeCanvasApp() {
   async function openProjectFileFromUi() {
     if (!confirmDiscardUnsavedProject("Open another project and discard unsaved changes?", () => void openProjectFileFromUiConfirmed())) return;
     await openProjectFileFromUiConfirmed();
+  }
+
+  function openSampleProjectFromUi() {
+    if (window.NarrativeCanvasHost) return;
+    if (!confirmDiscardUnsavedProject("Open the sample file and discard unsaved changes?", () => void createSampleProjectFile())) return;
+    void createSampleProjectFile();
   }
 
   async function openProjectFileFromUiConfirmed() {
@@ -11767,15 +12885,23 @@ function installNarrativeCanvasApp() {
 
   function showNodeContextMenu(nodeId, clientX, clientY) {
     if (!dom.nodeContextMenu) return;
+    const node = getNode(nodeId);
+    const frameCanvasButton = node && isFrameNode(node)
+      ? `<button data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}">${t("Open frame canvas")}</button>`
+      : "";
+    const deleteLabel = node && isFrameNode(node) ? t("Delete frame") : t("Delete node");
     state.contextNodeId = nodeId;
     state.contextLinkId = null;
     state.contextGroup = false;
+    dom.nodeContextMenu.setAttribute("aria-label", t("Node layer menu"));
     dom.nodeContextMenu.innerHTML = `
+      ${frameCanvasButton}
+      <div class="context-menu-label">${t("Node layer")}</div>
       <button data-layer-action="front">${t("Bring to front")}</button>
       <button data-layer-action="forward">${t("Bring forward")}</button>
       <button data-layer-action="backward">${t("Send backward")}</button>
       <button data-layer-action="back">${t("Send to back")}</button>
-      <button class="context-menu-danger" data-action="delete-node">${t("Delete node")}</button>
+      <button class="context-menu-danger" data-action="delete-node">${deleteLabel}</button>
     `;
     positionContextMenu(clientX, clientY);
   }
@@ -11787,8 +12913,10 @@ function installNarrativeCanvasApp() {
     state.contextNodeId = null;
     state.contextLinkId = null;
     state.contextGroup = true;
+    dom.nodeContextMenu.setAttribute("aria-label", t("Node layer menu"));
     dom.nodeContextMenu.innerHTML = `
       <div class="context-menu-label">${t("{count} selected", { count })}</div>
+      <div class="context-menu-label">${t("Node layer")}</div>
       <button data-layer-action="front">${t("Bring to front")}</button>
       <button data-layer-action="forward">${t("Bring forward")}</button>
       <button data-layer-action="backward">${t("Send backward")}</button>
@@ -11847,8 +12975,8 @@ function installNarrativeCanvasApp() {
     dom.nodeContextMenu.style.top = `${clamp(pointerY + 4, 8, maxTop)}px`;
   }
 
-  function getContextMenuContainerRect() {
-    const parent = dom.nodeContextMenu?.offsetParent;
+  function getContextMenuContainerRect(element = dom.nodeContextMenu) {
+    const parent = element?.offsetParent;
     if (parent?.getBoundingClientRect) return parent.getBoundingClientRect();
     return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
   }
@@ -11857,10 +12985,113 @@ function installNarrativeCanvasApp() {
     state.contextNodeId = null;
     state.contextLinkId = null;
     state.contextGroup = false;
+    hideCanvasRadialMenu();
     if (!dom.nodeContextMenu) return;
     dom.nodeContextMenu.hidden = true;
     dom.nodeContextMenu.style.display = "none";
     dom.nodeContextMenu.setAttribute("aria-hidden", "true");
+  }
+
+  function isCanvasRadialMenuOpen() {
+    return Boolean(dom.canvasRadialMenu && !dom.canvasRadialMenu.hidden);
+  }
+
+  function hideCanvasRadialMenu() {
+    if (!dom.canvasRadialMenu) return;
+    dom.canvasRadialMenu.hidden = true;
+    dom.canvasRadialMenu.setAttribute("aria-hidden", "true");
+  }
+
+  function readNodeSpawnPoint(target) {
+    const x = Number(target?.dataset?.spawnX);
+    const y = Number(target?.dataset?.spawnY);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+  }
+
+  function getRadialFrameNodeType() {
+    const entries = getNodeTypeEntries();
+    const frameEntry = entries.find(([type]) => type === "Frame") || entries.find(([, meta]) => isFrameKind(meta.kind));
+    return frameEntry ? frameEntry[0] : "";
+  }
+
+  function renderCanvasRadialAddList(spawn) {
+    const entries = getNodeTypeEntries();
+    if (!entries.length) return `<div class="radial-add-empty">${t("No visible node types.")}</div>`;
+    return entries.map(([type, meta]) => `
+      <button class="radial-add-item" type="button" role="menuitem" data-action="add-node" data-type="${escapeAttr(type)}" data-spawn-x="${escapeAttr(String(spawn.x))}" data-spawn-y="${escapeAttr(String(spawn.y))}">
+        <span class="radial-add-badge" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}">${escapeHtml(meta.badge)}</span>
+        <span class="radial-add-label">${escapeHtml(getNodeTypeLabel(type))}</span>
+      </button>
+    `).join("");
+  }
+
+  function showCanvasRadialMenu(clientX, clientY) {
+    if (!dom.canvasRadialMenu) return;
+    hideNodeContextMenu();
+    const spawn = screenToBoard(clientX, clientY);
+    const frameType = getRadialFrameNodeType();
+    const spawnAttrs = `data-spawn-x="${escapeAttr(String(spawn.x))}" data-spawn-y="${escapeAttr(String(spawn.y))}"`;
+    dom.canvasRadialMenu.setAttribute("aria-label", t("Canvas quick menu"));
+    dom.canvasRadialMenu.innerHTML = `
+      <div class="radial-arc" role="group" aria-label="${escapeAttr(t("Canvas quick menu"))}">
+        <button class="radial-button radial-segment-1" type="button" data-radial-toggle="add" aria-haspopup="menu" aria-expanded="false" title="${escapeAttr(t("Add"))}">
+          <span class="radial-content"><span class="radial-icon">＋</span><span class="radial-label">${t("Add")}</span></span>
+        </button>
+        <button class="radial-button radial-segment-2" type="button" ${frameType ? `data-action="add-node" data-type="${escapeAttr(frameType)}" ${spawnAttrs}` : "disabled"} title="${escapeAttr(t("Frame"))}">
+          <span class="radial-content"><span class="radial-icon">▣</span><span class="radial-label">${t("Frame")}</span></span>
+        </button>
+        <button class="radial-button radial-segment-3" type="button" data-action="play" title="${escapeAttr(t("Play"))}">
+          <span class="radial-content"><span class="radial-icon">▶</span><span class="radial-label">${t("Play")}</span></span>
+        </button>
+        <button class="radial-button radial-segment-4" type="button" data-action="center-view" title="${escapeAttr(t("Center"))}">
+          <span class="radial-content"><span class="radial-icon">⌖</span><span class="radial-label">${t("Center")}</span></span>
+        </button>
+      </div>
+      <button class="radial-hub" type="button" data-radial-close="true" title="${escapeAttr(t("Close"))}" aria-label="${escapeAttr(t("Close"))}">×</button>
+      <div class="radial-add-list" role="menu" aria-label="${escapeAttr(t("Node Library"))}" hidden>${renderCanvasRadialAddList(spawn)}</div>
+    `;
+    positionCanvasRadialMenu(clientX, clientY);
+  }
+
+  function positionCanvasRadialMenu(clientX, clientY) {
+    if (!dom.canvasRadialMenu) return;
+    dom.canvasRadialMenu.hidden = false;
+    dom.canvasRadialMenu.setAttribute("aria-hidden", "false");
+    const containerRect = getContextMenuContainerRect(dom.canvasRadialMenu);
+    const margin = 104;
+    const pointerX = clientX - containerRect.left;
+    const pointerY = clientY - containerRect.top;
+    const maxLeft = Math.max(margin, containerRect.width - margin);
+    const maxTop = Math.max(margin, containerRect.height - margin);
+    dom.canvasRadialMenu.style.left = `${clamp(pointerX, margin, maxLeft)}px`;
+    dom.canvasRadialMenu.style.top = `${clamp(pointerY, margin, maxTop)}px`;
+  }
+
+  function handleCanvasRadialMenuClick(event) {
+    if (event.target.closest("[data-radial-close]")) {
+      event.stopPropagation();
+      hideCanvasRadialMenu();
+      return;
+    }
+    const toggleTarget = event.target.closest("[data-radial-toggle]");
+    if (toggleTarget) {
+      event.stopPropagation();
+      const list = dom.canvasRadialMenu?.querySelector(".radial-add-list");
+      if (!list) return;
+      list.hidden = !list.hidden;
+      toggleTarget.setAttribute("aria-expanded", String(!list.hidden));
+      return;
+    }
+    const actionTarget = event.target.closest("[data-action]");
+    if (!actionTarget) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    try {
+      handleAction(actionTarget);
+    } finally {
+      hideCanvasRadialMenu();
+    }
   }
 
   function moveContextNode(action) {
@@ -11878,7 +13109,9 @@ function installNarrativeCanvasApp() {
   }
 
   function moveNodeLayer(nodeId, action) {
-    const layerItems = getCanvasLayerItems();
+    const node = getNode(nodeId);
+    if (!node) return false;
+    const layerItems = getLayerItemsForNodeScope(node);
     const layerIndex = layerItems.findIndex((item) => item.node.id === nodeId);
     if (layerIndex < 0) return false;
     let targetLayerIndex = layerIndex;
@@ -11897,20 +13130,31 @@ function installNarrativeCanvasApp() {
 
     if (targetLayerIndex === layerIndex) return false;
 
-    const layerOrders = layerItems.map((item) => item.order).sort((a, b) => a - b);
     const [movedItem] = layerItems.splice(layerIndex, 1);
     layerItems.splice(targetLayerIndex, 0, movedItem);
-    layerItems.forEach((item, itemIndex) => {
-      item.node.layerOrder = layerOrders[itemIndex];
-    });
-    state.project.nodes = layerItems.map((item) => item.node);
+    assignLayerOrdersForScope(layerItems, isFrameNode(node));
+    state.project.nodes = getCanvasLayerItems().map((item) => item.node);
     return true;
   }
 
   function moveSelectedNodesLayer(action) {
     const ids = new Set(state.selectedNodeIds);
     if (!ids.size) return false;
-    const items = getCanvasLayerItems();
+    const scopes = [
+      getCanvasLayerItems().filter((item) => isFrameNode(item.node)),
+      getCanvasLayerItems().filter((item) => !isFrameNode(item.node))
+    ].filter((items) => items.some((item) => ids.has(item.node.id)));
+    if (!scopes.length) return false;
+    let changed = false;
+    scopes.forEach((items) => {
+      changed = moveSelectedLayerItemsWithinScope(items, ids, action) || changed;
+    });
+    if (!changed) return false;
+    state.project.nodes = getCanvasLayerItems().map((item) => item.node);
+    return true;
+  }
+
+  function moveSelectedLayerItemsWithinScope(items, ids, action) {
     const total = items.length;
     const selectedIndexes = items.reduce((indexes, item, index) => {
       if (ids.has(item.node.id)) indexes.push(index);
@@ -11918,7 +13162,6 @@ function installNarrativeCanvasApp() {
     }, []);
     if (!selectedIndexes.length) return false;
 
-    const orders = items.map((item) => item.order).sort((a, b) => a - b);
     let arranged;
     if (action === "front") {
       const selected = selectedIndexes.map((index) => items[index]);
@@ -11944,11 +13187,20 @@ function installNarrativeCanvasApp() {
 
     const unchanged = arranged.every((item, index) => item === items[index]);
     if (unchanged) return false;
-    arranged.forEach((item, index) => {
-      item.node.layerOrder = orders[index];
-    });
-    state.project.nodes = arranged.map((item) => item.node);
+    assignLayerOrdersForScope(arranged, isFrameNode(arranged[0]?.node));
     return true;
+  }
+
+  function getLayerItemsForNodeScope(node) {
+    const frameScope = isFrameNode(node);
+    return getCanvasLayerItems().filter((item) => isFrameNode(item.node) === frameScope);
+  }
+
+  function assignLayerOrdersForScope(items, frameScope) {
+    const base = frameScope ? EVENT_LAYER_BASE : REGULAR_LAYER_BASE;
+    items.forEach((item, index) => {
+      item.node.layerOrder = base + index;
+    });
   }
 
   function moveContextSelection(action) {
@@ -11992,6 +13244,7 @@ function installNarrativeCanvasApp() {
     if (options.removeReferences) removeNodeTargetReferences(ids);
     ids.forEach((id) => archiveDeletedNode(id));
     const idSet = new Set(ids);
+    reparentChildrenOfDeletedFrames(idSet);
     state.project.nodes = state.project.nodes.filter((node) => !idSet.has(node.id));
     state.project.links = state.project.links.filter((link) => !idSet.has(link.from) && !idSet.has(link.to));
     markProjectStructureChanged();
@@ -12002,6 +13255,22 @@ function installNarrativeCanvasApp() {
     hideNodeContextMenu();
     renderAll();
     setStatus(`${ids.length} nodes deleted and archived outside runtime.`);
+  }
+
+  function reparentChildrenOfDeletedFrames(deletedIds) {
+    const ids = deletedIds instanceof Set ? deletedIds : new Set(deletedIds || []);
+    if (!ids.size) return;
+    const nodeMap = new Map(state.project.nodes.map((node) => [node.id, node]));
+    state.project.nodes.forEach((node) => {
+      if (ids.has(node.id) || !ids.has(normalizeOptionalString(node.frameId).trim())) return;
+      let parentId = normalizeOptionalString(node.frameId).trim();
+      const seen = new Set();
+      while (parentId && ids.has(parentId) && !seen.has(parentId)) {
+        seen.add(parentId);
+        parentId = normalizeOptionalString(nodeMap.get(parentId)?.frameId).trim();
+      }
+      node.frameId = parentId && !ids.has(parentId) && isFrameNode(nodeMap.get(parentId)) ? parentId : "";
+    });
   }
 
   function selectFile(fileId) {
@@ -12025,6 +13294,12 @@ function installNarrativeCanvasApp() {
     if (fileId === "events") {
       renderDocumentFileSwitch();
       setStatus("Events Sheet.csv opened.");
+      return;
+    }
+
+    if (fileId === "document") {
+      renderDocumentFileSwitch();
+      setStatus("Document.md opened.");
       return;
     }
 
@@ -12054,7 +13329,7 @@ function installNarrativeCanvasApp() {
     if (!target?.dataset) return "";
     if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
     const parts = [];
-    ["projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionEffectField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+    ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionEffectField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
       if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
     });
     ["nodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
@@ -12107,6 +13382,23 @@ function installNarrativeCanvasApp() {
     }
     if (!isMentionTarget && !isNarrativeCanvasTarget(target)) return;
 
+    if (target.hasAttribute?.("data-document-source")) {
+      state.documentDraft = target.value;
+      state.documentDraftFormat = state.documentFormat;
+      state.documentApplyStatus = "pending";
+      state.documentLastError = "";
+      updateDocumentSyncStatus();
+      syncDocumentEditorGutter(target);
+      scheduleDocumentHighlight(target);
+      if ((state.documentSearch || "").trim()) {
+        updateDocumentSearchMatches();
+        renderDocumentSearchLayer(target);
+        refreshWorkspaceSearchCount();
+      }
+      scheduleDocumentSourceApply();
+      return;
+    }
+
     if (target === dom.queryInput) {
       state.search = target.value;
       state.searchIndex = -1;
@@ -12146,6 +13438,24 @@ function installNarrativeCanvasApp() {
       state.playbookSearch = target.value;
       state.playbookSearchIndex = -1;
       hidePlaybookJsonSearchHighlight();
+      refreshWorkspaceSearchCount();
+      return;
+    }
+
+    if (target.hasAttribute && target.hasAttribute("data-document-search")) {
+      state.documentSearch = target.value;
+      state.documentSearchIndex = -1;
+      updateDocumentSearchMatches();
+      const editor = dom.documentPanel?.querySelector("[data-document-source]");
+      if (editor) {
+        if (state.documentSearchMatches.length) {
+          state.documentSearchIndex = 0;
+          renderDocumentSearchLayer(editor);
+          focusDocumentSearchMatch(state.documentSearchMatches[0].start);
+        } else {
+          renderDocumentSearchLayer(editor);
+        }
+      }
       refreshWorkspaceSearchCount();
       return;
     }
@@ -12283,6 +13593,14 @@ function installNarrativeCanvasApp() {
   function handleChange(event) {
     const target = event.target;
     if (!isNarrativeCanvasTarget(target)) return;
+
+    if (target.hasAttribute?.("data-document-source")) {
+      state.documentDraft = target.value;
+      state.documentDraftFormat = state.documentFormat;
+      flushDocumentSourceApply();
+      commitFocusedEdit(target);
+      return;
+    }
 
     if (target === dom.exportImageScale) {
       setExportImageScale(target.value);
@@ -12463,6 +13781,7 @@ function installNarrativeCanvasApp() {
     else if (target === dom.characterSearchInput) scope = "characters";
     else if (target === dom.eventSearchInput) scope = "events";
     else if (target === dom.playbookSearchInput) scope = "variables";
+    else if (target === dom.documentSearchInput) scope = "document";
     if (!scope) return;
     event.preventDefault();
     cycleSearchScope(scope);
@@ -12480,6 +13799,7 @@ function installNarrativeCanvasApp() {
     if (handleHistoryShortcutEvent(event)) return;
     if (!isNarrativeCanvasTarget(event.target)) return;
     if (handleMentionKeyDown(event)) return;
+    if (handleDocumentSourceKeyDown(event)) return;
     const isField = isNativeEditingTarget(event.target);
     if (isField && handleDialogTurnKeyDown(event)) return;
     if (event.target.dataset?.inlineNodeField && event.key === "Escape") {
@@ -12969,6 +14289,34 @@ function installNarrativeCanvasApp() {
     }) || null;
   }
 
+  function getCanvasCoveredHeaderTarget(event) {
+    if (!event || event.target !== dom.linkLayer || typeof document.elementsFromPoint !== "function") return null;
+    const stack = document.elementsFromPoint(event.clientX, event.clientY);
+    const stackedHeader = stack.find((element) => {
+      if (!dom.frameLayer?.contains(element) && !dom.nodeLayer?.contains(element)) return false;
+      return Boolean(element.closest?.(".node-header"));
+    });
+    if (stackedHeader) return stackedHeader;
+    const headers = [
+      ...(dom.nodeLayer?.querySelectorAll(".node-header") || []),
+      ...(dom.frameLayer?.querySelectorAll(".node-header") || [])
+    ];
+    return headers.reverse().find((header) => {
+      const rect = header.getBoundingClientRect();
+      return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    }) || null;
+  }
+
+  function isPointerOverNodeHeaderRegion(node, clientX, clientY) {
+    if (!node || typeof document.elementsFromPoint !== "function") return false;
+    // The input port overlaps the header's top border, so the pointer target is the port, not the
+    // header. Look through the whole stack at this point for the header that belongs to this node.
+    return document.elementsFromPoint(clientX, clientY).some((element) => {
+      const header = element.closest?.(".node-header[data-node-id]");
+      return Boolean(header) && header.dataset.nodeId === node.id;
+    });
+  }
+
   function getCanvasNodeIdFromTargetForClick(target, event = null) {
     const directNodeId = target?.closest?.("[data-node-id]")?.dataset?.nodeId;
     if (directNodeId && getNode(directNodeId)) return directNodeId;
@@ -13046,11 +14394,11 @@ function installNarrativeCanvasApp() {
     if (target.closest("[data-no-drag]")) return;
 
     const resizeHandle = target.closest("[data-resize-handle]");
-    if (resizeHandle) {
+    if (resizeHandle && event.button === 0) {
       const node = getNode(resizeHandle.dataset.nodeId);
       if (!node) return;
       const size = nodeSize(node);
-      beginGeometryHistoryCapture(node);
+      beginGeometryHistoryCapture(withFrameCanvasHistoryFrames([node]));
       if (!isFrameNode(node)) {
         selectNode(node.id, false);
       }
@@ -13076,14 +14424,14 @@ function installNarrativeCanvasApp() {
     }
 
     const handle = target.closest("[data-drag-handle]");
-    if (handle) {
+    if (handle && event.button === 0) {
       const node = getNode(handle.dataset.nodeId);
       if (!node) return;
       const selected = collectSelectedIds();
       const baseNodeIds = selected.includes(node.id) && selected.length > 1 ? selected : [node.id];
       const dragNodeIds = getDragNodeIdsForDrag(node);
       const dragNodes = dragNodeIds.map(getNode).filter(Boolean);
-      beginGeometryHistoryCapture(dragNodes);
+      beginGeometryHistoryCapture(withFrameCanvasHistoryFrames(dragNodes));
       if (isFrameNode(node) || !selected.includes(node.id)) {
         selectNode(node.id, false);
       }
@@ -13175,18 +14523,80 @@ function installNarrativeCanvasApp() {
     if (!movedIds.size) return;
     const baseIds = new Set(drag?.baseNodeIds || drag?.nodeIds || []);
     const movedFrames = [...movedIds].map(getNode).filter((node) => node && isFrameNode(node));
+    const activeFrame = getActiveFrameCanvas();
+    let changed = false;
     const explicitChildrenMovedWithFrame = (node) => movedFrames.some((frame) => frame.id !== node.id && isFrameDescendantOf(node, frame.id));
     movedIds.forEach((id) => {
       const node = getNode(id);
       if (!node) return;
       if (!baseIds.has(node.id) && explicitChildrenMovedWithFrame(node)) return;
-      const parent = getCanvasDropFrameForNode(node);
+      const parent = activeFrame ? getFrameCanvasDropFrameForNode(node, activeFrame.id) : getCanvasDropFrameForNode(node);
       const nextFrameId = parent?.id || "";
       if (normalizeOptionalString(node.frameId).trim() !== nextFrameId) {
         node.frameId = nextFrameId;
+        changed = true;
       }
     });
     sanitizeFrameMembership(state.project);
+    if (changed) markProjectStructureChanged();
+  }
+
+  function getFrameNestingDepth(node) {
+    let depth = 0;
+    let current = normalizeOptionalString(node?.frameId).trim();
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      depth += 1;
+      current = normalizeOptionalString(getNode(current)?.frameId).trim();
+    }
+    return depth;
+  }
+
+  function getFrameCanvasFrames(frameCanvasId = state.frameCanvasId) {
+    const root = getNode(frameCanvasId);
+    if (!root || !isFrameNode(root)) return [];
+    return [root, ...getFrameDescendantNodes(root.id).filter((node) => isFrameNode(node))];
+  }
+
+  function withFrameCanvasHistoryFrames(nodes) {
+    if (!isFrameCanvasActive()) return nodes;
+    const merged = new Map(nodes.map((node) => [node.id, node]));
+    getFrameCanvasFrames().forEach((frame) => {
+      if (!merged.has(frame.id)) merged.set(frame.id, frame);
+    });
+    return [...merged.values()];
+  }
+
+  function expandFrameToFitMembers(frame) {
+    if (!frame || !isFrameNode(frame)) return false;
+    const members = state.project.nodes.filter((node) => (
+      node && node.id !== frame.id && normalizeOptionalString(node.frameId).trim() === frame.id
+    ));
+    if (!members.length) return false;
+    const bounds = getCombinedNodeBounds(members);
+    const size = nodeLayoutSize(frame);
+    if (![frame.x, frame.y, size.width, size.height, bounds.left, bounds.top, bounds.right, bounds.bottom].every(Number.isFinite)) return false;
+    const left = Math.min(frame.x, Math.round(bounds.left - AUTO_LAYOUT_FRAME_PADDING));
+    const top = Math.min(frame.y, Math.round(bounds.top - AUTO_LAYOUT_FRAME_PADDING - AUTO_LAYOUT_FRAME_HEADER));
+    const right = Math.max(frame.x + size.width, Math.round(bounds.right + AUTO_LAYOUT_FRAME_PADDING));
+    const bottom = Math.max(frame.y + size.height, Math.round(bounds.bottom + AUTO_LAYOUT_FRAME_PADDING));
+    if (left === frame.x && top === frame.y && right === frame.x + size.width && bottom === frame.y + size.height) return false;
+    frame.x = left;
+    frame.y = top;
+    frame.width = Math.max(minNodeWidth(frame), right - left);
+    frame.height = Math.max(minNodeHeight(frame), bottom - top);
+    return true;
+  }
+
+  function expandFrameCanvasFramesToFit(frameCanvasId = state.frameCanvasId) {
+    const frames = getFrameCanvasFrames(frameCanvasId)
+      .sort((a, b) => getFrameNestingDepth(b) - getFrameNestingDepth(a));
+    let changed = false;
+    frames.forEach((frame) => {
+      changed = expandFrameToFitMembers(frame) || changed;
+    });
+    return changed;
   }
 
   function getFrameVisualContainedNodeIds(frame) {
@@ -13314,6 +14724,14 @@ function installNarrativeCanvasApp() {
     return getSmallestContainingFrameForNode(node, frames);
   }
 
+  function getFrameCanvasDropFrameForNode(node, frameCanvasId) {
+    if (!node || !frameCanvasId) return getCanvasDropFrameForNode(node);
+    const parent = getCanvasDropFrameForNode(node);
+    if (parent && (parent.id === frameCanvasId || isFrameDescendantOf(parent, frameCanvasId))) return parent;
+    const frame = getNode(frameCanvasId);
+    return frame && isFrameNode(frame) && node.id !== frame.id ? frame : null;
+  }
+
   function getIncidentLinksForNodes(nodeIds) {
     const ids = new Set(nodeIds);
     return state.project.links.filter((link) => ids.has(link.from) || ids.has(link.to));
@@ -13322,8 +14740,9 @@ function installNarrativeCanvasApp() {
   function getPortDragLinks(node) {
     if (!node || !isFrameCollapsed(node)) return getIncidentLinks(node.id);
     const nodeMap = getNodeIndex();
+    const activeFrame = getActiveFrameCanvas();
     return state.project.links.filter((link) => {
-      const endpoints = getRenderedLinkEndpoints(link, nodeMap);
+      const endpoints = getRenderedLinkEndpoints(link, nodeMap, { ignoredCollapsedFrameId: activeFrame?.id || "" });
       return endpoints && (endpoints.from.id === node.id || endpoints.to.id === node.id);
     });
   }
@@ -13375,7 +14794,11 @@ function installNarrativeCanvasApp() {
     if (!state.marquee) return;
     const rect = getMarqueeBoardRect();
     const set = new Set(state.marquee.baseIds);
+    const activeFrame = getActiveFrameCanvas();
+    const frameCanvasNodeIds = activeFrame ? getFrameCanvasNodeIdSet(activeFrame.id) : null;
     state.project.nodes.forEach((node) => {
+      if (frameCanvasNodeIds && !frameCanvasNodeIds.has(node.id)) return;
+      if (isNodeHiddenByCollapsedFrame(node, activeFrame?.id || "")) return;
       if (nodeIntersectsRect(node, rect)) set.add(node.id);
     });
     state.selectedNodeIds = [...set];
@@ -13402,6 +14825,12 @@ function installNarrativeCanvasApp() {
     safeReleasePointerCapture(dom.viewport, event.pointerId);
     if (dom.marqueeRect) dom.marqueeRect.hidden = true;
     state.selectedNodeIds = state.selectedNodeIds.filter((id) => getNode(id));
+    if (marquee.moved) {
+      // Releasing a drag-select over a node fires a trailing click on it, which
+      // would collapse the marquee selection to that single node. Swallow it.
+      state.ignoreNextCanvasClick = true;
+      state.ignoreNextCanvasClickTargetId = null;
+    }
     renderNodes();
     renderInspector();
     if (marquee.moved && state.selectedNodeIds.length) {
@@ -13541,8 +14970,27 @@ function installNarrativeCanvasApp() {
         renderLinks(context);
       }
     } else if (state.panning) {
-      dom.viewport.scrollLeft = state.panning.scrollLeft - (event.clientX - state.panning.startX);
-      dom.viewport.scrollTop = state.panning.scrollTop - (event.clientY - state.panning.startY);
+      let nextScrollLeft = state.panning.scrollLeft - (event.clientX - state.panning.startX);
+      let nextScrollTop = state.panning.scrollTop - (event.clientY - state.panning.startY);
+      let shiftedOrigin = false;
+      if (nextScrollLeft < CANVAS_PAN_EDGE_PADDING) {
+        const shift = CANVAS_PAN_EDGE_PADDING - nextScrollLeft;
+        state.view.x += shift;
+        state.panning.scrollLeft += shift;
+        nextScrollLeft += shift;
+        shiftedOrigin = true;
+      }
+      if (nextScrollTop < CANVAS_PAN_EDGE_PADDING) {
+        const shift = CANVAS_PAN_EDGE_PADDING - nextScrollTop;
+        state.view.y += shift;
+        state.panning.scrollTop += shift;
+        nextScrollTop += shift;
+        shiftedOrigin = true;
+      }
+      if (shiftedOrigin) renderTransform();
+      extendCanvasScrollBoundsForPan(nextScrollLeft, nextScrollTop);
+      dom.viewport.scrollLeft = nextScrollLeft;
+      dom.viewport.scrollTop = nextScrollTop;
       updateGridPosition();
       event.preventDefault();
     } else if (state.connectingFrom) {
@@ -13612,11 +15060,20 @@ function installNarrativeCanvasApp() {
       safeReleasePointerCapture(dom.viewport, event.pointerId);
     }
     if (state.draggingNode) syncFrameMembershipAfterCanvasDrag(state.draggingNode);
+    if (shouldCommitHistory && isFrameCanvasActive()) expandFrameCanvasFramesToFit();
     state.draggingNode = null;
     state.resizingNode = null;
     state.panning = null;
     state.ignoreNextCanvasClick = suppressNodeClickAfterRelease;
     state.ignoreNextCanvasClickTargetId = suppressNodeClickAfterRelease ? interactionNodeId : null;
+    if (suppressNodeClickAfterRelease) {
+      const ignoredTargetId = interactionNodeId;
+      window.setTimeout(() => {
+        if (!state.ignoreNextCanvasClick || state.ignoreNextCanvasClickTargetId !== ignoredTargetId) return;
+        state.ignoreNextCanvasClick = false;
+        state.ignoreNextCanvasClickTargetId = null;
+      }, 0);
+    }
     if (shouldCommitHistory) {
       commitGeometryHistoryCapture();
       // The interaction patched the canvas in place; refresh visible DOM once and
@@ -13629,6 +15086,7 @@ function installNarrativeCanvasApp() {
   }
 
   function handleWheel(event) {
+    if (isCanvasRadialMenuOpen() && !dom.canvasRadialMenu.contains(event.target)) hideCanvasRadialMenu();
     if (!event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
     const before = screenToBoard(event.clientX, event.clientY);
@@ -13730,12 +15188,14 @@ function installNarrativeCanvasApp() {
     renderLinks();
   }
 
-  function addNode(type) {
+  function addNode(type, spawnPoint = null) {
     state.activeFileId = "adventure";
     renderShellState();
     renderWorkspaceFile();
     const rect = dom.viewport.getBoundingClientRect();
-    const center = screenToBoard(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const center = spawnPoint && Number.isFinite(spawnPoint.x) && Number.isFinite(spawnPoint.y)
+      ? spawnPoint
+      : screenToBoard(rect.left + rect.width / 2, rect.top + rect.height / 2);
     const node = {
       id: nextId("n", state.project.nodes),
       type,
@@ -13752,7 +15212,11 @@ function installNarrativeCanvasApp() {
     if (type === "Condition") node.condition = "";
     applyNodeTypeDefaults(node);
     node.x = Math.round(center.x - nodeLayoutSize(node).width / 2);
-    node.frameId = getCanvasDropFrameForNode(node)?.id || "";
+    const activeFrame = getActiveFrameCanvas();
+    const dropFrame = getCanvasDropFrameForNode(node);
+    node.frameId = activeFrame
+      ? (dropFrame && isNodeWithinFrameCanvas(dropFrame, activeFrame.id) ? dropFrame.id : activeFrame.id)
+      : (dropFrame?.id || "");
     assignDefaultLayerOrderForNewNode(node);
     state.project.nodes.push(normalizeNode(node));
     markProjectStructureChanged();
@@ -14746,6 +16210,7 @@ function installNarrativeCanvasApp() {
     syncChoicesFromOptions(node);
     setProjectDirty(true);
     updateStatus();
+    if (field === "label") renderNodes();
     if (rerender) renderNodePanel(node);
     if (state.activeFileId === "variables") renderPlaybookSurfaces();
   }
@@ -15129,10 +16594,26 @@ function installNarrativeCanvasApp() {
     syncDialogBodyFromTurns(node);
     setProjectDirty(true);
     updateStatus();
+    renderNodes();
     if (rerender) {
-      renderNodePanel(node);
-      renderNodes();
+      rerenderNodePanelAfterPointer(node);
     }
+  }
+
+  // Rebuild the node panel, but not while a pointer is pressed inside it: the
+  // commit-on-blur rerender would otherwise destroy the button under the cursor
+  // between mousedown and mouseup, swallowing the click (e.g. editing a turn and
+  // then pressing "Add turn" did nothing).
+  function rerenderNodePanelAfterPointer(node) {
+    const doRender = () => {
+      const current = getNode(node.id);
+      if (current && state.selectedNodeId === current.id) renderNodePanel(current);
+    };
+    if (state.nodePanelPointerDown) {
+      window.addEventListener("pointerup", () => window.requestAnimationFrame(doRender), { once: true });
+      return;
+    }
+    doRender();
   }
 
   // --- Legacy convert hook (Phase 3 stub; Phase 5 will offer bulk migration) ----------------------
@@ -16112,6 +17593,8 @@ function installNarrativeCanvasApp() {
   }
 
   function selectNode(id, rerender = true) {
+    const node = getNode(id);
+    if (state.frameCanvasId && node && !isNodeWithinFrameCanvas(node)) exitFrameCanvas({ render: false });
     state.activeFileId = "adventure";
     state.selectedNodeId = id;
     state.selectedNodeIds = [];
@@ -16224,6 +17707,10 @@ function installNarrativeCanvasApp() {
         const matches = getPlaybookSearchMatchOffsets();
         return { scope, matches, indexKey: "playbookSearchIndex" };
       }
+      case "document": {
+        const matches = getDocumentSearchMatchOffsets();
+        return { scope, matches, indexKey: "documentSearchIndex" };
+      }
       default:
         return { scope, matches: [], indexKey: null };
     }
@@ -16273,6 +17760,10 @@ function installNarrativeCanvasApp() {
     }
     if (scope === "variables") {
       focusPlaybookJsonAtOffset(match);
+      return;
+    }
+    if (scope === "document") {
+      focusDocumentSearchMatch(match);
     }
   }
 
@@ -16428,6 +17919,7 @@ function installNarrativeCanvasApp() {
   function focusCanvasNode(id) {
     const node = getNode(id);
     if (!node) return;
+    if (state.frameCanvasId && !isNodeWithinFrameCanvas(node)) exitFrameCanvas({ render: false });
     state.activeFileId = "adventure";
     state.selectedNodeId = id;
     state.selectedNodeIds = [];
@@ -16444,6 +17936,7 @@ function installNarrativeCanvasApp() {
   function focusCanvasNodeForInlineEdit(id) {
     const node = getNode(id);
     if (!node) return;
+    if (state.frameCanvasId && !isNodeWithinFrameCanvas(node)) exitFrameCanvas({ render: false });
     state.activeFileId = "adventure";
     state.selectedNodeId = id;
     state.selectedNodeIds = [];
@@ -16463,6 +17956,7 @@ function installNarrativeCanvasApp() {
   function focusCharacterNode(id) {
     const node = getNode(id);
     if (!node) return;
+    if (state.frameCanvasId && !isNodeWithinFrameCanvas(node)) exitFrameCanvas({ render: false });
     state.activeFileId = "adventure";
     state.selectedNodeId = id;
     state.selectedLinkId = null;
@@ -16840,6 +18334,7 @@ function installNarrativeCanvasApp() {
   function deleteSelectedNodeConfirmed(id, options = {}) {
     if (options.removeReferences) removeNodeTargetReferences([id]);
     archiveDeletedNode(id);
+    reparentChildrenOfDeletedFrames(new Set([id]));
     state.project.nodes = state.project.nodes.filter((node) => node.id !== id);
     state.project.links = state.project.links.filter((link) => link.from !== id && link.to !== id);
     markProjectStructureChanged();
@@ -16989,8 +18484,9 @@ function installNarrativeCanvasApp() {
 
   function minimapPointToBoard(clientX, clientY) {
     const rect = dom.minimap.getBoundingClientRect();
-    const x = clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1) * BOARD_WIDTH;
-    const y = clamp((clientY - rect.top) / Math.max(rect.height, 1), 0, 1) * BOARD_HEIGHT;
+    const bounds = getCanvasScrollableBoardBounds();
+    const x = bounds.left + clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1) * bounds.width;
+    const y = bounds.top + clamp((clientY - rect.top) / Math.max(rect.height, 1), 0, 1) * bounds.height;
     return { x, y };
   }
 
@@ -19014,59 +20510,83 @@ function installNarrativeCanvasApp() {
     });
   }
 
-  function buildYarnScript(document) {
+  function buildYarnScript(document, options = {}) {
+    const documentSource = Boolean(options.documentSource);
     const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
     const formatContext = {};
     const lines = buildExportHeaderLines(document, "Yarn Spinner");
+    if (documentSource) lines.push(`// narrativeCanvasNotes: ${encodeURIComponent(document.source?.notes || "")}`, "");
     document.nodes.forEach((node) => {
       lines.push(`title: ${node.slug}`);
       lines.push(`narrativeCanvasId: ${node.id}`);
       lines.push(`nodeType: ${makePlainHeaderValue(node.typeLabel || node.type)}`);
+      if (documentSource) lines.push(`nodeTitle: ${formatDocumentLiteral(getDocumentSourceNodeTitle(node))}`);
       lines.push("---");
       if (node.id === document.startNodeId) {
-        appendYarnVariableDeclarations(lines, document);
+        appendYarnVariableDeclarations(lines, document, { documentSource });
       }
       appendYarnNodeEffects(lines, node.effects);
+      if (documentSource) lines.push("// narrativeCanvasBody:start");
       appendTextLines(lines, convertRuntimeTextForFormat(node.body, document, "yarn"));
+      if (documentSource) lines.push("// narrativeCanvasBody:end");
       appendYarnRouting(lines, node, nodeMap, document, formatContext);
       lines.push("===", "");
     });
     return lines.join("\n").trimEnd() + "\n";
   }
 
-  function buildInkScript(document) {
+  function buildInkScript(document, options = {}) {
+    const documentSource = Boolean(options.documentSource);
     const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
     const formatContext = { inkListMap: buildInkListMap(document) };
     const lines = buildExportHeaderLines(document, "ink");
-    appendInkVariableDeclarations(lines, document, formatContext);
+    if (documentSource) lines.push(`// narrativeCanvasNotes: ${encodeURIComponent(document.source?.notes || "")}`, "");
+    appendInkVariableDeclarations(lines, document, formatContext, { documentSource });
     if (document.startNode) {
       lines.push(`-> ${document.startNode}`, "");
     }
     document.nodes.forEach((node) => {
+      lines.push(`// narrativeCanvasId: ${node.id}`);
+      lines.push(`// nodeType: ${makePlainHeaderValue(node.typeLabel || node.type)}`);
+      if (documentSource) lines.push(`// nodeTitle: ${formatDocumentLiteral(getDocumentSourceNodeTitle(node))}`);
       lines.push(`=== ${node.slug} ===`);
       appendInkNodeEffects(lines, node.effects);
+      if (documentSource) lines.push("// narrativeCanvasBody:start");
       appendTextLines(lines, convertRuntimeTextForFormat(getInkNodeBody(node), document, "ink"));
+      if (documentSource) lines.push("// narrativeCanvasBody:end");
       appendInkRouting(lines, node, nodeMap, document, formatContext);
       lines.push("");
     });
     return lines.join("\n").trimEnd() + "\n";
   }
 
-  function buildTweeScript(document) {
+  function buildTweeScript(document, options = {}) {
+    const documentSource = Boolean(options.documentSource);
     const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
     const formatContext = {};
-    const lines = buildTweeHeaderLines(document);
+    const lines = buildTweeHeaderLines(document, options);
     document.nodes.forEach((node) => {
       lines.push(`:: ${formatTweePassageName(node.slug)} [${formatTweeTag(node.type || "node")}]`);
+      if (documentSource) {
+        lines.push(`<!-- narrativeCanvasId: ${String(node.id || "").replace(/--/g, "-")} -->`);
+        lines.push(`<!-- narrativeCanvasTitle: ${encodeURIComponent(getDocumentSourceNodeTitle(node))} -->`);
+      }
       appendTweeNodeEffects(lines, node.effects);
+      if (documentSource) lines.push("<!-- narrativeCanvasBody:start -->");
       appendTextLines(lines, convertRuntimeTextForFormat(node.body, document, "twee"));
+      if (documentSource) lines.push("<!-- narrativeCanvasBody:end -->");
       appendTweeRouting(lines, node, nodeMap, document, formatContext);
       lines.push("");
     });
     return lines.join("\n").trimEnd() + "\n";
   }
 
-  function buildTweeHeaderLines(document) {
+  function getDocumentSourceNodeTitle(runtimeNode) {
+    const sourceNode = getNode(runtimeNode?.id);
+    return sourceNode?.title || runtimeNode?.title || runtimeNode?.slug || runtimeNode?.id || "Untitled";
+  }
+
+  function buildTweeHeaderLines(document, options = {}) {
     const lines = [];
     lines.push(":: StoryData");
     lines.push(JSON.stringify({
@@ -19079,6 +20599,11 @@ function installNarrativeCanvasApp() {
     lines.push(":: StoryTitle");
     lines.push(document.source?.title || "Untitled");
     lines.push("");
+    if (options.documentSource) {
+      lines.push(":: NarrativeCanvasProjectNotes [annotation]");
+      lines.push(`<!-- narrativeCanvasNotes: ${encodeURIComponent(document.source?.notes || "")} -->`);
+      lines.push("");
+    }
     lines.push(":: StoryInit");
     appendTweeVariableDeclarations(lines, document);
     if (!Object.keys(document.variables || {}).length) lines.push("/* No initial variables. */");
@@ -19116,13 +20641,14 @@ function installNarrativeCanvasApp() {
     return lines;
   }
 
-  function appendYarnVariableDeclarations(lines, document) {
+  function appendYarnVariableDeclarations(lines, document, options = {}) {
     Object.entries(document.variables || {}).forEach(([key, value]) => {
       if (Array.isArray(value)) {
         lines.push(`<<declare $${key} = ${formatYarnArrayLiteral(value)}>>`);
         return;
       }
       if (isComplexRuntimeValue(value)) {
+        if (options.documentSource) lines.push(`// narrativeCanvasVariable: ${key} = ${formatDocumentLiteral(value)}`);
         lines.push(`// Skipped complex variable $${key}; see runtime JSON.`);
         return;
       }
@@ -19131,11 +20657,19 @@ function installNarrativeCanvasApp() {
     if (Object.keys(document.variables || {}).length) lines.push("");
   }
 
-  function appendInkVariableDeclarations(lines, document, context = {}) {
+  function appendInkVariableDeclarations(lines, document, context = {}, options = {}) {
     const inkListMap = context.inkListMap || {};
     Object.entries(document.variables || {}).forEach(([key, value]) => {
       if (Array.isArray(value)) {
         const list = inkListMap[key];
+        if (options.documentSource) {
+          const valueMap = {};
+          (list?.items || []).forEach((item) => {
+            const original = value.find((entry) => String(entry) === item.value);
+            valueMap[item.identifier] = original === undefined ? item.value : original;
+          });
+          lines.push(`// narrativeCanvasListValues: ${key} = ${formatDocumentLiteral(valueMap)}`);
+        }
         if (!list || !list.items.length) {
           lines.push(`// Skipped empty list ${key}; see runtime JSON.`);
           return;
@@ -19145,6 +20679,7 @@ function installNarrativeCanvasApp() {
         return;
       }
       if (isComplexRuntimeValue(value)) {
+        if (options.documentSource) lines.push(`// narrativeCanvasVariable: ${key} = ${formatDocumentLiteral(value)}`);
         lines.push(`// Skipped complex variable ${key}; see runtime JSON.`);
         return;
       }
@@ -19523,7 +21058,8 @@ function installNarrativeCanvasApp() {
     return String(label || "Continue").replace(/[\[\]\r\n]+/g, " ").replace(/\s+/g, " ").trim() || "Continue";
   }
 
-  function buildStoryMarkdown(document) {
+  function buildStoryMarkdown(document, options = {}) {
+    const documentSource = Boolean(options.documentSource);
     const nodeMap = new Map((document.nodes || []).map((node) => [node.id, node]));
     const lines = [
       `# ${formatMarkdownHeading(document.source?.title || "Untitled Story")}`,
@@ -19536,15 +21072,24 @@ function installNarrativeCanvasApp() {
       String(document.source.notes).split(/\r?\n/).forEach((line) => lines.push(`> ${line}`));
       lines.push("");
     }
+    const variables = Object.entries(document.variables || {});
+    if (variables.length) {
+      lines.push("### Variables");
+      variables.forEach(([key, value]) => lines.push(`- \`${key}\` = ${formatDocumentLiteral(value)}`));
+      lines.push("");
+    }
     (document.nodes || []).forEach((node) => {
-      lines.push(`## ${formatMarkdownHeading(node.title || node.slug || node.id)}`);
+      const sourceTitle = documentSource ? getDocumentSourceNodeTitle(node) : (node.title || node.slug || node.id);
+      lines.push(`## ${formatMarkdownHeading(sourceTitle)}`);
       lines.push(`<!-- id: ${node.id} -->`);
       lines.push(`type: ${formatMarkdownInline(node.typeLabel || node.type || "Node")}`);
       lines.push(`slug: ${formatMarkdownInline(node.slug || node.id)}`);
-      if (node.condition) lines.push(`requires: ${node.condition}`);
+      if (node.requirements) lines.push(`requires: ${node.requirements}`);
       if (node.cast?.length) lines.push(`cast: ${node.cast.map((entry) => entry.name).filter(Boolean).join(", ")}`);
       lines.push("");
+      if (documentSource) lines.push("<!-- narrativeCanvasBody:start -->");
       appendStoryMarkdownBody(lines, node.body);
+      if (documentSource) lines.push("<!-- narrativeCanvasBody:end -->", "");
       appendStoryMarkdownEffects(lines, node.effects, "effects");
       appendStoryMarkdownChoices(lines, node, nodeMap);
       appendStoryMarkdownBranches(lines, node, nodeMap);
@@ -20187,8 +21732,14 @@ function installNarrativeCanvasApp() {
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = filename;
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+    (document.body || document.documentElement).appendChild(anchor);
     anchor.click();
-    URL.revokeObjectURL(url);
+    anchor.remove();
+    // Defer revocation: revoking synchronously right after click() can cancel the download
+    // before it starts in Chromium/Electron (Obsidian), producing an empty or missing file.
+    window.setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
   function downloadJsonFile(value, filename) {
@@ -20446,15 +21997,17 @@ function installNarrativeCanvasApp() {
     };
   }
 
-  function parseStoryMarkdownDocument(source) {
+  function parseStoryMarkdownDocument(source, options = {}) {
+    const documentSource = Boolean(options.documentSource);
     const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
     const titleLine = lines.find((line) => /^#\s+/.test(line) && !/^##\s+/.test(line));
     const title = titleLine ? titleLine.replace(/^#\s+/, "").trim() : "Imported Story";
     const blocks = [];
     let current = null;
-    lines.forEach((line) => {
+    lines.forEach((line, index) => {
       const heading = line.match(/^##\s+(.+)$/);
-      if (heading) {
+      const nextLineIsStableId = /^<!--\s*id:\s*[^>]+-->$/.test((lines[index + 1] || "").trim());
+      if (heading && (!documentSource || nextLineIsStableId)) {
         current = { title: heading[1].trim(), lines: [] };
         blocks.push(current);
         return;
@@ -20463,8 +22016,478 @@ function installNarrativeCanvasApp() {
     });
     return {
       title,
+      notes: parseStoryMarkdownNotes(lines),
+      variables: parseStoryMarkdownVariables(lines),
       nodes: blocks.map(parseStoryMarkdownNodeBlock).filter((node) => node.title)
     };
+  }
+
+  function parseStoryMarkdownNotes(lines) {
+    const notes = [];
+    let inside = false;
+    (Array.isArray(lines) ? lines : []).forEach((line) => {
+      if (line.trim() === "> Source notes") {
+        inside = true;
+        return;
+      }
+      if (!inside) return;
+      const quote = line.match(/^>\s?(.*)$/);
+      if (!quote) {
+        inside = false;
+        return;
+      }
+      notes.push(quote[1]);
+    });
+    return notes.join("\n").trim();
+  }
+
+  function parseStoryMarkdownVariables(lines) {
+    const variables = {};
+    let inside = false;
+    (Array.isArray(lines) ? lines : []).forEach((line) => {
+      if (/^###\s+Variables\s*$/i.test(line.trim())) {
+        inside = true;
+        return;
+      }
+      if (inside && /^#{2,3}\s+/.test(line.trim())) {
+        inside = false;
+        return;
+      }
+      if (!inside) return;
+      const match = line.match(/^\s*-\s+`?([^`=]+?)`?\s*=\s*(.+)\s*$/);
+      if (match) variables[match[1].trim()] = parseDocumentLiteral(match[2]);
+    });
+    return variables;
+  }
+
+  function formatDocumentLiteral(value) {
+    if (value === undefined) return "null";
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return JSON.stringify(String(value));
+    }
+  }
+
+  function parseDocumentLiteral(value) {
+    const source = String(value ?? "").trim();
+    if (!source) return "";
+    try {
+      return JSON.parse(source);
+    } catch (error) {
+      if (source === "true") return true;
+      if (source === "false") return false;
+      if (source === "null") return null;
+      if (/^-?\d+(?:\.\d+)?$/.test(source)) return Number(source);
+      return source.replace(/^(?:"|')|(?:"|')$/g, "");
+    }
+  }
+
+  function parseProjectDocumentSource(source, format) {
+    const text = String(source || "").replace(/\r\n/g, "\n");
+    if (!text.trim()) throw new Error(t("Document cannot be empty."));
+    const normalizedFormat = normalizeDocumentFormat(format);
+    const parsed = normalizedFormat === "yarn"
+      ? parseYarnDocumentSource(text)
+      : normalizedFormat === "ink"
+        ? parseInkDocumentSource(text)
+        : normalizedFormat === "twee"
+          ? parseTweeDocumentSource(text)
+          : parseStoryMarkdownDocument(text, { documentSource: true });
+    if (!Array.isArray(parsed.nodes) || !parsed.nodes.length) {
+      throw new Error(t("No editable nodes were found."));
+    }
+    return { ...parsed, format: normalizedFormat };
+  }
+
+  function parseTweeDocumentSource(source) {
+    const passages = [];
+    let current = null;
+    const pushCurrent = () => {
+      if (current) passages.push(current);
+      current = null;
+    };
+    String(source || "").split("\n").forEach((line) => {
+      const header = line.match(/^::\s+(.+?)(?:\s+\[([^\]]*)\])?\s*$/);
+      if (header) {
+        pushCurrent();
+        current = {
+          slug: unescapeTweePassageName(header[1].trim()),
+          tags: (header[2] || "").split(/\s+/).filter(Boolean),
+          lines: []
+        };
+        return;
+      }
+      if (current) current.lines.push(line);
+    });
+    pushCurrent();
+
+    const bySlug = new Map(passages.map((passage) => [passage.slug, passage]));
+    const title = (bySlug.get("StoryTitle")?.lines || []).join("\n").trim();
+    const notesMarker = (bySlug.get("NarrativeCanvasProjectNotes")?.lines || []).join("\n").match(/<!--\s*narrativeCanvasNotes:\s*(.*?)\s*-->/);
+    const notes = decodeDocumentMetadata(notesMarker?.[1] || "");
+    const variables = {};
+    (bySlug.get("StoryInit")?.lines || []).forEach((line) => {
+      const match = line.trim().match(/^<<set\s+\$([A-Za-z_]\w*)\s*=\s*([\s\S]+?)>>$/);
+      if (match) variables[match[1]] = parseDocumentLiteral(match[2]);
+    });
+    const reserved = new Set(["StoryData", "StoryTitle", "StoryInit", "NarrativeCanvasProjectNotes", "NarrativeCanvasExportReport"]);
+    const nodes = passages
+      .filter((passage) => !reserved.has(passage.slug) && !passage.tags.includes("annotation"))
+      .map((passage) => parseTweeDocumentNode(passage));
+    return { title, notes, variables, nodes };
+  }
+
+  function decodeDocumentMetadata(value) {
+    try {
+      return decodeURIComponent(String(value || ""));
+    } catch (error) {
+      return String(value || "");
+    }
+  }
+
+  function parseTweeDocumentNode(passage) {
+    const lines = passage.lines || [];
+    const type = passage.tags[0] || "";
+    const node = {
+      id: "",
+      type,
+      slug: passage.slug,
+      body: [],
+      effects: [],
+      choices: [],
+      next: [],
+      hasBodyMarkers: false,
+      replaceEffects: true,
+      replaceChoices: true
+    };
+    const hasBodyMarkers = lines.some((line) => line.trim() === "<!-- narrativeCanvasBody:start -->");
+    node.hasBodyMarkers = hasBodyMarkers && lines.some((line) => line.trim() === "<!-- narrativeCanvasBody:end -->");
+    let insideBody = false;
+    const conditionStack = [];
+    const currentCondition = () => conditionStack[conditionStack.length - 1] || "";
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const trimmed = line.trim();
+      const idMarker = trimmed.match(/^<!--\s*narrativeCanvasId:\s*(.+?)\s*-->$/);
+      if (idMarker) {
+        node.id = idMarker[1].trim();
+        continue;
+      }
+      const titleMarker = trimmed.match(/^<!--\s*narrativeCanvasTitle:\s*(.*?)\s*-->$/);
+      if (titleMarker) {
+        try {
+          node.title = decodeURIComponent(titleMarker[1]);
+        } catch (error) {
+          node.title = titleMarker[1];
+        }
+        continue;
+      }
+      if (trimmed === "<!-- narrativeCanvasBody:start -->") {
+        insideBody = true;
+        continue;
+      }
+      if (trimmed === "<!-- narrativeCanvasBody:end -->") {
+        insideBody = false;
+        continue;
+      }
+      if (hasBodyMarkers && insideBody) {
+        node.body.push(line.replace(/\s+$/, ""));
+        continue;
+      }
+      if (!trimmed && !node.body.length) continue;
+      if (/^(?:<!--.*-->|\/\*.*\*\/)\s*$/.test(trimmed)) continue;
+      const ifMatch = trimmed.match(/^<<if\s+([\s\S]+?)>>$/);
+      if (ifMatch) {
+        conditionStack.push(ifMatch[1].trim());
+        continue;
+      }
+      if (trimmed === "<<else>>") {
+        if (conditionStack.length) conditionStack[conditionStack.length - 1] = "";
+        continue;
+      }
+      if (trimmed === "<</if>>") {
+        conditionStack.pop();
+        continue;
+      }
+      const link = parseTweeDocumentLink(trimmed);
+      if (link) {
+        const commands = [];
+        for (index += 1; index < lines.length && lines[index].trim() !== "<</link>>"; index += 1) {
+          commands.push(lines[index]);
+        }
+        const effects = commands.map((command) => parseTweeDocumentEffect(command.trim())).filter(Boolean);
+        if (type.toLowerCase() === "choice") {
+          node.choices.push({ label: link.label, requires: currentCondition(), effects, goto: link.target });
+        } else {
+          node.next.push({ goto: link.target, condition: currentCondition(), label: link.label });
+        }
+        continue;
+      }
+      const goto = parseTweeDocumentGoto(trimmed);
+      if (goto) {
+        node.next.push({ goto: goto.target, condition: currentCondition() });
+        continue;
+      }
+      const effect = parseTweeDocumentEffect(trimmed);
+      if (effect) {
+        node.effects.push(effect);
+        continue;
+      }
+      if (/^<<[^>]+>>$/.test(trimmed) && !/^<<print\s+/.test(trimmed)) continue;
+      node.body.push(line.replace(/\s+$/, ""));
+    }
+    node.body = node.body.join("\n").trim();
+    return node;
+  }
+
+  function parseTweeDocumentLink(source) {
+    const match = String(source || "").match(/^<<link\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s*>>$/);
+    return match ? { label: parseTweeDocumentString(match[1]), target: parseTweeDocumentString(match[2]) } : null;
+  }
+
+  function parseTweeDocumentGoto(source) {
+    const match = String(source || "").match(/^<<goto\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s*>>$/);
+    return match ? { target: parseTweeDocumentString(match[1]) } : null;
+  }
+
+  function parseTweeDocumentString(source) {
+    const text = String(source || "").trim();
+    if (text.startsWith('"')) {
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        return text.slice(1, -1);
+      }
+    }
+    return text.slice(1, -1).replace(/\\(["'\\])/g, "$1");
+  }
+
+  function parseTweeDocumentEffect(source) {
+    const match = String(source || "").match(/^<<set\s+\$([A-Za-z_]\w*)\s*(=|\+=|-=)\s*([\s\S]+?)>>$/);
+    if (!match) return null;
+    const [key, operator, value] = [match[1], match[2], match[3].trim()];
+    if (operator === "=" && value === `!$${key}`) return { trigger: "onVisit", op: "toggle", key, value: "" };
+    return {
+      trigger: "onVisit",
+      op: operator === "+=" ? "add" : operator === "-=" ? "subtract" : "set",
+      key,
+      value
+    };
+  }
+
+  function unescapeTweePassageName(value) {
+    return String(value || "").replace(/\\([\\[\]{}])/g, "$1");
+  }
+
+  function parseYarnDocumentSource(source) {
+    const title = source.match(/^\/\/\s*Source:\s*(.+)$/m)?.[1]?.trim() || "";
+    const notes = decodeDocumentMetadata(source.match(/^\/\/\s*narrativeCanvasNotes:\s*(.*)$/m)?.[1]?.trim() || "");
+    const variables = {};
+    for (const match of source.matchAll(/^\/\/\s*narrativeCanvasVariable:\s*([A-Za-z_]\w*)\s*=\s*(.+)$/gm)) {
+      variables[match[1]] = parseDocumentLiteral(match[2]);
+    }
+    for (const match of source.matchAll(/<<declare\s+\$([A-Za-z_]\w*)\s*=\s*([\s\S]*?)>>/g)) {
+      variables[match[1]] = parseDocumentLiteral(match[2]);
+    }
+    const nodes = [];
+    const blockPattern = /^title:\s*(.+)\n([\s\S]*?)^===\s*$/gm;
+    for (const match of source.matchAll(blockPattern)) {
+      const headerAndBody = match[2];
+      const separator = headerAndBody.indexOf("---\n");
+      if (separator < 0) continue;
+      const header = headerAndBody.slice(0, separator);
+      const body = headerAndBody.slice(separator + 4);
+      const id = header.match(/^narrativeCanvasId:\s*(.+)$/m)?.[1]?.trim() || "";
+      const type = header.match(/^nodeType:\s*(.+)$/m)?.[1]?.trim() || "";
+      const titleSource = header.match(/^nodeTitle:\s*(.+)$/m)?.[1]?.trim() || "";
+      const title = titleSource ? String(parseDocumentLiteral(titleSource)) : "";
+      nodes.push(parsePortableScriptNode(body, "yarn", { id, type, title, slug: match[1].trim() }));
+    }
+    return { title, notes, variables, nodes };
+  }
+
+  function parseInkDocumentSource(source) {
+    const title = source.match(/^\/\/\s*Source:\s*(.+)$/m)?.[1]?.trim() || "";
+    const notes = decodeDocumentMetadata(source.match(/^\/\/\s*narrativeCanvasNotes:\s*(.*)$/m)?.[1]?.trim() || "");
+    const variables = {};
+    const runtimeDocument = buildRuntimeExportDocument();
+    const inkListMap = buildInkListMap(runtimeDocument);
+    const listValues = new Map();
+    for (const match of source.matchAll(/^\/\/\s*narrativeCanvasVariable:\s*([A-Za-z_]\w*)\s*=\s*(.+)$/gm)) {
+      variables[match[1]] = parseDocumentLiteral(match[2]);
+    }
+    for (const match of source.matchAll(/^\/\/\s*narrativeCanvasListValues:\s*([A-Za-z_]\w*)\s*=\s*(.+)$/gm)) {
+      const map = parseDocumentLiteral(match[2]);
+      if (map && typeof map === "object" && !Array.isArray(map)) {
+        listValues.set(match[1], map);
+        variables[match[1]] = [];
+      }
+    }
+    for (const match of source.matchAll(/^VAR\s+([A-Za-z_]\w*)\s*=\s*(.+)$/gm)) {
+      const key = match[1];
+      const expression = match[2].trim();
+      const list = inkListMap[key];
+      if (list && /^\([^)]*\)$/.test(expression)) {
+        const identifiers = expression.slice(1, -1).split(",").map((item) => item.trim()).filter(Boolean);
+        const metadataValues = listValues.get(key) || {};
+        const originalValues = Array.isArray(runtimeDocument.variables?.[key]) ? runtimeDocument.variables[key] : [];
+        const valueByIdentifier = new Map(list.items.map((item) => {
+          const original = originalValues.find((value) => String(value) === item.value);
+          return [item.identifier, original === undefined ? item.value : original];
+        }));
+        variables[key] = identifiers.map((identifier) => (
+          Object.prototype.hasOwnProperty.call(metadataValues, identifier)
+            ? metadataValues[identifier]
+            : valueByIdentifier.has(identifier) ? valueByIdentifier.get(identifier) : identifier
+        ));
+      } else {
+        variables[key] = parseDocumentLiteral(expression);
+      }
+    }
+    const lines = source.split("\n");
+    const nodes = [];
+    let pendingId = "";
+    let pendingType = "";
+    let pendingTitle = "";
+    let current = null;
+    const pushCurrent = () => {
+      if (!current) return;
+      nodes.push(parsePortableScriptNode(current.lines.join("\n"), "ink", current));
+      current = null;
+    };
+    lines.forEach((line) => {
+      const idMatch = line.match(/^\/\/\s*narrativeCanvasId:\s*(.+)$/);
+      if (idMatch) {
+        pushCurrent();
+        pendingId = idMatch[1].trim();
+        return;
+      }
+      const typeMatch = line.match(/^\/\/\s*nodeType:\s*(.+)$/);
+      if (typeMatch && !current) {
+        pendingType = typeMatch[1].trim();
+        return;
+      }
+      const titleMatch = line.match(/^\/\/\s*nodeTitle:\s*(.+)$/);
+      if (titleMatch && !current) {
+        pendingTitle = String(parseDocumentLiteral(titleMatch[1]));
+        return;
+      }
+      const knot = line.match(/^===\s+(.+?)\s+===\s*$/);
+      if (knot) {
+        pushCurrent();
+        current = { id: pendingId, type: pendingType, title: pendingTitle, slug: knot[1].trim(), lines: [] };
+        pendingId = "";
+        pendingType = "";
+        pendingTitle = "";
+        return;
+      }
+      if (current) current.lines.push(line);
+    });
+    pushCurrent();
+    return { title, notes, variables, nodes };
+  }
+
+  function parsePortableScriptNode(source, format, meta) {
+    const lines = String(source || "").split("\n");
+    const body = [];
+    const effects = [];
+    const choices = [];
+    const next = [];
+    let currentChoice = null;
+    const bodyStartMarker = format === "yarn" ? "// narrativeCanvasBody:start" : "// narrativeCanvasBody:start";
+    const bodyEndMarker = format === "yarn" ? "// narrativeCanvasBody:end" : "// narrativeCanvasBody:end";
+    const hasBodyMarkers = lines.some((line) => line.trim() === bodyStartMarker);
+    let insideBody = false;
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed === bodyStartMarker) {
+        insideBody = true;
+        return;
+      }
+      if (trimmed === bodyEndMarker) {
+        insideBody = false;
+        return;
+      }
+      if (hasBodyMarkers && insideBody) {
+        body.push(line.replace(/\s+$/, ""));
+        return;
+      }
+      if (format === "yarn") {
+        const conditionalChoice = trimmed.match(/^->\s+(.+?)\s+<<if\s+(.+)>>$/);
+        const choice = conditionalChoice || trimmed.match(/^->\s+(.+)$/);
+        if (choice) {
+          currentChoice = { label: choice[1].trim(), requires: (conditionalChoice?.[2] || "").trim(), effects: [], goto: "" };
+          choices.push(currentChoice);
+          return;
+        }
+        const jump = trimmed.match(/^<<jump\s+(.+)>>$/);
+        if (jump) {
+          if (currentChoice) currentChoice.goto = jump[1].trim();
+          else next.push({ goto: jump[1].trim(), condition: "" });
+          return;
+        }
+        const effect = parsePortableEffect(trimmed, "yarn");
+        if (effect) {
+          (currentChoice && /^\s{2,}/.test(line) ? currentChoice.effects : effects).push(effect);
+          return;
+        }
+        if (/^<<.*>>$/.test(trimmed) || /^\/\//.test(trimmed)) return;
+      } else {
+        const choice = trimmed.match(/^\+\s+(?:\{(.+?)\}\s*)?\[(.*)\]\s*$/);
+        if (choice) {
+          currentChoice = { label: choice[2].trim(), requires: (choice[1] || "").trim(), effects: [], goto: "" };
+          choices.push(currentChoice);
+          return;
+        }
+        const divert = trimmed.match(/^->\s+(.+)$/);
+        if (divert) {
+          if (currentChoice) currentChoice.goto = divert[1].trim();
+          else if (divert[1].trim() !== "END") next.push({ goto: divert[1].trim(), condition: "" });
+          return;
+        }
+        const effect = parsePortableEffect(trimmed, "ink");
+        if (effect) {
+          (currentChoice && /^\s{2,}/.test(line) ? currentChoice.effects : effects).push(effect);
+          return;
+        }
+        if (/^(?:\/\/|\{|\}|-\s*else:)/.test(trimmed)) return;
+      }
+      if (!trimmed && !body.length) return;
+      body.push(line.replace(/\s+$/, ""));
+    });
+    return {
+      id: meta.id || "",
+      type: meta.type || "",
+      title: meta.title || "",
+      slug: meta.slug || "",
+      body: body.join("\n").trim(),
+      effects,
+      choices,
+      next,
+      hasBodyMarkers: hasBodyMarkers && lines.some((line) => line.trim() === bodyEndMarker),
+      replaceEffects: true,
+      replaceChoices: true
+    };
+  }
+
+  function parsePortableEffect(source, format) {
+    if (format === "ink") {
+      const match = source.match(/^~\s+([A-Za-z_]\w*)\s*=\s*(.+)$/);
+      if (!match) return null;
+      const [key, expression] = [match[1], match[2].trim()];
+      if (expression === `not ${key}`) return { trigger: "onVisit", op: "toggle", key, value: "" };
+      const delta = expression.match(new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*([+-])\\s*(.+)$`));
+      if (delta) return { trigger: "onVisit", op: delta[1] === "+" ? "add" : "subtract", key, value: delta[2] };
+      return { trigger: "onVisit", op: "set", key, value: expression };
+    }
+    const match = source.match(/^<<set\s+\$([A-Za-z_]\w*)\s+to\s+(.+)>>$/);
+    if (!match) return null;
+    const [key, expression] = [match[1], match[2].trim()];
+    if (expression === `not $${key}`) return { trigger: "onVisit", op: "toggle", key, value: "" };
+    const delta = expression.match(new RegExp(`^\\$${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*([+-])\\s*(.+)$`));
+    if (delta) return { trigger: "onVisit", op: delta[1] === "+" ? "add" : "subtract", key, value: delta[2] };
+    return { trigger: "onVisit", op: "set", key, value: expression };
   }
 
   function parseStoryMarkdownNodeBlock(block) {
@@ -20482,9 +22505,24 @@ function installNarrativeCanvasApp() {
     };
     let section = "body";
     let currentChoice = null;
+    const hasBodyMarkers = block.lines.some((line) => line.trim() === "<!-- narrativeCanvasBody:start -->");
+    let insideBody = false;
     block.lines.forEach((rawLine) => {
       const line = rawLine.replace(/\s+$/, "");
       const trimmed = line.trim();
+      if (trimmed === "<!-- narrativeCanvasBody:start -->") {
+        insideBody = true;
+        section = "body";
+        return;
+      }
+      if (trimmed === "<!-- narrativeCanvasBody:end -->") {
+        insideBody = false;
+        return;
+      }
+      if (hasBodyMarkers && insideBody) {
+        node.body.push(line);
+        return;
+      }
       if (!trimmed) {
         if (section === "body" && node.body.length) node.body.push("");
         return;
@@ -20534,6 +22572,7 @@ function installNarrativeCanvasApp() {
         if (key === "requires") node.requires = meta[2].trim();
         return;
       }
+      if (/^cast:\s*/i.test(trimmed)) return;
       const inlineChoice = trimmed.match(/^->\s*(.+)$/);
       if (inlineChoice) {
         currentChoice = { label: inlineChoice[1].trim(), id: "", requires: "", effects: [], goto: "" };
@@ -20549,6 +22588,7 @@ function installNarrativeCanvasApp() {
       node.body.push(line);
     });
     node.body = node.body.join("\n").trim();
+    node.hasBodyMarkers = hasBodyMarkers && block.lines.some((line) => line.trim() === "<!-- narrativeCanvasBody:end -->");
     return node;
   }
 
@@ -20588,6 +22628,359 @@ function installNarrativeCanvasApp() {
     const key = parts.shift() || "";
     const value = parts.join(" ");
     return { trigger, op, key, value };
+  }
+
+  function mergeProjectDocumentSource(parsed, baseline = { title: "", variables: {}, nodes: [] }) {
+    const runtimeDocument = buildRuntimeExportDocument();
+    const nodeById = new Map(state.project.nodes.map((node) => [node.id, node]));
+    const nodeByRef = new Map();
+    state.project.nodes.forEach((node) => {
+      [node.id, node.title].filter(Boolean).forEach((ref) => nodeByRef.set(normalizeStoryMarkdownRef(ref), node));
+    });
+    (runtimeDocument.nodes || []).forEach((runtimeNode) => {
+      const node = nodeById.get(runtimeNode.id);
+      if (node) [runtimeNode.id, runtimeNode.slug, runtimeNode.title].filter(Boolean).forEach((ref) => nodeByRef.set(normalizeStoryMarkdownRef(ref), node));
+    });
+    const variableNameMap = runtimeDocument.report?.variableNameMap || {};
+    const sourceVariableByExportName = new Map(Object.entries(variableNameMap).map(([sourceKey, exportKey]) => [exportKey, sourceKey]));
+    const baselineNodeById = new Map();
+    const baselineNodeByRef = new Map();
+    (baseline.nodes || []).forEach((node) => {
+      if (node.id) baselineNodeById.set(node.id, node);
+      [node.id, node.slug, node.title].filter(Boolean).forEach((ref) => baselineNodeByRef.set(normalizeStoryMarkdownRef(ref), node));
+    });
+    let structureChanged = false;
+
+    if (parsed.title !== baseline.title) state.project.title = parsed.title;
+    if ((parsed.notes || "") !== (baseline.notes || "")) state.project.notes = parsed.notes || "";
+    const parsedVariables = parsed.variables || {};
+    const baselineVariables = baseline.variables || {};
+    new Set([...Object.keys(parsedVariables), ...Object.keys(baselineVariables)]).forEach((exportKey) => {
+      if (documentValuesEqual(parsedVariables[exportKey], baselineVariables[exportKey])
+        && Object.prototype.hasOwnProperty.call(parsedVariables, exportKey) === Object.prototype.hasOwnProperty.call(baselineVariables, exportKey)) return;
+      const sourceKey = sourceVariableByExportName.get(exportKey) || exportKey;
+      if (Object.prototype.hasOwnProperty.call(parsedVariables, exportKey)) {
+        state.project.variables[sourceKey] = normalizeDocumentVariableValue(parsedVariables[exportKey]);
+      } else {
+        delete state.project.variables[sourceKey];
+      }
+    });
+
+    parsed.nodes.forEach((sourceNode) => {
+      const node = nodeById.get(sourceNode.id)
+        || nodeByRef.get(normalizeStoryMarkdownRef(sourceNode.slug))
+        || nodeByRef.get(normalizeStoryMarkdownRef(sourceNode.title));
+      if (!node || isFrameNode(node)) return;
+      const baselineNode = baselineNodeById.get(sourceNode.id)
+        || baselineNodeByRef.get(normalizeStoryMarkdownRef(sourceNode.slug))
+        || baselineNodeByRef.get(normalizeStoryMarkdownRef(sourceNode.title));
+      if (!baselineNode) return;
+
+      if (!documentValuesEqual(sourceNode.title, baselineNode.title)) node.title = normalizeOptionalString(sourceNode.title);
+      if (!documentValuesEqual(sourceNode.type, baselineNode.type)) {
+        const nextType = resolveDocumentNodeType(sourceNode.type);
+        if (nextType && nextType !== node.type) {
+          node.type = nextType;
+          applyNodeTypeDefaults(node);
+          structureChanged = true;
+        }
+      }
+
+      if (!documentValuesEqual(sourceNode.body, baselineNode.body)) {
+        node.body = restoreDocumentBodyVariables(sourceNode.body || "", parsed.format, sourceVariableByExportName);
+        if (node.type === "Dialog") syncDialogTurnsFromDocumentBody(node);
+      }
+
+      const shouldReplaceEffects = !documentValuesEqual(sourceNode.effects || [], baselineNode.effects || []);
+      const shouldReplaceRequirements = !documentValuesEqual(sourceNode.requires || "", baselineNode.requires || "");
+      if (shouldReplaceEffects || shouldReplaceRequirements) {
+        const logic = normalizeNodeStateLogic(node.stateLogic);
+        if (shouldReplaceRequirements) {
+          logic.requirements = restoreDocumentCondition(sourceNode.requires || "", parsed.format, sourceVariableByExportName);
+          logic.requirementsMode = getStoredConditionModeForExpression(logic.requirements, "all");
+        }
+        if (shouldReplaceEffects) {
+          logic.effects = mergeDocumentEffects(logic.effects, sourceNode.effects || [], parsed.format, sourceVariableByExportName, "onVisit");
+        }
+        if (logic.requirements || logic.effects.length) node.stateLogic = logic;
+        else delete node.stateLogic;
+      }
+
+      const shouldReplaceChoices = node.type === "Choice" && !documentValuesEqual(sourceNode.choices || [], baselineNode.choices || []);
+      if (shouldReplaceChoices) {
+        mergeDocumentChoices(node, sourceNode.choices || [], parsed.format, sourceVariableByExportName, nodeByRef);
+        structureChanged = true;
+      } else if (!documentValuesEqual(sourceNode.next || [], baselineNode.next || [])
+        || !documentValuesEqual(sourceNode.branches || [], baselineNode.branches || [])) {
+        structureChanged = mergeDocumentTransitions(node, sourceNode, baselineNode, nodeByRef, parsed.format, sourceVariableByExportName) || structureChanged;
+      }
+    });
+    state.project.links = normalizeLinks(state.project.links);
+    syncProjectChoiceOptionLinks(state.project);
+    return { structureChanged };
+  }
+
+  function documentValuesEqual(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function normalizeDocumentVariableValue(value) {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if (/^(?:\[|\{)/.test(trimmed)) {
+      try {
+        return JSON.parse(trimmed);
+      } catch (error) {
+        return value;
+      }
+    }
+    return value;
+  }
+
+  function resolveDocumentNodeType(value) {
+    const candidate = normalizeOptionalString(value).trim().toLowerCase();
+    if (!candidate) return "";
+    const type = getProjectNodeTypes().find((typeDef) => (
+      typeDef.type.toLowerCase() === candidate || normalizeOptionalString(typeDef.label).trim().toLowerCase() === candidate
+    ));
+    return type && !isFrameKind(type.kind) ? type.type : "";
+  }
+
+  function restoreDocumentBodyVariables(value, format, sourceVariableByExportName) {
+    let output = String(value || "");
+    [...sourceVariableByExportName.entries()]
+      .sort((a, b) => b[0].length - a[0].length)
+      .forEach(([exportKey, sourceKey]) => {
+        const escaped = exportKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (format === "yarn") output = output.replace(new RegExp(`\\{\\$${escaped}\\}`, "g"), `{${sourceKey}}`);
+        else if (format === "twee") output = output.replace(new RegExp(`<<print\\s+\\$${escaped}\\s*>>`, "g"), `{${sourceKey}}`);
+        else output = output.replace(new RegExp(`\\{${escaped}\\}`, "g"), `{${sourceKey}}`);
+      });
+    return output;
+  }
+
+  function restoreDocumentCondition(value, format, sourceVariableByExportName) {
+    let output = String(value || "");
+    if (format === "yarn") {
+      output = replaceOutsideDocumentStrings(output, (segment) => segment
+        .replace(/\bcontains\(\s*\$?([A-Za-z_]\w*)\s*,\s*([^()]+?)\s*\)/g, "$1.includes($2)")
+        .replace(/\band\b/g, "&&")
+        .replace(/\bor\b/g, "||")
+        .replace(/\bnot\s+/g, "!"));
+    } else if (format === "ink") {
+      const runtimeDocument = buildRuntimeExportDocument();
+      const listMap = buildInkListMap(runtimeDocument);
+      output = replaceOutsideDocumentStrings(output, (segment) => segment
+        .replace(/\(\s*([A-Za-z_]\w*)\s*\?\s*([A-Za-z_]\w*)\s*\)/g, (match, key, identifier) => {
+          const list = listMap[key];
+          const item = list?.items?.find((entry) => entry.identifier === identifier);
+          if (!item) return match;
+          const originalValues = Array.isArray(runtimeDocument.variables?.[key]) ? runtimeDocument.variables[key] : [];
+          const original = originalValues.find((entry) => String(entry) === item.value);
+          return `${key}.includes(${formatDocumentLiteral(original === undefined ? item.value : original)})`;
+        })
+        .replace(/\band\b/g, "&&")
+        .replace(/\bor\b/g, "||")
+        .replace(/\bnot\s+/g, "!"));
+    }
+    return restoreDocumentExpressionVariables(output, format, sourceVariableByExportName);
+  }
+
+  function restoreDocumentExpressionVariables(value, format, sourceVariableByExportName) {
+    return replaceOutsideDocumentStrings(String(value || ""), (segment) => {
+      let output = segment;
+      [...sourceVariableByExportName.entries()]
+        .sort((a, b) => b[0].length - a[0].length)
+        .forEach(([exportKey, sourceKey]) => {
+          const escaped = exportKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          output = output.replace(new RegExp(`\\$${escaped}\\b`, "g"), sourceKey);
+          output = output.replace(new RegExp(`\\b${escaped}\\b`, "g"), sourceKey);
+        });
+      return output;
+    });
+  }
+
+  function replaceOutsideDocumentStrings(value, replaceSegment) {
+    const text = String(value || "");
+    let output = "";
+    let segment = "";
+    let quote = "";
+    let escaped = false;
+    const flush = () => {
+      if (!segment) return;
+      output += quote ? segment : replaceSegment(segment);
+      segment = "";
+    };
+    for (const char of text) {
+      if (quote) {
+        segment += char;
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === quote) {
+          flush();
+          quote = "";
+        }
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        flush();
+        quote = char;
+        segment = char;
+        continue;
+      }
+      segment += char;
+    }
+    flush();
+    return output;
+  }
+
+  function restoreDocumentEffect(effect, format, sourceVariableByExportName) {
+    const key = sourceVariableByExportName.get(effect?.key) || effect?.key || "";
+    let value = restoreDocumentExpressionVariables(effect?.value || "", format, sourceVariableByExportName);
+    if (/^"(?:\\.|[^"])*"$/.test(value)) {
+      try {
+        value = String(JSON.parse(value));
+      } catch (error) {
+        // Keep malformed target-format literals visible for correction.
+      }
+    }
+    return {
+      trigger: effect?.trigger || "onVisit",
+      op: effect?.op || "set",
+      key,
+      value
+    };
+  }
+
+  function mergeDocumentEffects(existingEffects, sourceEffects, format, sourceVariableByExportName, defaultTrigger) {
+    const restored = (sourceEffects || []).map((effect) => restoreDocumentEffect({ ...effect, trigger: effect?.trigger || defaultTrigger }, format, sourceVariableByExportName));
+    const preserved = (existingEffects || []).filter((effect) => !isDocumentEditableEffect(effect, format, defaultTrigger));
+    return [...restored, ...preserved];
+  }
+
+  function isDocumentEditableEffect(effect, format, defaultTrigger) {
+    if (isRuntimeVisitTrackingEffect(effect)) return false;
+    if (format === "plain") return true;
+    const trigger = normalizePlaybookActionTrigger(effect?.trigger || defaultTrigger);
+    const op = normalizePlaybookActionOperation(effect?.op || "set");
+    return trigger === defaultTrigger && ["set", "add", "subtract", "toggle"].includes(op);
+  }
+
+  function syncDialogTurnsFromDocumentBody(node) {
+    const lines = String(node.body || "").split(/\r?\n/).filter((line) => line.trim());
+    node.turns = lines.map((line) => {
+      const match = line.match(/^([^:\n]{1,80}):\s*(.*)$/);
+      return match ? { speaker: match[1].trim(), line: match[2] } : { speaker: "", line };
+    });
+    syncDialogCastFromTurns(node);
+  }
+
+  function mergeDocumentChoices(node, sourceChoices, format, sourceVariableByExportName, nodeByRef) {
+    const existing = ensureChoiceOptionsArray(node);
+    const assignedIds = new Set();
+    const previousOptions = [];
+    node.choiceOptions = sourceChoices.map((choice, index) => {
+      const requestedId = normalizeOptionalString(choice.id).trim();
+      const previous = existing.find((option) => requestedId && option.id === requestedId) || existing[index] || {};
+      previousOptions.push(previous);
+      let id = requestedId || previous.id;
+      if (!id || assignedIds.has(id)) {
+        const reserved = new Set([...existing.map((option) => option.id).filter(Boolean), ...assignedIds]);
+        id = generateChoiceOptionId(reserved, index);
+      }
+      assignedIds.add(id);
+      return {
+        ...previous,
+        id,
+        label: restoreDocumentBodyVariables(normalizeOptionalString(choice.label).trim(), format, sourceVariableByExportName),
+        requires: restoreDocumentCondition(choice.requires || "", format, sourceVariableByExportName),
+        requiresMode: getStoredConditionModeForExpression(choice.requires || "", "all"),
+        effects: mergeDocumentEffects(previous.effects || [], choice.effects || [], format, sourceVariableByExportName, "onChoose")
+      };
+    });
+    syncChoicesFromOptions(node);
+    const outgoing = state.project.links.filter((link) => link.from === node.id);
+    const usedLinks = new Set();
+    node.choiceOptions.forEach((option, index) => {
+      const choice = sourceChoices[index] || {};
+      const previous = previousOptions[index] || {};
+      let link = outgoing.find((candidate) => !usedLinks.has(candidate) && candidate.choiceOptionId === previous.id)
+        || outgoing.find((candidate) => !usedLinks.has(candidate) && Number(candidate.choiceIndex) === index)
+        || outgoing.find((candidate) => !usedLinks.has(candidate));
+      const target = resolveDocumentTarget(choice.goto, nodeByRef);
+      if (!link && target) {
+        link = { id: nextId("l", state.project.links), from: node.id, to: target.id };
+        state.project.links.push(link);
+      }
+      if (!link) return;
+      usedLinks.add(link);
+      link.label = option.label;
+      link.choiceIndex = index;
+      link.choiceOptionId = option.id;
+      if (target) link.to = target.id;
+    });
+    state.project.links = state.project.links.filter((link) => link.from !== node.id || usedLinks.has(link));
+  }
+
+  function mergeDocumentTransitions(node, sourceNode, baselineNode, nodeByRef, format, sourceVariableByExportName) {
+    const routes = sourceNode.next?.length ? sourceNode.next : sourceNode.branches || [];
+    const baselineRoutes = baselineNode.next?.length ? baselineNode.next : baselineNode.branches || [];
+    const routing = normalizeNodeRouting(node.routing);
+    if (routing.mode === "goTo") {
+      const target = resolveDocumentTarget(routes[0]?.goto, nodeByRef);
+      if (target) node.routing = { mode: "goTo", target: target.title || target.id };
+      else if (!routes.length && baselineRoutes.length) node.routing = { mode: "end", target: "" };
+      return true;
+    }
+    const outgoing = state.project.links.filter((link) => link.from === node.id);
+    let changed = false;
+    const usedLinks = new Set();
+    routes.forEach((route, index) => {
+      let link = outgoing[index];
+      const target = resolveDocumentTarget(route.goto, nodeByRef);
+      if (!link && target) {
+        link = { id: nextId("l", state.project.links), from: node.id, to: target.id };
+        state.project.links.push(link);
+        changed = true;
+      }
+      if (!link) return;
+      usedLinks.add(link);
+      if (target && link.to !== target.id) {
+        link.to = target.id;
+        changed = true;
+      }
+      const baselineRoute = baselineRoutes[index] || {};
+      if (!documentValuesEqual(route.condition || "", baselineRoute.condition || "") && sourceNode.next?.length) {
+        const condition = restoreDocumentCondition(route.condition || "", format, sourceVariableByExportName);
+        if (condition) link.requirements = condition;
+        else delete link.requirements;
+        changed = true;
+      }
+      if (!documentValuesEqual(route.label || "", baselineRoute.label || "") && route.label) {
+        link.label = route.label;
+        changed = true;
+      }
+    });
+    if (routes.length !== baselineRoutes.length) {
+      state.project.links = state.project.links.filter((link) => link.from !== node.id || usedLinks.has(link));
+      changed = true;
+    }
+    if (sourceNode.branches?.length) {
+      const sourceCondition = sourceNode.branches.find((branch) => branch.kind !== "else")?.condition || "";
+      const baselineCondition = baselineNode.branches?.find((branch) => branch.kind !== "else")?.condition || "";
+      if (!documentValuesEqual(sourceCondition, baselineCondition)) {
+        node.condition = restoreDocumentCondition(sourceCondition, format, sourceVariableByExportName);
+        node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  function resolveDocumentTarget(value, nodeByRef) {
+    const key = normalizeStoryMarkdownRef(value);
+    if (!key || key === "end") return null;
+    return nodeByRef.get(key) || null;
   }
 
   function buildStoryMarkdownNode(sourceNode, index, usedIds) {
@@ -21374,12 +23767,15 @@ function installNarrativeCanvasApp() {
   function normalizeDialogTurns(node) {
     const raw = Array.isArray(node?.turns) ? node.turns : null;
     if (raw) {
+      // Keep empty turns: they are work-in-progress rows the writer just added.
+      // Autosave normalizes the live project, so dropping them here silently
+      // deleted turns while the user was still filling them in. Play already
+      // filters empty turns at runtime (getRuntimeDialogTurns).
       return raw
         .map((turn) => {
           if (!turn || typeof turn !== "object" || Array.isArray(turn)) return null;
           const speaker = normalizeOptionalString(turn.speaker || turn.who || turn.name).trim();
           const line = normalizeOptionalString(turn.line || turn.body || turn.text).trim();
-          if (!speaker && !line) return null;
           return { speaker, line };
         })
         .filter(Boolean);
@@ -21395,8 +23791,10 @@ function installNarrativeCanvasApp() {
       return raw
         .map((opt, index) => {
           if (!opt || typeof opt !== "object" || Array.isArray(opt)) return null;
+          // Keep options with an empty label: autosave normalizes the live
+          // project, and dropping them here deleted an option (plus its
+          // requires/effects) while the user was mid-edit on the label.
           const label = normalizeOptionalString(opt.label || opt.text || labels[index]).trim();
-          if (!label) return null;
           let id = normalizeOptionalString(opt.id).trim();
           if (!id || used.has(id)) id = generateChoiceOptionId(used, index);
           used.add(id);
@@ -21549,10 +23947,31 @@ function installNarrativeCanvasApp() {
     if (!dom.root) return;
     if (open) dom.root.setAttribute("data-play-panel", "open");
     else dom.root.removeAttribute("data-play-panel");
+    if (!open) state.playFloating = false;
+    applyPlayFloatState();
     requestAnimationFrame(() => {
       renderTransform();
       scheduleCanvasViewportRender();
     });
+  }
+
+  function applyPlayFloatState() {
+    const floating = Boolean(state.playFloating) && Boolean(dom.root?.hasAttribute("data-play-panel"));
+    if (dom.root) dom.root.setAttribute("data-play-floating", floating ? "true" : "false");
+    if (dom.playDialog) dom.playDialog.classList.toggle("floating", floating);
+    const button = dom.playDialog?.querySelector("[data-action='toggle-play-float']");
+    if (button) {
+      button.setAttribute("aria-pressed", String(floating));
+      const label = t(floating ? "Dock preview to the right" : "Float preview to center");
+      button.title = label;
+      button.setAttribute("aria-label", label);
+    }
+  }
+
+  function togglePlayFloat() {
+    if (!dom.root?.hasAttribute("data-play-panel")) return;
+    state.playFloating = !state.playFloating;
+    applyPlayFloatState();
   }
 
   function openPreviewPanel() {
@@ -21582,6 +24001,10 @@ function installNarrativeCanvasApp() {
       state.selectedNodeIds = [];
       state.selectedLinkId = null;
       state.characterFocusId = null;
+      state.panel = "node";
+      // Focus the node in the inspector, but honor a right panel the reader deliberately collapsed
+      // during playback instead of forcing it open again on every step.
+      if (state.floatingInspectorPanel) closeFloatingInspector({ restoreFocus: false });
       renderShellState();
       renderWorkspaceFile();
       renderInspector();
@@ -21608,13 +24031,24 @@ function installNarrativeCanvasApp() {
     state.playVisitedNodeIds = new Set();
     state.playVisitRecords = [];
     state.activeFileId = "adventure";
+    state.selectedNodeId = entry.id;
+    state.selectedNodeIds = [];
+    state.selectedLinkId = null;
+    state.panel = "node";
+    state.sidebar.rightCollapsed = false;
+    if (state.floatingInspectorPanel) closeFloatingInspector({ restoreFocus: false });
     openPreviewPanel();
     renderShellState();
     renderWorkspaceFile();
+    renderInspector();
     renderPreviewNode(entry.id);
   }
 
   function resetPreviewSessionState() {
+    if (state.playRefreshFrame) {
+      window.cancelAnimationFrame(state.playRefreshFrame);
+      state.playRefreshFrame = null;
+    }
     state.playNodeId = null;
     state.playPath = [];
     state.playStepIndex = 0;
@@ -21624,6 +24058,15 @@ function installNarrativeCanvasApp() {
     state.playManualActionRunIds = new Set();
     state.playVisitedNodeIds = new Set();
     state.playVisitRecords = [];
+  }
+
+  function scheduleOpenPreviewRefresh() {
+    if (!state.playNodeId || !dom.playDialog?.open || state.playRefreshFrame) return;
+    state.playRefreshFrame = window.requestAnimationFrame(() => {
+      state.playRefreshFrame = null;
+      if (!state.playNodeId || !dom.playDialog?.open) return;
+      renderPreviewNode(state.playNodeId, { skipVisit: true, skipCanvasFocus: true });
+    });
   }
 
   function clonePreviewVariables(variables) {
@@ -21865,7 +24308,7 @@ function installNarrativeCanvasApp() {
       ${customFields}
       ${debugDetails}
     `;
-    focusCanvasOnPreviewNode(node);
+    if (!options.skipCanvasFocus) focusCanvasOnPreviewNode(node);
 
     if (dialogTurns.length && dialogTurnIndex < dialogTurns.length - 1) {
       const linePrevButton = dialogTurnIndex > 0
@@ -21894,7 +24337,7 @@ function installNarrativeCanvasApp() {
         const optionAttr = link.choiceOptionId ? ` data-choice-option-id="${escapeAttr(link.choiceOptionId)}"` : "";
         const available = link.choiceOptionId ? availability.get(link.choiceOptionId) !== false : true;
         const disabledAttr = revealMode === "disabled" && !available ? ` disabled aria-disabled="true" title="${escapeAttr(t("Requirements not met"))}"` : "";
-        return `<button class="play-action" type="button" data-action="play-next" data-node-id="${escapeAttr(link.to)}"${optionAttr}${disabledAttr}>${escapeHtml(label)}</button>`;
+        return `<button class="play-action play-choice-action" type="button" data-action="play-next" data-node-id="${escapeAttr(link.to)}"${optionAttr}${disabledAttr}>${escapeHtml(label)}</button>`;
       }).join("");
       return;
     }
@@ -23851,12 +26294,25 @@ function installNarrativeCanvasApp() {
   }
 
   function getProjectBounds() {
-    if (!state.project.nodes.length) return { x: 0, y: 0, width: 800, height: 500 };
+    const activeFrame = getActiveFrameCanvas();
+    const nodes = activeFrame ? getFrameDescendantNodes(activeFrame.id) : state.project.nodes;
+    if (!nodes.length) {
+      if (activeFrame) {
+        const frameSize = nodeLayoutSize(activeFrame);
+        return {
+          x: Math.round(activeFrame.x + 48),
+          y: Math.round(activeFrame.y + 58),
+          width: Math.max(800, Math.round(frameSize.width - 96)),
+          height: Math.max(500, Math.round(frameSize.height - 116))
+        };
+      }
+      return { x: 0, y: 0, width: 800, height: 500 };
+    }
     let minX = Number.POSITIVE_INFINITY;
     let minY = Number.POSITIVE_INFINITY;
     let maxRight = Number.NEGATIVE_INFINITY;
     let maxBottom = Number.NEGATIVE_INFINITY;
-    state.project.nodes.forEach((node) => {
+    nodes.forEach((node) => {
       const size = nodeLayoutSize(node);
       minX = Math.min(minX, node.x);
       minY = Math.min(minY, node.y);
@@ -24129,8 +26585,9 @@ function installNarrativeCanvasApp() {
     const height = Math.ceil(bounds.height + margin * 2);
     const offset = { x: margin - bounds.x, y: margin - bounds.y };
 
+    const frameMarkup = nodes.filter(isFrameNode).map((node) => renderExportNode(node, offset)).join("");
     const links = renderLinks.map((link) => renderExportLink(link, offset)).join("");
-    const nodeMarkup = nodes.map((node) => renderExportNode(node, offset)).join("");
+    const nodeMarkup = nodes.filter((node) => !isFrameNode(node)).map((node) => renderExportNode(node, offset)).join("");
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
     <defs>
@@ -24148,6 +26605,7 @@ function installNarrativeCanvasApp() {
     <rect width="100%" height="100%" fill="#202020"/>
     <rect width="100%" height="100%" fill="url(#grid-large)"/>
     <text x="28" y="42" fill="#dcddde" font-family="system-ui, sans-serif" font-size="22" font-weight="700">${escapeSvg(state.project.title || "Narrative Canvas")}</text>
+    ${frameMarkup}
     ${links}
     ${nodeMarkup}
   </svg>`;
@@ -24402,10 +26860,13 @@ function installNarrativeCanvasApp() {
     const threshold = 18 / Math.max(0.01, state.view.scale);
     let best = null;
     const nodeMap = getNodeIndex();
+    const activeFrame = getActiveFrameCanvas();
+    const frameCanvasNodeIds = activeFrame ? getFrameCanvasNodeIdSet(activeFrame.id) : null;
     state.project.links.forEach((link) => {
-      const endpoints = getRenderedLinkEndpoints(link, nodeMap);
+      const endpoints = getRenderedLinkEndpoints(link, nodeMap, { ignoredCollapsedFrameId: activeFrame?.id || "" });
       if (!endpoints) return;
       const { from, to } = endpoints;
+      if (frameCanvasNodeIds && (!frameCanvasNodeIds.has(from.id) || !frameCanvasNodeIds.has(to.id))) return;
       const distance = distancePointToLink(point, getOutputPoint(from), getInputPoint(to));
       if (!best || distance < best.distance) best = { link, distance };
     });
@@ -24962,6 +27423,14 @@ function installNarrativeCanvasApp() {
       }
       if (state.activeFileId === "events") {
         dom.statusText.textContent = `${getFileViewLabel("events")} - ${t("{count} event rows", { count: getEventRows().length })}`;
+        return;
+      }
+      const activeFrame = getActiveFrameCanvas();
+      if (activeFrame && isCanvasFileActive()) {
+        const nodeCount = getFrameDescendantNodes(activeFrame.id).length;
+        const visibleIds = getFrameCanvasNodeIdSet(activeFrame.id) || new Set();
+        const linkCount = state.project.links.filter((link) => visibleIds.has(link.from) && visibleIds.has(link.to)).length;
+        dom.statusText.textContent = `${getNodeDisplayTitle(activeFrame, t("Frame"))} - ${t("{nodes} nodes, {links} links", { nodes: nodeCount, links: linkCount })}`;
         return;
       }
       const nodeCount = state.project.nodes.length;

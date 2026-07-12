@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Narrative Canvas</title>
-    <link rel="stylesheet" href="./canvas.css?v=20260706-1.1.2">
+    <link rel="stylesheet" href="./canvas.css?v=20260711c-1.2.0">
   </head>
   <body>
     <div class="app-shell">
@@ -39,6 +39,7 @@
             <button class="small-button" data-action="open-project-file" type="button">Open</button>
             <button class="small-button" data-action="reload-project-file" type="button">Reload</button>
             <button class="small-button" data-action="clear-browser-storage" data-web-only type="button">Clear storage</button>
+            <button class="small-button project-file-sample-button" data-action="open-sample-project" data-web-only type="button">Open sample file</button>
           </div>
         </section>
 
@@ -55,6 +56,10 @@
           <button class="nc-file-item" data-file-id="characters">
             <span class="file-dot muted"></span>
             <span class="nc-file-item-label">Characters.md</span>
+          </button>
+          <button class="nc-file-item" data-file-id="document">
+            <span class="file-dot muted"></span>
+            <span class="nc-file-item-label">Document.md</span>
           </button>
           <button class="nc-file-item" data-file-id="variables">
             <span class="file-dot muted"></span>
@@ -88,6 +93,7 @@
             <strong id="activeFileTab">Narrative.canvas</strong>
           </div>
           <span class="project-history" role="group" aria-label="History">
+            <button id="fullscreenButton" class="icon-button history-button immersive-toggle-button" data-action="toggle-immersive-fullscreen" type="button" title="Enter immersive fullscreen" aria-label="Enter immersive fullscreen" aria-pressed="false"><svg class="history-icon immersive-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path></svg></button>
             <button id="undoButton" class="icon-button history-button" data-action="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
             <button id="redoButton" class="icon-button history-button" data-action="redo" type="button" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo" disabled>↷</button>
           </span>
@@ -99,6 +105,11 @@
             <button class="toolbar-button" data-action="zoom-in" data-files="adventure" title="Zoom in">+</button>
             <button class="toolbar-button" data-action="center-view" data-files="adventure" title="Center canvas">Center</button>
             <button class="toolbar-button primary" data-action="play" data-files="adventure" title="Play from entry">Play</button>
+          </div>
+          <div id="frameCanvasScope" class="frame-canvas-scope" hidden>
+            <span class="frame-canvas-label">Frame canvas</span>
+            <strong id="frameCanvasTitle"></strong>
+            <button id="frameCanvasExitButton" class="toolbar-button" data-action="exit-frame-canvas" type="button" title="Exit frame canvas" aria-label="Exit frame canvas">Exit</button>
           </div>
           <div class="toolbar-group toolbar-group-right" data-files="adventure">
             <span class="export-image-controls" role="group" aria-label="Image export">
@@ -134,6 +145,7 @@
         <section id="charactersPanel" class="canvas-workspace-view document-panel" aria-label="Characters"></section>
         <section id="variablesPanel" class="canvas-workspace-view document-panel" aria-label="Variables"></section>
         <section id="eventsPanel" class="canvas-workspace-view document-panel event-sheet-panel" aria-label="Events Sheet"></section>
+        <section id="documentPanel" class="canvas-workspace-view document-panel document-source-panel" aria-label="Document"></section>
 
         <footer class="status-bar">
           <div id="statusText">Ready</div>
@@ -154,12 +166,21 @@
               Find
               <input id="playbookSearchInput" type="search" data-playbook-search placeholder="Find in Playbook" spellcheck="false">
             </label>
+            <label class="workspace-search-box document-search-box" data-search-scope="document" hidden>
+              Find
+              <input id="documentSearchInput" type="search" data-document-search placeholder="Find in document" spellcheck="false">
+            </label>
             <div id="matchCount">0 / 0</div>
           </div>
         </footer>
-        <button class="playbook-scroll-top-button" type="button" data-action="scroll-playbook-top" title="Back to top" aria-label="Back to top">
-          <span aria-hidden="true">↑</span>
-        </button>
+        <div class="workspace-floating-controls">
+          <button class="workspace-toc-button" type="button" data-action="toggle-document-toc" aria-pressed="false" title="Toggle outline" aria-label="Toggle outline">
+            <span aria-hidden="true">☰</span>
+          </button>
+          <button class="workspace-scroll-top-button playbook-scroll-top-button" type="button" data-action="scroll-workspace-top" title="Back to top" aria-label="Back to top">
+            <span aria-hidden="true">↑</span>
+          </button>
+        </div>
       </main>
 
       <dialog id="playDialog" class="play-dialog">
@@ -169,10 +190,15 @@
               <span class="pane-kicker">Runtime</span>
               <h2 id="playTitle">Preview</h2>
             </div>
-            <button class="icon-button" value="close" aria-label="Close preview">x</button>
+            <div class="play-header-actions">
+              <button class="icon-button play-float-button" type="button" data-action="toggle-play-float" aria-pressed="false" title="Float preview to center" aria-label="Float preview to center"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 17 7 7M7 7v7M7 7h7"></path></svg></button>
+              <button class="icon-button" value="close" aria-label="Close preview">x</button>
+            </div>
           </header>
-          <article id="playBody" class="play-body"></article>
-          <footer id="playActions" class="play-actions"></footer>
+          <div class="play-scroll">
+            <article id="playBody" class="play-body"></article>
+            <footer id="playActions" class="play-actions"></footer>
+          </div>
         </form>
       </dialog>
 
@@ -192,31 +218,59 @@
         </header>
 
         <div class="inspector-tabs">
-          <button class="inspector-tab active" data-panel="project">Project</button>
-          <button class="inspector-tab" data-panel="node">Node</button>
-          <button class="inspector-tab" data-panel="story">Story</button>
+          <div class="inspector-tab-group">
+            <button class="inspector-tab active" data-panel="project">Project</button>
+            <button class="inspector-float-button" data-action="float-inspector-panel" data-float-panel="project" type="button" title="Open Project in center" aria-label="Open Project in center"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 17 7 7M7 7v7M7 7h7"></path></svg></button>
+          </div>
+          <div class="inspector-tab-group">
+            <button class="inspector-tab" data-panel="node">Node</button>
+            <button class="inspector-float-button" data-action="float-inspector-panel" data-float-panel="node" type="button" title="Open Node in center" aria-label="Open Node in center"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 17 7 7M7 7v7M7 7h7"></path></svg></button>
+          </div>
+          <div class="inspector-tab-group">
+            <button class="inspector-tab" data-panel="story">Story</button>
+            <button class="inspector-float-button" data-action="float-inspector-panel" data-float-panel="story" type="button" title="Open Story in center" aria-label="Open Story in center"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 17 7 7M7 7v7M7 7h7"></path></svg></button>
+          </div>
         </div>
 
-        <section id="projectPanel" class="inspector-panel active"></section>
-        <section id="nodePanel" class="inspector-panel"></section>
-        <section id="storyPanel" class="inspector-panel"></section>
+        <div id="inspectorPanels" class="inspector-panels">
+          <section id="projectPanel" class="inspector-panel active"></section>
+          <section id="nodePanel" class="inspector-panel"></section>
+          <section id="storyPanel" class="inspector-panel"></section>
+        </div>
       </aside>
+
+      <div id="inspectorFloatOverlay" class="inspector-float-overlay" hidden>
+        <section class="inspector-float-window" role="dialog" aria-modal="true" aria-labelledby="inspectorFloatTitle">
+          <header class="inspector-float-header">
+            <div>
+              <span class="pane-kicker">Inspector</span>
+              <h2 id="inspectorFloatTitle">Project</h2>
+            </div>
+            <button class="icon-button" data-action="close-floating-inspector" type="button" title="Close centered inspector" aria-label="Close centered inspector">x</button>
+          </header>
+          <div id="inspectorFloatBody" class="inspector-float-body"></div>
+        </section>
+      </div>
 
       <button id="languageToggle" class="language-toggle-button" data-web-only data-action="toggle-language" type="button" title="Switch language" aria-label="Switch language">
         <span class="language-toggle-option" data-lang="en">EN</span>
         <span class="language-toggle-divider" aria-hidden="true">/</span>
         <span class="language-toggle-option" data-lang="zh">中</span>
       </button>
-    </div>
 
-    <div id="mentionPopover" class="mention-popover" hidden role="listbox" aria-label="Character mentions"></div>
+      <!-- Canvas overlays live inside .app-shell so they render in immersive/native fullscreen,
+           which fullscreens .app-shell; a sibling here would be hidden by the browser. -->
+      <div id="mentionPopover" class="mention-popover" hidden role="listbox" aria-label="Character mentions"></div>
 
-    <div id="nodeContextMenu" class="node-context-menu" hidden>
-      <button data-layer-action="front">Bring to front</button>
-      <button data-layer-action="forward">Bring forward</button>
-      <button data-layer-action="backward">Send backward</button>
-      <button data-layer-action="back">Send to back</button>
-      <button class="context-menu-danger" data-action="delete-node">Delete node</button>
+      <div id="nodeContextMenu" class="node-context-menu" hidden role="menu" aria-label="Node layer menu">
+        <button data-layer-action="front">Bring to front</button>
+        <button data-layer-action="forward">Bring forward</button>
+        <button data-layer-action="backward">Send backward</button>
+        <button data-layer-action="back">Send to back</button>
+        <button class="context-menu-danger" data-action="delete-node">Delete node</button>
+      </div>
+
+      <div id="canvasRadialMenu" class="canvas-radial-menu" role="menu" aria-label="Canvas quick menu" hidden></div>
     </div>
 
     <dialog id="exportReportDialog" class="nc-notice-dialog export-report-dialog" aria-label="Export report">
@@ -426,6 +480,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260706-1.1.2"></script>
+    <script src="./app.js?v=20260711c-1.2.0"></script>
   </body>
 </html>

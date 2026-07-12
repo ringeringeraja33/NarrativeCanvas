@@ -33,6 +33,7 @@
         failures: []
       };
       const WEB_STORAGE_KEY = "narrative-canvas-state-v1";
+      const WEB_LANGUAGE_STORAGE_KEY = "narrative-canvas-language-v1";
 
       function record(name, status, detail = "") {
         report.tests.push({ name, status, detail });
@@ -194,6 +195,346 @@
         );
       }
 
+      function getProjectFrameTypes(project) {
+        return new Set((project?.nodeTypes || [])
+          .filter((typeDef) => typeDef.kind === "frame")
+          .map((typeDef) => typeDef.type));
+      }
+
+      function getRenderedNodeSize(doc, nodeId) {
+        const element = doc.querySelector(`.node[data-node-id='${nodeId}']`);
+        return {
+          width: Number.parseFloat(element?.style.width || "0") || element?.getBoundingClientRect?.().width || 0,
+          height: Number.parseFloat(element?.style.height || "0") || element?.getBoundingClientRect?.().height || 0
+        };
+      }
+
+      function getProjectNodeSize(doc, node, fallback = {}) {
+        const rendered = getRenderedNodeSize(doc, node?.id || "");
+        return {
+          width: Number(node?.width) || fallback.width || rendered.width || 0,
+          height: Number(node?.height) || fallback.height || rendered.height || 0
+        };
+      }
+
+      function findVisibleFrameCanvasCase(win, doc) {
+        const project = win.NarrativeCanvasApp.getSavedState()?.project || {};
+        const frameTypes = getProjectFrameTypes(project);
+        const frames = (project.nodes || []).filter((node) => frameTypes.has(node.type) && !node.collapsed);
+        for (const frame of frames) {
+          const frameElement = doc.querySelector(`.node.frame[data-node-id='${frame.id}']`);
+          const openButton = frameElement?.querySelector("[data-action='open-frame-canvas']");
+          if (!frameElement || !openButton) continue;
+          const child = (project.nodes || []).find((node) => node.frameId === frame.id && !frameTypes.has(node.type));
+          if (child) return { frame, child, openButton };
+        }
+        return null;
+      }
+
+      async function verifyFrameCanvasDragContainment(label, win, doc) {
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas opens before frame canvas containment check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
+        const candidate = findVisibleFrameCanvasCase(win, doc);
+        if (!candidate) {
+          assert(`${label}: frame canvas containment test has a visible frame with child`, false);
+          return;
+        }
+        const beforeProject = win.NarrativeCanvasApp.getSavedState()?.project || {};
+        const beforeFrame = (beforeProject.nodes || []).find((node) => node.id === candidate.frame.id);
+        const beforeFrameSize = getProjectNodeSize(doc, beforeFrame);
+        click(candidate.openButton);
+        await waitFor(`${label}: frame canvas opens for containment check`, () => doc.querySelector(".app-shell")?.getAttribute("data-frame-canvas") === "true");
+        const childElement = doc.querySelector(`.node[data-node-id='${candidate.child.id}']`);
+        const childHeader = childElement?.querySelector("[data-drag-handle]");
+        const childHeaderRect = childHeader?.getBoundingClientRect();
+        const childSizeBefore = getRenderedNodeSize(doc, candidate.child.id);
+        if (!childHeaderRect) {
+          assert(`${label}: frame canvas child is draggable`, false);
+          return;
+        }
+        const startX = childHeaderRect.left + Math.min(80, childHeaderRect.width / 2);
+        const startY = childHeaderRect.top + childHeaderRect.height / 2;
+        const endX = startX - 180;
+        const endY = startY - 120;
+        const viewport = doc.querySelector("#canvasViewport");
+        childHeader.dispatchEvent(new win.PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 121,
+          button: 0,
+          buttons: 1,
+          clientX: startX,
+          clientY: startY
+        }));
+        viewport.dispatchEvent(new win.PointerEvent("pointermove", {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 121,
+          button: 0,
+          buttons: 1,
+          clientX: endX,
+          clientY: endY
+        }));
+        viewport.dispatchEvent(new win.PointerEvent("pointerup", {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 121,
+          button: 0,
+          clientX: endX,
+          clientY: endY
+        }));
+        await wait(120);
+        click(doc.querySelector("#frameCanvasExitButton"));
+        await waitFor(`${label}: frame canvas exits after containment drag`, () => !doc.querySelector(".app-shell")?.hasAttribute("data-frame-canvas"));
+        const afterProject = win.NarrativeCanvasApp.getSavedState()?.project || {};
+        const frameAfter = (afterProject.nodes || []).find((node) => node.id === candidate.frame.id);
+        const childAfter = (afterProject.nodes || []).find((node) => node.id === candidate.child.id);
+        const frameSize = getProjectNodeSize(doc, frameAfter, beforeFrameSize);
+        const childSize = getProjectNodeSize(doc, childAfter, childSizeBefore);
+        const contains = frameAfter && childAfter
+          && childAfter.x >= frameAfter.x - 1
+          && childAfter.y >= frameAfter.y - 1
+          && childAfter.x + childSize.width <= frameAfter.x + frameSize.width + 1
+          && childAfter.y + childSize.height <= frameAfter.y + frameSize.height + 1;
+        assert(
+          `${label}: frame canvas drag keeps child visually contained after exit`,
+          contains,
+          `frame=${frameAfter?.x},${frameAfter?.y},${frameSize.width},${frameSize.height} child=${childAfter?.x},${childAfter?.y},${childSize.width},${childSize.height}`
+        );
+      }
+
+      async function verifyCanvasRadialMenu(label, win, doc) {
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas opens before radial menu check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
+        const viewport = doc.querySelector("#canvasViewport");
+        const viewportRect = viewport?.getBoundingClientRect();
+        const occupiedRects = [...doc.querySelectorAll(".node[data-node-id]")].map((node) => node.getBoundingClientRect());
+        let clientX = viewportRect.left + 32;
+        let clientY = viewportRect.top + 32;
+        outer: for (let y = viewportRect.top + 32; y < viewportRect.bottom - 32; y += 44) {
+          for (let x = viewportRect.left + 32; x < viewportRect.right - 32; x += 44) {
+            const occupied = occupiedRects.some((rect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+            if (!occupied) {
+              clientX = x;
+              clientY = y;
+              break outer;
+            }
+          }
+        }
+        const beforeProject = win.NarrativeCanvasApp.getSavedState()?.project || {};
+        const beforeCount = beforeProject.nodes?.length || 0;
+        viewport.dispatchEvent(new win.MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          view: win,
+          clientX,
+          clientY
+        }));
+        const radialMenu = doc.querySelector("#canvasRadialMenu");
+        await waitFor(`${label}: blank canvas right-click opens radial menu`, () => radialMenu && !radialMenu.hidden);
+        assert(`${label}: radial menu is one four-segment semicircle`, radialMenu?.querySelectorAll(".radial-arc .radial-button").length === 4);
+        const addButton = radialMenu.querySelector("[data-radial-toggle='add']");
+        assert(`${label}: radial menu exposes Add`, Boolean(addButton));
+        click(addButton);
+        await waitFor(`${label}: radial Add expands Node Library`, () => !radialMenu.querySelector(".radial-add-list")?.hidden);
+        const addList = radialMenu.querySelector(".radial-add-list");
+        assert(`${label}: radial add list is labelled as Node Library`, addList?.getAttribute("aria-label") === "Node Library");
+        const markerItem = addList?.querySelector("[data-action='add-node'][data-type='Marker']")
+          || addList?.querySelector("[data-action='add-node']");
+        if (!markerItem) {
+          assert(`${label}: radial add list has node type items`, false);
+          return;
+        }
+        const spawnX = Number(markerItem?.dataset.spawnX);
+        const spawnY = Number(markerItem?.dataset.spawnY);
+        assert(`${label}: radial add item carries spawn point`, Number.isFinite(spawnX) && Number.isFinite(spawnY));
+        click(markerItem);
+        await waitFor(`${label}: radial add creates node`, () => {
+          const project = win.NarrativeCanvasApp.getSavedState()?.project || {};
+          return (project.nodes?.length || 0) === beforeCount + 1;
+        });
+        assert(`${label}: radial menu closes after add`, radialMenu.hidden);
+        const saved = win.NarrativeCanvasApp.getSavedState();
+        const createdId = saved?.ui?.selectedNodeId;
+        const createdNode = saved?.project?.nodes?.find((node) => node.id === createdId);
+        assert(`${label}: radial add selects created node`, Boolean(createdNode));
+        assert(`${label}: radial add uses selected node type`, createdNode?.type === markerItem?.dataset.type);
+        assert(
+          `${label}: radial add places node near right-click point`,
+          createdNode && Math.abs((createdNode.x + 70) - spawnX) < 260 && Math.abs((createdNode.y + 70) - spawnY) < 160,
+          `spawn=${spawnX},${spawnY} node=${createdNode?.x},${createdNode?.y}`
+        );
+      }
+
+      async function verifyFrameContextMenu(label, win, doc) {
+        let frame = doc.querySelector(".node.frame[data-node-id]");
+        const linkLayer = doc.querySelector("#linkLayer");
+        if (!frame || !linkLayer) {
+          assert(`${label}: frame context-menu fixture exists`, false);
+          return;
+        }
+        const frameId = frame.dataset.nodeId;
+        frame.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
+        await wait(100);
+        frame = doc.querySelector(`.node.frame[data-node-id='${frameId}']`) || frame;
+        const rect = frame.getBoundingClientRect();
+        const viewportRect = doc.querySelector("#canvasViewport")?.getBoundingClientRect();
+        const clientX = Math.max(viewportRect.left + 12, Math.min(viewportRect.right - 12, rect.left + rect.width * 0.7));
+        const clientY = Math.max(viewportRect.top + 12, Math.min(viewportRect.bottom - 12, rect.top + rect.height * 0.7));
+        linkLayer.dispatchEvent(new win.MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          view: win,
+          clientX,
+          clientY
+        }));
+        // Frame body right-click behaves like blank canvas: radial quick menu.
+        const frameRadialMenu = doc.querySelector("#canvasRadialMenu");
+        await waitFor(`${label}: frame body right-click opens radial menu`, () => frameRadialMenu && !frameRadialMenu.hidden);
+        doc.body.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true }));
+        await wait(80);
+        // Frame header right-click opens the layer/delete menu.
+        const frameHeader = frame.querySelector(".node-header");
+        const headerRect = frameHeader.getBoundingClientRect();
+        linkLayer.dispatchEvent(new win.MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          view: win,
+          clientX: headerRect.left + headerRect.width / 2,
+          clientY: headerRect.top + headerRect.height / 2
+        }));
+        const menu = doc.querySelector("#nodeContextMenu");
+        await waitFor(`${label}: frame header right-click opens context menu`, () => menu && !menu.hidden);
+        assert(`${label}: frame context menu exposes layer actions`, menu?.querySelectorAll("[data-layer-action]").length === 4);
+        assert(`${label}: frame context menu exposes frame deletion`, Boolean(menu?.querySelector("[data-action='delete-node']")) && menu.textContent.includes("Delete frame"));
+        doc.body.dispatchEvent(new win.MouseEvent("pointerdown", { bubbles: true }));
+      }
+
+      async function verifyProjectDocument(label, win, doc) {
+        async function verifyNoopRoundTrip(formatLabel) {
+          const sourceEditor = doc.querySelector("#documentPanel [data-document-source]");
+          const before = JSON.stringify(win.NarrativeCanvasApp.getSavedState()?.project || {});
+          setControlValue(win, sourceEditor, `${sourceEditor?.value || ""}\n`);
+          await waitFor(`${label}: ${formatLabel} no-op source reaches synced state`, () => doc.querySelector("[data-document-sync-status]")?.dataset.status === "synced");
+          const after = JSON.stringify(win.NarrativeCanvasApp.getSavedState()?.project || {});
+          assert(`${label}: ${formatLabel} no-op round-trip preserves project JSON`, after === before);
+        }
+
+        const documentFile = doc.querySelector("[data-file-id='document']");
+        assert(`${label}: Document file tab exists`, Boolean(documentFile));
+        click(documentFile);
+        await waitFor(`${label}: Document file opens`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "document");
+        const editor = doc.querySelector("#documentPanel [data-document-source]");
+        assert(`${label}: Document source editor renders`, Boolean(editor));
+        assert(`${label}: Document offers four source formats`, doc.querySelectorAll("#documentPanel [data-document-format]").length === 4);
+        const originalSource = editor?.value || "";
+        assert(`${label}: plain document marks exact body boundaries`, originalSource.includes("<!-- narrativeCanvasBody:start -->") && originalSource.includes("<!-- narrativeCanvasBody:end -->"));
+        const originalTitle = win.NarrativeCanvasApp.getSavedState()?.project?.title || "";
+        const editedSource = originalSource.replace(/^#\s+.+$/m, "# Document Smoke Title");
+        setControlValue(win, editor, editedSource);
+        await waitFor(`${label}: plain document edit syncs to project`, () => win.NarrativeCanvasApp.getSavedState()?.project?.title === "Document Smoke Title");
+        setControlValue(win, editor, originalSource);
+        await waitFor(`${label}: plain document edit can be restored`, () => win.NarrativeCanvasApp.getSavedState()?.project?.title === originalTitle);
+        await verifyNoopRoundTrip("plain");
+        const originalMarkerBody = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n19")?.body || "";
+        const markerBody = "Body markers preserve structural-looking prose.\n## This stays inside the node body\nchoices:\n<<set $literal = 1>>";
+        const markerBodyPattern = /(<!-- id: n19 -->[\s\S]*?<!-- narrativeCanvasBody:start -->\n)([\s\S]*?)(\n<!-- narrativeCanvasBody:end -->)/;
+        const markerEditedSource = originalSource.replace(markerBodyPattern, `$1${markerBody}$3`);
+        assert(`${label}: plain marker-node body can be located safely`, markerEditedSource !== originalSource);
+        setControlValue(win, editor, markerEditedSource);
+        await waitFor(`${label}: plain body markers preserve headings and script-like lines`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n19")?.body === markerBody);
+        setControlValue(win, editor, originalSource);
+        await waitFor(`${label}: plain body edit can be restored exactly`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n19")?.body === originalMarkerBody);
+        const beforeBrokenMarker = JSON.stringify(win.NarrativeCanvasApp.getSavedState()?.project || {});
+        setControlValue(win, editor, originalSource.replace("<!-- narrativeCanvasBody:end -->", "<!-- body marker being edited -->"));
+        await waitFor(`${label}: incomplete Document structure reports source error`, () => doc.querySelector("[data-document-sync-status]")?.dataset.status === "error");
+        assert(`${label}: incomplete Document structure cannot mutate project`, JSON.stringify(win.NarrativeCanvasApp.getSavedState()?.project || {}) === beforeBrokenMarker);
+        setControlValue(win, editor, originalSource);
+        await waitFor(`${label}: corrected Document structure returns to synced`, () => doc.querySelector("[data-document-sync-status]")?.dataset.status === "synced");
+
+        click(doc.querySelector("#documentPanel [data-document-format='ink']"));
+        await waitFor(`${label}: Ink document renders`, () => doc.querySelector("#documentPanel [data-document-format='ink']")?.classList.contains("active"));
+        const inkSource = doc.querySelector("#documentPanel [data-document-source]")?.value || "";
+        assert(`${label}: Ink document carries stable node ids`, inkSource.includes("// narrativeCanvasId:"));
+        assert(`${label}: Ink document carries editable node titles and body boundaries`, inkSource.includes("// nodeTitle:") && inkSource.includes("// narrativeCanvasBody:start"));
+        assert(`${label}: Ink document preserves project notes and complex variables`, inkSource.includes("// narrativeCanvasNotes:") && inkSource.includes("// narrativeCanvasVariable: sample_metadata ="));
+        await verifyNoopRoundTrip("Ink");
+        const originalFeatureTags = win.NarrativeCanvasApp.getSavedState()?.project?.variables?.feature_tags || [];
+        const inkListMatch = inkSource.match(/^VAR feature_tags = \(([^)]*)\)$/m);
+        const inkListItems = (inkListMatch?.[1] || "").split(",").map((item) => item.trim()).filter(Boolean);
+        assert(`${label}: Ink document exposes typed list metadata`, inkSource.includes("// narrativeCanvasListValues: feature_tags =") && inkListItems.length >= 3);
+        const shortenedInkSource = inkSource.replace(inkListMatch?.[0] || "", `VAR feature_tags = (${inkListItems.slice(0, 2).join(", ")})`);
+        setControlValue(win, doc.querySelector("#documentPanel [data-document-source]"), shortenedInkSource);
+        await waitFor(`${label}: Ink list edit syncs typed array values`, () => win.NarrativeCanvasApp.getSavedState()?.project?.variables?.feature_tags?.length === 2);
+        setControlValue(win, doc.querySelector("#documentPanel [data-document-source]"), inkSource);
+        await waitFor(`${label}: Ink list edit restores exact typed array`, () => JSON.stringify(win.NarrativeCanvasApp.getSavedState()?.project?.variables?.feature_tags) === JSON.stringify(originalFeatureTags));
+        click(doc.querySelector("#documentPanel [data-document-format='yarn']"));
+        await waitFor(`${label}: Yarn document renders`, () => doc.querySelector("#documentPanel [data-document-format='yarn']")?.classList.contains("active"));
+        const yarnSource = doc.querySelector("#documentPanel [data-document-source]")?.value || "";
+        assert(`${label}: Yarn document carries stable node ids`, yarnSource.includes("narrativeCanvasId:"));
+        assert(`${label}: Yarn document carries editable node titles and body boundaries`, yarnSource.includes("nodeTitle:") && yarnSource.includes("// narrativeCanvasBody:start"));
+        assert(`${label}: Yarn document preserves project notes and complex variables`, yarnSource.includes("// narrativeCanvasNotes:") && yarnSource.includes("// narrativeCanvasVariable: sample_metadata ="));
+        await verifyNoopRoundTrip("Yarn");
+        const yarnConditionSource = yarnSource.replace(/(->\s+[^\n]+?)\s+<<if\s+\$workflow_progress\s+>=\s+0>>/, "$1 <<if $workflow_progress >= 2 and $data_integrity >= 1>>");
+        assert(`${label}: Yarn choice condition can be located`, yarnConditionSource !== yarnSource);
+        setControlValue(win, doc.querySelector("#documentPanel [data-document-source]"), yarnConditionSource);
+        await waitFor(`${label}: Yarn condition converts back to project expression syntax`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n4")?.choiceOptions?.[0]?.requires === "workflow_progress >= 2 && data_integrity >= 1");
+        setControlValue(win, doc.querySelector("#documentPanel [data-document-source]"), yarnSource);
+        await waitFor(`${label}: Yarn condition can be restored`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n4")?.choiceOptions?.[0]?.requires === "workflow_progress >= 0");
+        click(doc.querySelector("#documentPanel [data-document-format='twee']"));
+        await waitFor(`${label}: Twee document renders`, () => doc.querySelector("#documentPanel [data-document-format='twee']")?.classList.contains("active"));
+        const tweeEditor = doc.querySelector("#documentPanel [data-document-source]");
+        assert(`${label}: Twee document carries stable node ids`, tweeEditor?.value.includes("<!-- narrativeCanvasId:"));
+        assert(`${label}: Twee document carries editable node titles and body boundaries`, tweeEditor?.value.includes("<!-- narrativeCanvasTitle:") && tweeEditor?.value.includes("<!-- narrativeCanvasBody:start -->"));
+        const originalTweeSource = tweeEditor?.value || "";
+        const tweeNodeTitleSource = originalTweeSource.replace(/(<!-- narrativeCanvasId: n19 -->\n<!-- narrativeCanvasTitle: )[^\n]+?( -->)/, `$1${encodeURIComponent("Twee Node Title Smoke")}$2`);
+        assert(`${label}: Twee node title metadata can be located`, tweeNodeTitleSource !== originalTweeSource);
+        setControlValue(win, tweeEditor, tweeNodeTitleSource);
+        await waitFor(`${label}: Twee node title edit syncs to project`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n19")?.title === "Twee Node Title Smoke");
+        setControlValue(win, tweeEditor, originalTweeSource);
+        await waitFor(`${label}: Twee node title edit can be restored`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n19")?.title === "Operation Note");
+        const editedTweeSource = originalTweeSource.replace(/(:: StoryTitle\n)[^\n]*/, "$1Document Twee Smoke Title");
+        setControlValue(win, tweeEditor, editedTweeSource);
+        await waitFor(`${label}: Twee document edit syncs to project`, () => win.NarrativeCanvasApp.getSavedState()?.project?.title === "Document Twee Smoke Title");
+        setControlValue(win, tweeEditor, originalTweeSource);
+        await waitFor(`${label}: Twee document edit can be restored`, () => win.NarrativeCanvasApp.getSavedState()?.project?.title === originalTitle);
+        await verifyNoopRoundTrip("Twee");
+        click(doc.querySelector("#documentPanel [data-document-format='plain']"));
+        await waitFor(`${label}: plain document can be restored after format switches`, () => doc.querySelector("#documentPanel [data-document-format='plain']")?.classList.contains("active"));
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas returns after Document check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
+      }
+
+      async function verifyInspectorFloatAndPlaySync(label, win, doc) {
+        const nodeFloatButton = doc.querySelector("[data-action='float-inspector-panel'][data-float-panel='node']");
+        click(nodeFloatButton);
+        const overlay = doc.querySelector("#inspectorFloatOverlay");
+        await waitFor(`${label}: node inspector opens in centered window`, () => overlay && !overlay.hidden && overlay.querySelector("#nodePanel"));
+        assert(`${label}: centered inspector is wider than sidebar`, overlay.querySelector(".inspector-float-window")?.getBoundingClientRect().width > doc.querySelector(".sidebar-right")?.getBoundingClientRect().width);
+        click(overlay.querySelector("[data-action='close-floating-inspector']"));
+        await waitFor(`${label}: centered inspector closes`, () => overlay.hidden && doc.querySelector(".sidebar-right #nodePanel"));
+
+        click(doc.querySelector("[data-action='play']"));
+        const playDialog = doc.querySelector("#playDialog");
+        await waitFor(`${label}: play panel opens`, () => playDialog?.open);
+        await waitFor(`${label}: play focuses Node inspector`, () => doc.querySelector(".inspector-tab[data-panel='node']")?.classList.contains("active"));
+        const saved = win.NarrativeCanvasApp.getSavedState();
+        const selected = saved?.project?.nodes?.find((node) => node.id === saved?.ui?.selectedNodeId);
+        assert(`${label}: play step and inspector select the same node`, selected?.title === doc.querySelector("#playTitle")?.textContent);
+        const bodyInput = doc.querySelector("#nodePanel [data-node-field='body']");
+        if (bodyInput) {
+          const original = bodyInput.value;
+          const marker = `Live preview ${Date.now()}`;
+          bodyInput.value = marker;
+          bodyInput.dispatchEvent(new win.Event("input", { bubbles: true }));
+          await waitFor(`${label}: editing focused node refreshes open play`, () => doc.querySelector("#playBody")?.textContent.includes(marker));
+          bodyInput.value = original;
+          bodyInput.dispatchEvent(new win.Event("input", { bubbles: true }));
+        }
+        click(playDialog.querySelector("[value='close']"));
+        await waitFor(`${label}: play panel closes`, () => !playDialog.open);
+      }
+
       function readSavedProject(win) {
         const latestPluginSave = win.__saveProjectCalls?.[win.__saveProjectCalls.length - 1] || "";
         const raw = latestPluginSave || win.localStorage?.getItem(WEB_STORAGE_KEY) || "";
@@ -312,6 +653,7 @@
 
       async function loadWebFrame() {
         window.localStorage?.removeItem(WEB_STORAGE_KEY);
+        window.localStorage?.removeItem(WEB_LANGUAGE_STORAGE_KEY);
         const frame = document.createElement("iframe");
         frame.title = "web smoke target";
         frame.src = `${assetUrl("index.html")}?smoke=${Date.now()}`;
@@ -402,10 +744,13 @@
         assert(`${label}: theme toggle exists`, Boolean(doc.querySelector("#themeToggle")));
         assert(`${label}: project file status exists`, Boolean(doc.querySelector("#projectFileName")));
         const clearStorageButton = doc.querySelector("[data-action='clear-browser-storage']");
+        const sampleButton = doc.querySelector("[data-action='open-sample-project']");
         if ("__saveProjectCalls" in win) {
           assert(`${label}: clear browser storage is hidden in plugin`, isElementHidden(win, clearStorageButton));
+          assert(`${label}: web sample button is hidden in plugin`, isElementHidden(win, sampleButton));
         } else {
           assert(`${label}: clear browser storage is available on web`, clearStorageButton && !isElementHidden(win, clearStorageButton));
+          assert(`${label}: sample file button is available on web`, sampleButton && !isElementHidden(win, sampleButton));
         }
         if ("__sampleEnsureOptions" in win) {
           assert(`${label}: init does not create sample project`, win.__sampleEnsureOptions === null);
@@ -422,6 +767,15 @@
         const redoButton = doc.querySelector("#redoButton");
         assert(`${label}: history controls live in workspace header`, undoButton?.closest(".workspace-global-bar") && redoButton?.closest(".workspace-global-bar"));
         assert(`${label}: history controls are not floating over canvas`, !doc.querySelector(".canvas-frame #undoButton") && !doc.querySelector(".canvas-frame #redoButton"));
+        const fullscreenButton = doc.querySelector("#fullscreenButton");
+        assert(`${label}: immersive fullscreen button is visible`, fullscreenButton && !isElementHidden(win, fullscreenButton));
+        assert(`${label}: immersive fullscreen button uses SVG icon`, Boolean(fullscreenButton?.querySelector("svg.history-icon")));
+        click(fullscreenButton);
+        await waitFor(`${label}: immersive fullscreen turns on`, () => root.getAttribute("data-immersive") === "true" && fullscreenButton.getAttribute("aria-pressed") === "true");
+        assert(`${label}: immersive fullscreen keeps left sidebar`, !isElementHidden(win, doc.querySelector(".sidebar-left")));
+        assert(`${label}: immersive fullscreen keeps right sidebar`, !isElementHidden(win, doc.querySelector(".sidebar-right")));
+        click(fullscreenButton);
+        await waitFor(`${label}: immersive fullscreen turns off`, () => root.getAttribute("data-immersive") !== "true" && fullscreenButton.getAttribute("aria-pressed") === "false");
         assert(`${label}: image export controls are grouped`, Boolean(doc.querySelector(".export-image-controls .export-image-button + .export-image-scale-label")));
         const imageButtonRect = doc.querySelector(".export-image-button")?.getBoundingClientRect();
         const imageScaleRect = doc.querySelector(".export-image-controls .toolbar-select")?.getBoundingClientRect();
@@ -872,7 +1226,7 @@
         const savedChoiceBranches = (readSavedProject(win)?.project?.links || [])
           .filter((link) => link.from === "n4")
           .sort((a, b) => a.choiceIndex - b.choiceIndex);
-        assert(`${label}: sample choice branches keep explicit labels`, savedChoiceBranches.map((link) => link.label).join("|") === "① An always-available option|② An option that changes a variable|③ An option with a prerequisite");
+        assert(`${label}: sample choice branches keep authored labels without manual ordinals`, savedChoiceBranches.map((link) => link.label).join("|") === "An always-available option|An option that changes a variable|An option with a prerequisite");
         assert(`${label}: sample choice branches keep explicit indexes`, savedChoiceBranches.map((link) => link.choiceIndex).join("|") === "0|1|2");
         const savedRequirementGateLinks = (readSavedProject(win)?.project?.links || []).filter((link) => link.from === "n10");
         assert(`${label}: sample requirement gate continues by normal link`, savedRequirementGateLinks.length === 1 && savedRequirementGateLinks[0].to === "n11");
@@ -1113,14 +1467,35 @@
         const afterWidth = Number.parseFloat(getComputedStyle(root).getPropertyValue("--sidebar-left-width"));
         assert(`${label}: left sidebar resizes`, afterWidth > beforeWidth);
 
-        const node = doc.querySelector(".node[data-node-id]");
+        // Use a non-frame node: frame bodies open the radial menu instead.
+        const node = doc.querySelector(".node[data-node-id]:not(.frame)");
         node.dispatchEvent(new win.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 200, clientY: 160, view: win }));
         const menu = doc.querySelector("#nodeContextMenu");
         await waitFor(`${label}: context menu opens`, () => menu && !menu.hidden);
+        assert(`${label}: context menu shows node layer group`, menu?.textContent.includes("Node layer"));
+        assert(`${label}: context menu exposes z-order actions`, menu?.querySelectorAll("[data-layer-action]").length === 4);
         const menuAction = menu.querySelector("[data-layer-action]");
         click(menuAction);
         await wait(80);
         assert(`${label}: context menu closes after action`, menu.hidden);
+
+        await verifyFrameCanvasDragContainment(label, win, doc);
+        const choiceFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n4']");
+        if (choiceFocus) click(choiceFocus);
+        await waitFor(`${label}: Choice card renders after focus`, () => Boolean(doc.querySelector(".node[data-node-id='n4']")));
+        assert(`${label}: Choice card lists configured options`, doc.querySelectorAll(".node[data-node-id='n4'] .node-choice-preview li").length === 3);
+        assert(
+          `${label}: Choice card generates option numbers`,
+          [...doc.querySelectorAll(".node[data-node-id='n4'] .node-choice-index")].map((item) => item.textContent.trim()).join(",") === "1,2,3"
+        );
+        const dialogFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n6']");
+        if (dialogFocus) click(dialogFocus);
+        await waitFor(`${label}: Dialog card renders after focus`, () => Boolean(doc.querySelector(".node[data-node-id='n6']")));
+        assert(`${label}: Dialog card previews authored turns`, doc.querySelectorAll(".node[data-node-id='n6'] .node-dialog-line").length === 2);
+        await verifyCanvasRadialMenu(label, win, doc);
+        await verifyFrameContextMenu(label, win, doc);
+        await verifyInspectorFloatAndPlaySync(label, win, doc);
+        await verifyProjectDocument(label, win, doc);
 
         const status = doc.querySelector(".status-bar").getBoundingClientRect();
         const workspace = doc.querySelector(".canvas-workspace").getBoundingClientRect();
@@ -1215,6 +1590,25 @@
         frame.remove();
       }
 
+      async function runWebLanguageChecks() {
+        const target = await loadWebFrame();
+        const { win, doc, frame } = target;
+        win.NarrativeCanvasApp.setLanguage("zh");
+        await wait(80);
+        click(doc.querySelector("[data-action='clear-browser-storage']"));
+        await waitFor("web zh: clear browser storage dialog opens", () => doc.querySelector("#genericConfirmDialog")?.open);
+        assert("web zh: clear storage title translated", doc.querySelector("#genericConfirmTitle")?.textContent.trim() === "清除浏览器存储？");
+        assert(
+          "web zh: clear storage body translated",
+          doc.querySelector("#genericConfirmBody")?.textContent.trim() === "清除浏览器存储并载入空项目？这会删除当前浏览器中保存的项目。"
+        );
+        assert("web zh: clear storage confirm translated", doc.querySelector("#genericConfirmButton")?.textContent.trim() === "清除存储");
+        assert("web zh: clear storage cancel translated", doc.querySelector("#genericConfirmDialog .confirm-cancel")?.textContent.trim() === "取消");
+        doc.querySelector("#genericConfirmDialog .confirm-cancel")?.click();
+        win.NarrativeCanvasApp.destroy?.();
+        frame.remove();
+      }
+
       async function runSampleLanguageChecks() {
         const cases = [
           { language: "en", label: "plugin en", title: "Your First Narrative Canvas", fileName: "Narrative Canvas Guide Sample.ncanvas" },
@@ -1230,6 +1624,14 @@
           assert(`${item.label}: sample filename follows language`, win.__createdProjectOptions[0]?.filenameOverride === item.fileName);
           assert(`${item.label}: sample title follows language`, sampleState.title === item.title);
           assert(`${item.label}: sample language marker follows language`, sampleState.variables?.sample_language === item.language);
+          if (item.language === "zh") {
+            const sampleText = JSON.stringify(sampleState);
+            const guideNode = sampleState.nodes?.find((node) => node.id === "n3");
+            const choiceNode = sampleState.nodes?.find((node) => node.id === "n4");
+            assert(`${item.label}: sample uses 演示设置 terminology`, guideNode?.title === "演示设置是什么" && !sampleText.includes("Playbook") && !sampleText.includes("Play 预览"));
+            assert(`${item.label}: sample describes all four Document formats`, sampleState.notes?.includes("纯文本 / Ink / Yarn / Twee"));
+            assert(`${item.label}: sample choice labels rely on generated card numbering`, choiceNode?.choiceOptions?.every((option) => !/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(option.label || "")));
+          }
           win.NarrativeCanvasApp.destroy?.();
           frame.remove();
         }
@@ -1244,6 +1646,7 @@
           await runCoreChecks("plugin", plugin);
           await runSampleLanguageChecks();
           await runLanguageChecks();
+          await runWebLanguageChecks();
         } catch (error) {
           fail("smoke runner crashed", error && error.stack ? error.stack : String(error));
         } finally {
