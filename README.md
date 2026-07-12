@@ -12,10 +12,11 @@ It is intended for structure planning, branch validation, pitch preparation, and
 
 The interface supports both English and Chinese. The web app has an `EN / 中文` floating language switch in the lower-right corner, and the Obsidian plugin has a `Language` setting that can follow Obsidian’s language.
 
-![Narrative Canvas main canvas](assets/screenshots/main-canvas.png)
+![Narrative Canvas main canvas](main-canvas.png)
 
 ## Safety Notes
 
+- The plugin runtime makes no network requests, sends no telemetry, and requires no account or payment. Project data stays in vault `.ncanvas` files and the plugin's local settings data.
 - `Playbook.json` is declarative. It defines `Play` titles, body text, choice options, condition syntax, and variable writes, and does not execute arbitrary JavaScript.
 - `Hide` only hides Events Sheet columns; it does not delete data. `Delete` removes a schema field and also clears matching values from frame nodes in the Events Sheet.
 - Deleted nodes are moved to an archive outside the runtime path for recovery safety, but you should still version important projects.
@@ -82,6 +83,7 @@ Default node types are editable templates. `Entry` is a system type and cannot b
 - Right-click an existing link to reconnect or delete it.
 - `Canvas` and `Story` can both collapse frames, with shared collapse state. When collapsed in Canvas, links to child nodes are routed through frame ports temporarily; underlying links are not rewritten.
 - `Frame` and `Event Frame` are rendered below normal nodes by default. New frames are inserted above existing frame layers; frame depth can be adjusted via the node context menu.
+- Choice and Dialog cards keep long option or turn lists inside a vertically scrollable preview, so node size and canvas layout stay unchanged. In the Node inspector, `Add turn` appears after the turn list.
 - Every node has two ports: an **input port** (`input`) that receives links, and an **output port** (`output`) that starts links. Flow is always output → input, and input-to-output clicks are ignored. A `Focus` action selects and centers that node at 100% zoom.
 - Ports can be repositioned by dragging along a node boundary. Port positions are saved on the node and persist across sessions.
 
@@ -101,7 +103,7 @@ Manual Story order is stored in `storyOrder`. `Re-sort by graph` clears manual o
 
 ### Events Sheet
 
-![Events Sheet](assets/screenshots/events-sheet.png)
+![Events Sheet](events-sheet.png)
 
 `Frame` nodes appear in Events Sheet by default. Different frame types are placed in separate tables. Frame types used only for canvas grouping can enable `Hide frame rows from Events Sheet` in the node type editor.
 
@@ -111,7 +113,7 @@ You can rename, hide, or delete columns. Hidden columns are collected in each ta
 
 ### Characters
 
-![Characters page](assets/screenshots/characters.png)
+![Characters page](characters.png)
 
 `Characters` can be linked to nodes using Cast chips:
 
@@ -128,7 +130,7 @@ Use Character focus to highlight related nodes.
 
 ### Document
 
-![Document editor in Twee mode](assets/screenshots/document.png)
+![Document editor in Twee mode](document.png)
 
 `Document.md` is a full-page, VSCode-style editor for the project's runtime narrative. A slim tab strip shows the file name, a `Plain text` / `Ink` / `Yarn` / `Twee` format switch, and the live sync status; below it an edge-to-edge monospace editor with a synced line-number gutter fills the whole pane. `Tab` and `Shift+Tab` indent and outdent, and lines do not soft-wrap, so scripts read the same as in a code editor.
 
@@ -136,7 +138,7 @@ Edit existing narrative content directly and changes sync back to the project: p
 
 ### Playbook
 
-![Playbook settings](assets/screenshots/playbook.png)
+![Playbook settings](playbook.png)
 
 Think of `Playbook.json` in this way:
 
@@ -174,3 +176,11 @@ The top toolbar supports these export types:
 - **Twee**: exports Twee 3 `.twee` passages for Twine / Tweego, including SugarCube `StoryData`, `StoryInit`, conditional links, `<<goto>>`, and `<<set>>`.
 
 All exporters share one mapping of node slugs and variable names. Complex variables, Playbook actions, and effect operations that do not map cleanly to target formats are retained in Runtime JSON and exported as comments with warnings. After Story MD, Runtime JSON, Yarn, Ink, Twee, or Export All, an export report dialog appears with warnings and renamed variable mappings. Runtime JSON retains the full report for downstream tools.
+
+### AI copilot (Beta)
+
+![AI copilot](assets/screenshots/ai-copilot.png)
+
+The **AI** button at the bottom-left of the canvas opens an experimental copilot. Discuss the story in your own language, then ask it to change the canvas — it replies with a proposal of operations (add / update nodes, add / remove links) that you **Apply to canvas** or **Reject**. Nothing changes until you apply. The current node selection is passed as context, and the panel is bilingual.
+
+In the web app, open **Connection settings** and point it at any OpenAI-compatible endpoint (endpoint URL, API key, model); that config is stored only in your browser. In the Obsidian plugin, configure the same fields in plugin settings; the API key is stored in the plugin's local `data.json`, and requests use Obsidian's `requestUrl`. The bundled canvas code contains no browser `fetch` or `localStorage` branch. The feature is experimental and marked **Beta**.

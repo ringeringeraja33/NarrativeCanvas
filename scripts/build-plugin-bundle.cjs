@@ -133,6 +133,27 @@ const pluginOnlyRewrites = [
     `async function clearBrowserStorageConfirmed() {
   return;
 }`
+  ],
+  // AI is web-only inside Obsidian (requests go through NarrativeCanvasHost.aiChat).
+  // Strip the localStorage config and direct browser fetch. Plugin requests are routed
+  // through NarrativeCanvasHost.aiChat and Obsidian's requestUrl implementation.
+  [
+    /function getWebAiConfig\(\) \{/,
+    `function getWebAiConfig() {
+  return { endpoint: "", apiKey: "", model: "" };
+}`
+  ],
+  [
+    /function saveWebAiConfig\(\) \{/,
+    `function saveWebAiConfig() {
+  return;
+}`
+  ],
+  [
+    /async function requestWebAiCompletion\(payload\) \{/,
+    `async function requestWebAiCompletion(_payload) {
+  throw new Error("AI networking is only available through the Narrative Canvas host in Obsidian.");
+}`
   ]
 ];
 for (const [pattern, replacement] of pluginOnlyRewrites) {

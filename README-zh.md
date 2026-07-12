@@ -1,6 +1,6 @@
 # Narrative Canvas (中文)
 
-English version: [README.md](README.md)
+English version: [README.md](NarrativeCanvas/README.md)
 
 Changelog and release notes: [GitHub Releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
@@ -12,10 +12,11 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 界面支持英文与中文。网页端右下角提供 `EN / 中` 浮动切换按钮；Obsidian 插件设置提供 `语言` 选项，支持跟随 Obsidian 界面语言。
 
-![Narrative Canvas 主画布](assets/screenshots/main-canvas-zh.png)
+![Narrative Canvas 主画布](main-canvas-zh.png)
 
 ### 安全提醒
 
+- 插件运行时不发起网络请求、不发送遥测，也不要求账户或付费；项目数据仅保存在库内 `.ncanvas` 文件和插件本地设置数据中。
 - `演示设置`（底层文件 `Playbook.json`）是声明式配置。它控制 `演示` 的标题、正文、选项按钮、简单条件和变量写入；不执行任意 JavaScript。
 - `隐藏` 仅隐藏 `事件表` 列并保留数据。`删除` 会从 schema 移除列，并清除显示在 `事件表` 中的 `框架` 节点对应字段值。
 - 删除节点后，相关内容进入运行路径之外的归档数据。重要项目仍建议保留版本。
@@ -81,6 +82,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 - 右键点击已有连线，执行重连或删除。
 - Canvas 与 `故事` 均可折叠 `框架`，并共享同一折叠状态。Canvas 中 `框架` 折叠时，连到内部节点的线临时显示为从 `框架` 端口进出；真实连线不被改写。
 - `框架` 与 `事件框架` 默认显示在普通节点下层。新建 `框架` 放置在已有默认顺序 `框架` 的最上方，避免覆盖旧归组框架；需要时可通过右键菜单的层级控件手动调整。
+- Choice 与 Dialog 卡片的选项或轮次过多时，内容在节点内部纵向滚动，节点尺寸和画布布局保持不变；Node 检查器中的“添加轮次”位于轮次列表之后。
 - 每个节点都有两个端口：**输入端口**（input）只接收连线的 *终点*，箭头指向它；**输出端口**（output）只发出连线的 *起点*。连线方向永远是 **输出 → 输入**，两端不能互换；先点输入端口再点输出端口不会建立连线。
 - 端点滑动重排：拖动端口可沿当前节点边缘滑动。
 
@@ -100,7 +102,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 ### 事件表
 
-![事件表](assets/screenshots/events-sheet-zh.png)
+![事件表](events-sheet-zh.png)
 
 `框架` 节点默认进入 `事件表`。不同 `框架` 类型分属不同表格。仅用于画布归组的 `框架` 类型，可在节点类型编辑器中启用 `Hide frame rows from Events Sheet`。
 
@@ -110,7 +112,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 ### 角色
 
-![角色页面](assets/screenshots/characters-zh.png)
+![角色页面](characters-zh.png)
 
 `角色` 通过 Cast chips 关联到节点：
 
@@ -127,14 +129,14 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 ### 文档
 
-![Twee 模式下的文档编辑器](assets/screenshots/document-zh.png)
+![Twee 模式下的文档编辑器](document-zh.png)
 
 `Document.md` 是面向项目运行时叙事的整页编辑器，手感与 VSCode 原生编辑区一致。顶部标签栏显示文件名、`纯文本` / `Ink` / `Yarn` / `Twee` 格式切换以及实时同步状态；下方是铺满整块面板的等宽编辑区，带随内容同步的行号栏。`Tab` 与 `Shift+Tab` 缩进/取消缩进，且文本不自动换行，脚本的排版与代码编辑器一致。
 
 直接编辑现有叙事内容即可写回项目：项目标题与备注、节点标题与正文、变量、现有选项、条件、效果和跳转会逐字段比较后增量合并，而画布布局及格式无法表达的元数据保持不变。节点、选项和路线的新增或删除仍在画布或检查器中完成；稳定节点 ID 与正文边界标记会阻止编辑中的半成品误改项目结构。切换格式会把同一个项目重新渲染为纯文本（Story Markdown）、Ink、Yarn 或 Twee 3 / SugarCube。
 
 ### 演示设置
-![演示设置](assets/screenshots/playbook-zh.png)
+![演示设置](playbook-zh.png)
 
 `演示设置`（底层文件 `Playbook.json`）的职责如下：
 
@@ -171,3 +173,11 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 - **Twee**：导出给 Twine / Tweego 使用的 Twee 3 `.twee` passage，使用 SugarCube `StoryData`、`StoryInit`、条件链接、`<<goto>>` 和 `<<set>>`。
 
 这些导出共用同一套节点 slug 和变量名映射。复杂变量、演示设置动作、无法直接映射到目标格式的效果操作不会在导出中丢弃：执行 Story MD、Runtime JSON、Yarn、Ink、Twee 或 `导出全部` 后，界面打开导出报告弹窗，显示警告和被转换过的变量名映射。Runtime JSON 保留完整报告，供下游工具读取。
+
+### AI 助手（测试版）
+
+![AI 助手](assets/screenshots/ai-copilot-zh.png)
+
+画布左下角的 **AI** 按钮会打开实验性助手。用你自己的语言讨论剧情，再让它修改画布——它会回复一份操作建议（新增/更新节点、新增/删除连线），你可以**应用到画布**或**拒绝**；在应用之前画布不会改变。当前选中的节点会作为上下文传入，面板支持中英文。
+
+网页端点开**连接设置**，填入任意 OpenAI 兼容接口（endpoint、API key、模型），配置仅保存在本地浏览器。插件端在插件设置中填写相同字段，API key 保存在插件本地 `data.json`，请求通过 Obsidian 的 `requestUrl` 发送；插件内嵌的画布代码不包含浏览器 `fetch` 或 `localStorage` 分支。该功能为实验性，标记为 **Beta**。

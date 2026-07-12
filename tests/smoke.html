@@ -743,6 +743,16 @@
         assert(`${label}: export scale select exists`, Boolean(doc.querySelector("#exportImageScale")));
         assert(`${label}: theme toggle exists`, Boolean(doc.querySelector("#themeToggle")));
         assert(`${label}: project file status exists`, Boolean(doc.querySelector("#projectFileName")));
+        const aiButton = doc.querySelector("#aiFloatingButton");
+        const aiWindow = doc.querySelector("#aiFloatingWindow");
+        const aiCloseButton = doc.querySelector("[data-action='close-ai-window']");
+        assert(`${label}: AI floating controls exist`, Boolean(aiButton && aiWindow && aiCloseButton));
+        for (let index = 0; index < 20; index += 1) {
+          click(aiButton);
+          assert(`${label}: AI button opens reliably ${index + 1}`, !aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "true");
+          click(aiCloseButton);
+          assert(`${label}: AI close button responds reliably ${index + 1}`, aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "false");
+        }
         const clearStorageButton = doc.querySelector("[data-action='clear-browser-storage']");
         const sampleButton = doc.querySelector("[data-action='open-sample-project']");
         if ("__saveProjectCalls" in win) {
@@ -1488,10 +1498,28 @@
           `${label}: Choice card generates option numbers`,
           [...doc.querySelectorAll(".node[data-node-id='n4'] .node-choice-index")].map((item) => item.textContent.trim()).join(",") === "1,2,3"
         );
+        const choicePreview = doc.querySelector(".node[data-node-id='n4'] .node-choice-preview");
+        const choicePreviewClones = Array.from({ length: 16 }, () => choicePreview?.lastElementChild?.cloneNode(true)).filter(Boolean);
+        choicePreviewClones.forEach((item) => choicePreview.append(item));
+        const choicePreviewStyle = win.getComputedStyle(choicePreview);
+        assert(`${label}: Choice card scrolls long option lists`, choicePreviewStyle.overflowY === "auto" && choicePreview.scrollHeight > choicePreview.clientHeight + 1, `overflowY=${choicePreviewStyle.overflowY} scroll=${choicePreview.scrollHeight} client=${choicePreview.clientHeight}`);
+        assert(`${label}: Choice card contains scroll chaining`, choicePreviewStyle.overscrollBehaviorY === "contain" || choicePreviewStyle.overscrollBehavior === "contain", `overscroll=${choicePreviewStyle.overscrollBehavior}`);
+        assert(`${label}: Choice card scroll area is keyboard focusable`, choicePreview.tabIndex === 0);
+        choicePreviewClones.forEach((item) => item.remove());
         const dialogFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n6']");
         if (dialogFocus) click(dialogFocus);
         await waitFor(`${label}: Dialog card renders after focus`, () => Boolean(doc.querySelector(".node[data-node-id='n6']")));
         assert(`${label}: Dialog card previews authored turns`, doc.querySelectorAll(".node[data-node-id='n6'] .node-dialog-line").length === 2);
+        const dialogPreview = doc.querySelector(".node[data-node-id='n6'] .node-dialog-preview");
+        const dialogPreviewClones = Array.from({ length: 16 }, () => dialogPreview?.lastElementChild?.cloneNode(true)).filter(Boolean);
+        dialogPreviewClones.forEach((item) => dialogPreview.append(item));
+        const dialogPreviewStyle = win.getComputedStyle(dialogPreview);
+        assert(`${label}: Dialog card scrolls long turn lists`, dialogPreviewStyle.overflowY === "auto" && dialogPreview.scrollHeight > dialogPreview.clientHeight + 1, `overflowY=${dialogPreviewStyle.overflowY} scroll=${dialogPreview.scrollHeight} client=${dialogPreview.clientHeight}`);
+        assert(`${label}: Dialog card contains scroll chaining`, dialogPreviewStyle.overscrollBehaviorY === "contain" || dialogPreviewStyle.overscrollBehavior === "contain", `overscroll=${dialogPreviewStyle.overscrollBehavior}`);
+        assert(`${label}: Dialog card scroll area is keyboard focusable`, dialogPreview.tabIndex === 0 && dialogPreview.getAttribute("role") === "region");
+        dialogPreviewClones.forEach((item) => item.remove());
+        const dialogTurnsEditor = doc.querySelector(".dialog-turns-editor");
+        assert(`${label}: Add turn remains below the turn list`, dialogTurnsEditor?.querySelector(".dialog-turns-list")?.nextElementSibling?.classList.contains("dialog-turns-footer"));
         await verifyCanvasRadialMenu(label, win, doc);
         await verifyFrameContextMenu(label, win, doc);
         await verifyInspectorFloatAndPlaySync(label, win, doc);

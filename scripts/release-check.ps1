@@ -184,6 +184,18 @@ function Get-PluginBundledAppSource([string]$SourceRaw) {
     @{
       Pattern = 'async function clearBrowserStorageConfirmed\(\) \{'
       Replacement = "async function clearBrowserStorageConfirmed() {`n  return;`n}"
+    },
+    @{
+      Pattern = 'function getWebAiConfig\(\) \{'
+      Replacement = "function getWebAiConfig() {`n  return { endpoint: `"`", apiKey: `"`", model: `"`" };`n}"
+    },
+    @{
+      Pattern = 'function saveWebAiConfig\(\) \{'
+      Replacement = "function saveWebAiConfig() {`n  return;`n}"
+    },
+    @{
+      Pattern = 'async function requestWebAiCompletion\(payload\) \{'
+      Replacement = "async function requestWebAiCompletion(_payload) {`n  throw new Error(`"AI networking is only available through the Narrative Canvas host in Obsidian.`");`n}"
     }
   )
 

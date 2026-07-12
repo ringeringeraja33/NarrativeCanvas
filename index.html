@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Narrative Canvas</title>
-    <link rel="stylesheet" href="./canvas.css?v=20260711c-1.2.0">
+    <link rel="stylesheet" href="./canvas.css?v=20260712a-1.2.1">
   </head>
   <body>
     <div class="app-shell">
@@ -181,6 +181,17 @@
             <span aria-hidden="true">↑</span>
           </button>
         </div>
+
+        <button id="aiFloatingButton" class="ai-floating-button" data-action="toggle-ai-window" type="button" title="Open AI assistant" aria-label="Open AI assistant" aria-expanded="false">
+          <span aria-hidden="true">AI</span>
+        </button>
+        <aside id="aiFloatingWindow" class="ai-floating-window" aria-label="AI assistant" hidden>
+          <header class="ai-floating-header">
+            <div><span class="pane-kicker">Canvas copilot</span><div class="ai-title"><h2>AI</h2><span class="ai-beta-badge" data-ai-beta>Beta</span></div></div>
+            <button class="icon-button" data-action="close-ai-window" type="button" title="Close AI assistant" aria-label="Close AI assistant">×</button>
+          </header>
+          <div id="aiPanel" class="ai-floating-body"></div>
+        </aside>
       </main>
 
       <dialog id="playDialog" class="play-dialog">
@@ -480,6 +491,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260711c-1.2.0"></script>
+    <script src="./app.js?v=20260712a-1.2.1"></script>
   </body>
 </html>

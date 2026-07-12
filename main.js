@@ -1,4 +1,4 @@
-const { AbstractInputSuggest, ItemView, Notice, Plugin, PluginSettingTab, Setting, SuggestModal, TFile, TFolder, normalizePath } = require("obsidian");
+const { AbstractInputSuggest, ItemView, Notice, Plugin, PluginSettingTab, Setting, SuggestModal, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
 
 const VIEW_TYPE = "narrative-canvas-view";
 const PLUGIN_ID = "narrative-canvas";
@@ -26,6 +26,9 @@ const DEFAULT_SETTINGS = {
   filenameTemplate: DEFAULT_FILENAME_TEMPLATE,
   autoSaveIntervalSeconds: DEFAULT_AUTO_SAVE_INTERVAL_SECONDS,
   language: DEFAULT_LANGUAGE_SETTING,
+  aiEndpoint: "",
+  aiApiKey: "",
+  aiModel: "",
   currentProjectPath: "",
   lastProjectPath: ""
 };
@@ -112,6 +115,23 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
         .then(() => window.NarrativeCanvasApp?.loadVaultProject?.())
         .catch((error) => console.error(error));
     }));
+  }
+
+  async requestAi(payload) {
+    const endpoint = String(this.settings.aiEndpoint || "").trim();
+    const apiKey = String(this.settings.aiApiKey || "").trim();
+    const model = String(this.settings.aiModel || "").trim();
+    if (!endpoint || !apiKey || !model) throw new Error("Configure AI endpoint, API key, and model in Narrative Canvas settings.");
+    const response = await requestUrl({
+      url: endpoint,
+      method: "POST",
+      contentType: "application/json",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ ...payload, model }),
+      throw: false
+    });
+    if (response.status < 200 || response.status >= 300) throw new Error(`AI request failed (${response.status}): ${response.text || "Unknown error"}`);
+    return response.json;
   }
 
   async saveActiveCanvas() {
@@ -744,6 +764,7 @@ class NarrativeCanvasView extends ItemView {
         saveProject: (savedStateJson) => this.plugin.saveProjectFile(savedStateJson),
         getAutoSaveIntervalMs: () => this.plugin.getAutoSaveIntervalMs(),
         getLanguage: () => this.plugin.getEffectiveLanguage(),
+        aiChat: (payload) => this.plugin.requestAi(payload),
         ensureProjectFile: (savedStateJson, options) => this.plugin.ensureProjectFile(savedStateJson, options),
         createProjectFile: (savedStateJson, options) => this.plugin.createProjectFile(savedStateJson, options),
         previewNewProjectFile: (savedStateJson, options) => this.plugin.previewNewProjectFile(savedStateJson, options),
@@ -972,6 +993,11 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
           });
       });
 
+    containerEl.createEl("h3", { text: "AI" });
+    new Setting(containerEl).setName("API endpoint").setDesc("OpenAI-compatible chat completions endpoint.").addText((input) => input.setPlaceholder("https://api.example.com/v1/chat/completions").setValue(this.plugin.settings.aiEndpoint || "").onChange(async (value) => { this.plugin.settings.aiEndpoint = String(value || "").trim(); await this.plugin.savePluginData(); }));
+    new Setting(containerEl).setName("API key").setDesc("Stored in this plugin's local data.json.").addText((input) => { input.inputEl.type = "password"; input.setValue(this.plugin.settings.aiApiKey || "").onChange(async (value) => { this.plugin.settings.aiApiKey = String(value || "").trim(); await this.plugin.savePluginData(); }); });
+    new Setting(containerEl).setName("Model").addText((input) => input.setPlaceholder("model-name").setValue(this.plugin.settings.aiModel || "").onChange(async (value) => { this.plugin.settings.aiModel = String(value || "").trim(); await this.plugin.savePluginData(); }));
+
   }
 }
 
@@ -982,6 +1008,9 @@ function normalizeSettings(rawSettings) {
     filenameTemplate: normalizeFilenameTemplate(source.filenameTemplate),
     autoSaveIntervalSeconds: normalizeAutoSaveIntervalSeconds(source.autoSaveIntervalSeconds),
     language: normalizeLanguageSetting(source.language),
+    aiEndpoint: String(source.aiEndpoint || "").trim(),
+    aiApiKey: String(source.aiApiKey || "").trim(),
+    aiModel: String(source.aiModel || "").trim(),
     currentProjectPath: normalizeVaultPath(source.currentProjectPath),
     lastProjectPath: normalizeVaultPath(source.lastProjectPath)
   };
@@ -1331,7 +1360,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003cmeta charset=\"utf-8\"\u003e",
   "    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\u003e",
   "    \u003ctitle\u003eNarrative Canvas\u003c/title\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260711c-1.2.0\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260712a-1.2.1\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -1508,6 +1537,17 @@ const CANVAS_INDEX_HTML = [
   "            \u003cspan aria-hidden=\"true\"\u003e↑\u003c/span\u003e",
   "          \u003c/button\u003e",
   "        \u003c/div\u003e",
+  "",
+  "        \u003cbutton id=\"aiFloatingButton\" class=\"ai-floating-button\" data-action=\"toggle-ai-window\" type=\"button\" title=\"Open AI assistant\" aria-label=\"Open AI assistant\" aria-expanded=\"false\"\u003e",
+  "          \u003cspan aria-hidden=\"true\"\u003eAI\u003c/span\u003e",
+  "        \u003c/button\u003e",
+  "        \u003caside id=\"aiFloatingWindow\" class=\"ai-floating-window\" aria-label=\"AI assistant\" hidden\u003e",
+  "          \u003cheader class=\"ai-floating-header\"\u003e",
+  "            \u003cdiv\u003e\u003cspan class=\"pane-kicker\"\u003eCanvas copilot\u003c/span\u003e\u003cdiv class=\"ai-title\"\u003e\u003ch2\u003eAI\u003c/h2\u003e\u003cspan class=\"ai-beta-badge\" data-ai-beta\u003eBeta\u003c/span\u003e\u003c/div\u003e\u003c/div\u003e",
+  "            \u003cbutton class=\"icon-button\" data-action=\"close-ai-window\" type=\"button\" title=\"Close AI assistant\" aria-label=\"Close AI assistant\"\u003e×\u003c/button\u003e",
+  "          \u003c/header\u003e",
+  "          \u003cdiv id=\"aiPanel\" class=\"ai-floating-body\"\u003e\u003c/div\u003e",
+  "        \u003c/aside\u003e",
   "      \u003c/main\u003e",
   "",
   "      \u003cdialog id=\"playDialog\" class=\"play-dialog\"\u003e",
@@ -1807,7 +1847,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=20260711c-1.2.0\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=20260712a-1.2.1\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -2865,6 +2905,22 @@ function installNarrativeCanvasApp() {
       "Characters.md opened.": "Characters.md 已打开。",
       "Cast": "演员表",
       "Clear": "清除",
+      "Open AI assistant": "打开 AI 助手",
+      "Close AI assistant": "关闭 AI 助手",
+      "AI assistant": "AI 助手",
+      "Canvas copilot": "画布助手",
+      "Apply to canvas": "应用到画布",
+      "Reject": "拒绝",
+      "Send": "发送",
+      "Connection settings": "连接设置",
+      "Save settings": "保存设置",
+      "Context": "上下文",
+      "Entire canvas": "整个画布",
+      "Discuss the story, then ask AI to propose canvas changes.": "先讨论剧情，再让 AI 提出画布修改建议。",
+      "Ask about the story or request a canvas change...": "询问剧情，或请求修改画布……",
+      "Thinking...": "思考中……",
+      "Canvas change proposal": "画布修改建议",
+      "Canvas change proposal ready.": "画布修改建议已就绪。",
       "Clear character focus": "清除角色聚焦",
       "Clear character search": "清除角色搜索",
       "Clear event search": "清除事件搜索",
@@ -3890,6 +3946,11 @@ function installNarrativeCanvasApp() {
     immersiveFullscreen: false,
     nodePanelPointerDown: false,
     floatingInspectorPanel: "",
+    aiMessages: [],
+    aiPendingPatch: null,
+    aiBusy: false,
+    aiError: "",
+    aiOpen: false,
     frameCanvasId: "",
     frameCanvasReturnView: null,
     search: "",
@@ -4027,6 +4088,9 @@ function installNarrativeCanvasApp() {
     dom.projectPanel = dom.scope.querySelector("#projectPanel");
     dom.nodePanel = dom.scope.querySelector("#nodePanel");
     dom.storyPanel = dom.scope.querySelector("#storyPanel");
+    dom.aiPanel = dom.scope.querySelector("#aiPanel");
+    dom.aiFloatingButton = dom.scope.querySelector("#aiFloatingButton");
+    dom.aiFloatingWindow = dom.scope.querySelector("#aiFloatingWindow");
     dom.inspectorPanels = dom.scope.querySelector("#inspectorPanels");
     dom.inspectorFloatOverlay = dom.scope.querySelector("#inspectorFloatOverlay");
     dom.inspectorFloatBody = dom.scope.querySelector("#inspectorFloatBody");
@@ -4133,6 +4197,9 @@ function installNarrativeCanvasApp() {
     eventController = new AbortController();
     const { signal } = eventController;
     const eventRoot = dom.scope || document;
+
+    dom.aiFloatingButton?.addEventListener("click", handleAiFloatingControlClick, { signal });
+    dom.aiFloatingWindow?.querySelector("[data-action='close-ai-window']")?.addEventListener("click", handleAiFloatingControlClick, { signal });
 
     eventRoot.addEventListener("pointerdown", handleFormControlPointerEvent, { signal });
     eventRoot.addEventListener("mousedown", handleFormControlPointerEvent, { signal });
@@ -4271,6 +4338,16 @@ function installNarrativeCanvasApp() {
     dom.nodeRequiredDialog.addEventListener("click", (event) => {
       if (event.target === dom.nodeRequiredDialog) dom.nodeRequiredDialog.close();
     }, { signal });
+  }
+
+  function handleAiFloatingControlClick(event) {
+    if (event.__narrativeCanvasClickHandled) return;
+    const action = event.currentTarget?.dataset?.action;
+    if (action !== "toggle-ai-window" && action !== "close-ai-window") return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.__narrativeCanvasClickHandled = true;
+    toggleAiWindow(action === "close-ai-window" ? false : null);
   }
 
   function destroyNarrativeCanvas() {
@@ -5252,8 +5329,15 @@ function installNarrativeCanvasApp() {
       [".workspace-toc-button", "title", "Toggle outline"],
       [".workspace-toc-button", "aria-label", "Toggle outline"],
       ["[data-document-toc-panel]", "aria-label", "Document outline"],
+      ["#aiFloatingButton", "title", "Open AI assistant"],
+      ["#aiFloatingButton", "aria-label", "Open AI assistant"],
+      ["#aiFloatingWindow", "aria-label", "AI assistant"],
+      ["[data-action='close-ai-window']", "title", "Close AI assistant"],
+      ["[data-action='close-ai-window']", "aria-label", "Close AI assistant"],
       ["#themeToggle", "title", "Switch theme"]
     ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
+
+    localizeText(".ai-floating-header .pane-kicker", "Canvas copilot");
 
     localizeLabelText(".canvas-search-box", "Query");
     localizeLabelText(".character-search-box", "Find");
@@ -10193,7 +10277,7 @@ function installNarrativeCanvasApp() {
       : (Array.isArray(node.choices) ? node.choices.map(normalizeOptionalString).filter(Boolean) : []);
     return `
       ${node.body ? `<div class="node-text node-text-summary">${escapeHtml(displayBody(node))}</div>` : ""}
-      <ol class="node-choice-preview" aria-label="${escapeAttr(t("Choices"))}">
+      <ol class="node-choice-preview" aria-label="${escapeAttr(t("Choices"))}" tabindex="0">
         ${options.map((label, index) => {
           const displayLabel = stripChoiceDisplayOrdinal(label);
           return `<li title="${escapeAttr(label)}"><span class="node-choice-index" aria-hidden="true">${index + 1}</span><span class="node-choice-label">${escapeHtml(displayLabel)}</span></li>`;
@@ -10210,7 +10294,7 @@ function installNarrativeCanvasApp() {
 
   function renderDialogNodeCardContent(node) {
     return `
-      <div class="node-dialog-preview" aria-label="${escapeAttr(t("Dialog"))}">
+      <div class="node-dialog-preview" role="region" aria-label="${escapeAttr(t("Dialog"))}" tabindex="0">
         ${node.turns.map((turn) => {
           const speaker = normalizeOptionalString(turn?.speaker).trim();
           const line = normalizeOptionalString(turn?.line);
@@ -10656,6 +10740,7 @@ function installNarrativeCanvasApp() {
     renderProjectPanel();
     renderNodePanel(activeNode);
     renderStoryPanel();
+    renderAiPanel();
     renderFloatingInspectorState();
   }
 
@@ -10668,6 +10753,158 @@ function installNarrativeCanvasApp() {
     dom.scope.querySelectorAll(".inspector-panel").forEach((panel) => {
       panel.classList.toggle("active", panel.id === `${state.panel}Panel`);
     });
+  }
+
+  function getWebAiConfig() {
+    return { endpoint: "", apiKey: "", model: "" };
+  }
+
+  function saveWebAiConfig() {
+    return;
+  }
+
+  function renderAiPanel() {
+    if (!dom.aiPanel) return;
+    const config = getWebAiConfig();
+    const selected = (state.selectedNodeIds?.length ? state.selectedNodeIds : [state.selectedNodeId]).filter(Boolean);
+    const messages = state.aiMessages.map((message) => `<article class="ai-message ai-message-${escapeAttr(message.role)}"><strong>${message.role === "user" ? t("You") : "AI"}</strong><div>${escapeHtml(message.content).replace(/\n/g, "<br>")}</div></article>`).join("");
+    const patch = state.aiPendingPatch;
+    const operations = Array.isArray(patch?.operations) ? patch.operations : [];
+    const proposal = patch ? `<section class="ai-proposal"><h3>${escapeHtml(patch.summary || t("Canvas change proposal"))}</h3><ol>${operations.map((op) => `<li><code>${escapeHtml(op.op || "")}</code> ${escapeHtml(op.node?.title || op.id || op.from || "")}</li>`).join("")}</ol><div class="ai-actions"><button data-action="ai-apply-patch" type="button">${t("Apply to canvas")}</button><button data-action="ai-reject-patch" type="button">${t("Reject")}</button></div></section>` : "";
+    const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
+    dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span></div><div class="ai-messages">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change..."))}" ${state.aiBusy ? "disabled" : ""}></textarea><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Thinking...") : t("Send")}</button><button data-action="ai-clear" type="button">${t("Clear")}</button></div></div>`;
+    dom.aiPanel.querySelector(".ai-messages")?.scrollTo?.({ top: 999999 });
+    renderAiFloatingState();
+  }
+
+  function renderAiFloatingState() {
+    if (dom.aiFloatingWindow) dom.aiFloatingWindow.hidden = !state.aiOpen;
+    if (dom.aiFloatingButton) {
+      dom.aiFloatingButton.setAttribute("aria-expanded", state.aiOpen ? "true" : "false");
+      dom.aiFloatingButton.classList.toggle("active", state.aiOpen);
+    }
+  }
+
+  function toggleAiWindow(force = null) {
+    state.aiOpen = typeof force === "boolean" ? force : !state.aiOpen;
+    renderAiPanel();
+    if (state.aiOpen) window.setTimeout(() => dom.aiPanel?.querySelector("[data-ai-prompt]")?.focus?.(), 0);
+  }
+
+  function buildAiContext() {
+    const selected = new Set((state.selectedNodeIds?.length ? state.selectedNodeIds : [state.selectedNodeId]).filter(Boolean));
+    let nodes = state.project.nodes;
+    if (selected.size) {
+      const related = new Set(selected);
+      state.project.links.forEach((link) => { if (selected.has(link.from) || selected.has(link.to)) { related.add(link.from); related.add(link.to); } });
+      nodes = nodes.filter((node) => related.has(node.id));
+    }
+    return {
+      project: { title: state.project.title, notes: state.project.notes },
+      focusNodeIds: [...selected], variables: state.project.variables, characters: state.project.characters,
+      nodes: nodes.map((node) => ({ id: node.id, type: node.type, title: node.title, body: node.body, frameId: node.frameId || "", turns: node.turns, choiceOptions: node.choiceOptions, stateLogic: node.stateLogic, routing: node.routing })),
+      links: state.project.links.filter((link) => !selected.size || nodes.some((node) => node.id === link.from || node.id === link.to))
+    };
+  }
+
+  function aiSystemPrompt() {
+    return `You are the Narrative Canvas copilot. Discuss narrative design in the user's language. When canvas edits are requested, finish with exactly one JSON object inside a fenced json block: {"summary":"...","operations":[{"op":"addNode","tempId":"new_1","node":{"type":"Dialog","title":"...","body":"","frameId":"","turns":[{"speaker":"...","line":"..."}]},"placement":{"x":500,"y":300}}]}. Every operation MUST include op. Allowed operations: addNode {op,tempId,node,placement}, updateNode {op,id,changes}, addLink {op,from,to,label,choiceOptionId}, deleteLink {op,id}. Never delete nodes. Node types include Content, Dialog, Choice, Marker, Clue, StorySequence and other existing project types. Preserve existing text unless asked. For addNode, include type,title,body,frameId; Dialog turns use {speaker,line}; Choice must include matching choiceOptions and choices. Keep operations <= 12.`;
+  }
+
+  function extractAiPatch(content) {
+    const fenced = String(content || "").match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidates = [];
+    if (fenced?.[1]) candidates.push(fenced[1].trim());
+    const raw = String(content || "").trim();
+    if (raw.startsWith("{") && raw.endsWith("}")) candidates.push(raw);
+    const firstBrace = raw.indexOf("{");
+    const lastBrace = raw.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(raw.slice(firstBrace, lastBrace + 1));
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && Array.isArray(parsed.operations)) return { patch: validateAiPatch(parsed), source: candidate };
+      } catch (_error) { /* try the next candidate */ }
+    }
+    return null;
+  }
+
+  // Web-only AI transport. Isolated so the Obsidian plugin build can strip fetch entirely;
+  // inside Obsidian the request always goes through NarrativeCanvasHost.aiChat instead.
+  async function requestWebAiCompletion(_payload) {
+    throw new Error("AI networking is only available through the Narrative Canvas host in Obsidian.");
+  }
+
+  async function sendAiMessage() {
+    if (state.aiBusy) return;
+    const prompt = dom.aiPanel?.querySelector("[data-ai-prompt]")?.value?.trim() || "";
+    if (!prompt) return;
+    saveWebAiConfig();
+    state.aiMessages.push({ role: "user", content: prompt });
+    state.aiBusy = true; state.aiError = ""; state.aiPendingPatch = null; renderAiPanel();
+    try {
+      const payload = { messages: [{ role: "system", content: aiSystemPrompt() }, { role: "system", content: `Canvas context:\n${JSON.stringify(buildAiContext())}` }, ...state.aiMessages.slice(-12)], temperature: 0.4 };
+      let response;
+      if (window.NarrativeCanvasHost?.aiChat) response = await window.NarrativeCanvasHost.aiChat(payload);
+      else response = await requestWebAiCompletion(payload);
+      const content = response?.choices?.[0]?.message?.content || response?.output_text || "";
+      if (!content) throw new Error("AI returned an empty response.");
+      const extracted = extractAiPatch(content);
+      state.aiPendingPatch = extracted?.patch || null;
+      const visibleContent = extracted ? content.replace(extracted.source, "").replace(/```(?:json)?\s*```/i, "").trim() : content.trim();
+      state.aiMessages.push({ role: "assistant", content: visibleContent || (extracted ? t("Canvas change proposal ready.") : content) });
+    } catch (error) { state.aiError = error?.message || String(error); }
+    state.aiBusy = false; renderAiPanel();
+  }
+
+  function validateAiPatch(value) {
+    if (!value || typeof value !== "object" || !Array.isArray(value.operations)) throw new Error("AI patch is invalid.");
+    const allowed = new Set(["addNode", "updateNode", "addLink", "deleteLink"]);
+    const operations = value.operations.map((source) => {
+      if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("AI patch contains an invalid operation.");
+      const operation = { ...source };
+      if (!operation.op && operation.node) operation.op = "addNode";
+      if (!operation.op && operation.changes && operation.id) operation.op = "updateNode";
+      if (!allowed.has(operation.op)) throw new Error("AI patch contains unsupported operations.");
+      if (operation.op === "addNode" && operation.node && typeof operation.node === "object") {
+        const node = { ...operation.node };
+        if (node.type === "Dialog" && !Array.isArray(node.turns) && (node.speaker || node.line)) {
+          node.turns = [{ speaker: String(node.speaker || ""), line: String(node.line || "") }];
+          delete node.speaker;
+          delete node.line;
+        }
+        operation.node = node;
+      }
+      return operation;
+    });
+    if (operations.length > 12) throw new Error("AI patch contains too many operations.");
+    return { summary: String(value.summary || ""), operations };
+  }
+
+  function applyAiPatch() {
+    const patch = state.aiPendingPatch;
+    if (!patch) return;
+    const before = getHistorySnapshot();
+    const tempIds = new Map();
+    for (const operation of patch.operations) {
+      if (operation.op === "addNode") {
+        const source = operation.node && typeof operation.node === "object" ? operation.node : {};
+        const id = nextId("n", state.project.nodes); tempIds.set(operation.tempId || id, id);
+        const focus = getNode(state.selectedNodeId); const offset = tempIds.size;
+        const placement = operation.placement && typeof operation.placement === "object" ? operation.placement : {};
+        const node = normalizeNode({ ...source, id, type: source.type || "Content", title: source.title || "AI node", body: source.body || "", x: Number(placement.x ?? source.x ?? ((focus?.x || 80) + 380 * offset)), y: Number(placement.y ?? source.y ?? (focus?.y || 80)), frameId: source.frameId ?? focus?.frameId ?? "" });
+        applyNodeTypeDefaults(node); state.project.nodes.push(normalizeNode(node));
+      } else if (operation.op === "updateNode") {
+        const node = getNode(operation.id); if (!node || !operation.changes || typeof operation.changes !== "object") continue;
+        const protectedKeys = new Set(["id", "x", "y", "frameId"]); Object.entries(operation.changes).forEach(([key, value]) => { if (!protectedKeys.has(key)) node[key] = value; });
+        Object.assign(node, normalizeNode(node));
+      } else if (operation.op === "addLink") {
+        const from = tempIds.get(operation.from) || operation.from; const to = tempIds.get(operation.to) || operation.to;
+        if (!getNode(from) || !getNode(to)) continue;
+        state.project.links.push({ id: nextId("l", state.project.links), from, to, label: String(operation.label || ""), ...(operation.choiceOptionId ? { choiceOptionId: operation.choiceOptionId } : {}) });
+      } else if (operation.op === "deleteLink") state.project.links = state.project.links.filter((link) => link.id !== operation.id);
+    }
+    state.project = normalizeProject(state.project); markProjectStructureChanged(); commitHistoryFromSnapshot(before); state.aiPendingPatch = null; renderAll(); setStatus("AI proposal applied.");
   }
 
   function getInspectorPanelElement(panel) {
@@ -12096,6 +12333,7 @@ function installNarrativeCanvasApp() {
   function handleDocumentClickCapture(event) {
     if (event.__narrativeCanvasClickHandled) return;
     const target = getCanvasCoveredFrameTarget(event) || event.target;
+    if (target?.closest?.("#aiFloatingButton, [data-action='close-ai-window']")) return;
     if (!isNarrativeCanvasClickDelegateTarget(target)) return;
     syncDomScopeForEventTarget(target);
     if (handleDocumentClickEvent(event, target)) {
@@ -12542,6 +12780,13 @@ function installNarrativeCanvasApp() {
       closeFloatingInspector();
       return;
     }
+    if (action === "toggle-ai-window") { toggleAiWindow(); return; }
+    if (action === "close-ai-window") { toggleAiWindow(false); return; }
+    if (action === "ai-send") { void sendAiMessage(); return; }
+    if (action === "ai-apply-patch") { applyAiPatch(); return; }
+    if (action === "ai-reject-patch") { state.aiPendingPatch = null; renderAiPanel(); return; }
+    if (action === "ai-clear") { state.aiMessages = []; state.aiPendingPatch = null; state.aiError = ""; renderAiPanel(); return; }
+    if (action === "ai-save-config") { saveWebAiConfig(); setStatus("AI settings saved locally."); return; }
     if (action === "toggle-play-float") {
       togglePlayFloat();
       return;
