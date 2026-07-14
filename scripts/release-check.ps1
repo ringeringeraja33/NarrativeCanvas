@@ -194,8 +194,8 @@ function Get-PluginBundledAppSource([string]$SourceRaw) {
       Replacement = "function saveWebAiConfig() {`n  return;`n}"
     },
     @{
-      Pattern = 'async function requestWebAiCompletion\(payload\) \{'
-      Replacement = "async function requestWebAiCompletion(_payload) {`n  throw new Error(`"AI networking is only available through the Narrative Canvas host in Obsidian.`");`n}"
+      Pattern = 'async function requestWebAiCompletion\(payload, options\) \{'
+      Replacement = "async function requestWebAiCompletion(_payload, _options) {`n  throw new Error(`"AI networking is only available through the Narrative Canvas host in Obsidian.`");`n}"
     }
   )
 

@@ -43,6 +43,7 @@
   --accent-green: #98c379;
   --accent-cyan: #56b6c2;
   --accent-blue: #61afef;
+  --graph-hover-color: #a78bfa;
   --radius-s: 4px;
   --radius-m: 6px;
   --shadow-soft: 0 16px 40px rgba(0, 0, 0, 0.32);
@@ -51,43 +52,45 @@
 
 :root[data-theme="light"],
 .app-shell[data-theme="light"] {
-  --background-primary: #f4f4f1;
-  --background-primary-alt: #fcfbf7;
-  --background-secondary: #e9e7e2;
-  --background-secondary-alt: #dedbd3;
-  --background-canvas: #efeee9;
+  --background-primary: #f7f7f8;
+  --background-primary-alt: #ffffff;
+  --background-secondary: #eeeeef;
+  --background-secondary-alt: #e4e4e7;
+  --background-canvas: #f2f2f3;
   --background-control: #ffffff;
-  --workspace-bar-bg: #eceae5;
-  --background-modifier-hover: #ddd9d1;
-  --background-modifier-active: #d3cec3;
-  --background-modifier-border: #c7c1b6;
-  --background-modifier-border-hover: #aaa397;
-  --canvas-grid-small: rgba(40, 37, 32, 0.085);
-  --canvas-grid-large: rgba(40, 37, 32, 0.14);
-  --node-surface: rgba(255, 255, 255, 0.94);
-  --node-border: rgba(35, 31, 27, 0.14);
-  --visual-frame-surface: rgba(52, 58, 68, 0.08);
-  --visual-frame-border: rgba(52, 58, 68, 0.22);
-  --event-frame-surface: rgba(118, 78, 190, 0.16);
-  --event-frame-border: rgba(107, 75, 170, 0.36);
-  --frame-header-bg: rgba(35, 31, 27, 0.035);
-  --subtle-button-border: rgba(35, 31, 27, 0.08);
-  --subtle-button-bg: rgba(35, 31, 27, 0.035);
-  --node-header-border: rgba(35, 31, 27, 0.09);
-  --node-header-bg: rgba(35, 31, 27, 0.045);
-  --overlay-bg: rgba(255, 255, 255, 0.9);
-  --minimap-bg: rgba(255, 255, 255, 0.78);
-  --scrollbar-track: rgba(40, 37, 32, 0.08);
-  --scrollbar-thumb: rgba(40, 37, 32, 0.32);
-  --scrollbar-thumb-hover: rgba(40, 37, 32, 0.44);
-  --link-color: rgba(55, 51, 45, 0.64);
-  --text-normal: #171717;
-  --text-muted: #3f3b35;
-  --text-faint: #625b52;
+  --workspace-bar-bg: #ededee;
+  --background-modifier-hover: #e1e1e4;
+  --background-modifier-active: #d8d7dc;
+  --background-modifier-border: #d0d0d4;
+  --background-modifier-border-hover: #aaaab2;
+  --canvas-grid-small: rgba(40, 40, 45, 0.065);
+  --canvas-grid-large: rgba(40, 40, 45, 0.115);
+  --node-surface: rgba(255, 255, 255, 0.97);
+  --node-border: rgba(38, 38, 43, 0.14);
+  --visual-frame-surface: rgba(65, 65, 72, 0.065);
+  --visual-frame-border: rgba(65, 65, 72, 0.2);
+  --event-frame-surface: rgba(127, 109, 242, 0.12);
+  --event-frame-border: rgba(111, 86, 218, 0.34);
+  --frame-header-bg: rgba(35, 35, 40, 0.035);
+  --subtle-button-border: rgba(35, 35, 40, 0.08);
+  --subtle-button-bg: rgba(35, 35, 40, 0.03);
+  --node-header-border: rgba(35, 35, 40, 0.09);
+  --node-header-bg: rgba(35, 35, 40, 0.04);
+  --overlay-bg: rgba(255, 255, 255, 0.92);
+  --minimap-bg: rgba(255, 255, 255, 0.86);
+  --scrollbar-track: rgba(35, 35, 40, 0.06);
+  --scrollbar-thumb: rgba(35, 35, 40, 0.26);
+  --scrollbar-thumb-hover: rgba(35, 35, 40, 0.38);
+  --link-color: rgba(55, 55, 62, 0.62);
+  --text-normal: #202124;
+  --text-muted: #5f6368;
+  --text-faint: #85888d;
   --text-on-accent: #ffffff;
-  --interactive-accent: #6655dd;
-  --interactive-accent-hover: #5343c5;
-  --shadow-soft: 0 16px 36px rgba(40, 37, 32, 0.16);
+  --interactive-accent: #6f55d9;
+  --interactive-accent-hover: #5d43c2;
+  --focus-accent: #7f6df2;
+  --graph-hover-color: #8f70ff;
+  --shadow-soft: 0 16px 36px rgba(30, 30, 36, 0.14);
   color-scheme: light;
 }
 
@@ -1627,6 +1630,13 @@ button {
   min-height: 0;
 }
 
+/* Keep enough scroll-past-end space to center matches near the end of Advanced JSON. */
+.document-shell.playbook-json-open {
+  align-self: start;
+  min-height: max-content;
+  padding-bottom: min(44vh, 360px);
+}
+
 .document-limit-notice {
   display: flex;
   align-items: center;
@@ -1941,6 +1951,18 @@ button {
   stroke-width: 3;
 }
 
+.link-path.graph-hover-link {
+  stroke: var(--graph-hover-color);
+  stroke-width: 4;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--graph-hover-color) 86%, transparent));
+}
+
+.link-label.graph-hover-link {
+  fill: var(--text-normal);
+  font-weight: 700;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--graph-hover-color) 70%, transparent));
+}
+
 .link-path.pending {
   stroke: var(--interactive-accent-hover);
   stroke-dasharray: 9 7;
@@ -1990,6 +2012,22 @@ button {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   pointer-events: auto;
   user-select: none;
+}
+
+.node.graph-hover-node {
+  border-color: color-mix(in srgb, var(--graph-hover-color) 88%, white 12%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--graph-hover-color) 50%, transparent),
+    0 0 20px color-mix(in srgb, var(--graph-hover-color) 38%, transparent),
+    var(--shadow-soft);
+}
+
+.node.graph-hover-origin {
+  border-color: var(--graph-hover-color);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--graph-hover-color) 68%, transparent),
+    0 0 26px color-mix(in srgb, var(--graph-hover-color) 48%, transparent),
+    var(--shadow-soft);
 }
 
 .node.frame {
@@ -2341,8 +2379,81 @@ button {
 }
 
 .node-dialog-line {
-  overflow-wrap: anywhere;
+  display: grid;
+  grid-template-columns: minmax(42px, var(--dialog-speaker-ratio, 34%)) 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 2px;
+}
+
+.node .node-dialog-speaker-input,
+.node .node-dialog-line-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.node .node-dialog-speaker-input {
+  height: 24px;
+  color: var(--text-accent);
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+.node .node-dialog-line-input {
+  resize: none;
+  field-sizing: content;
+  max-height: 84px;
+  overflow-y: auto;
   white-space: pre-wrap;
+}
+
+.node-dialog-separator {
+  display: grid;
+  place-items: start center;
+  align-self: stretch;
+  min-height: 24px;
+  padding-top: 3px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.node-dialog-separator:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  color: var(--interactive-accent-hover);
+}
+
+.dialog-column-resizing,
+.dialog-column-resizing * {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.node .node-dialog-speaker-input:hover,
+.node .node-dialog-line-input:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);
+}
+
+.node .node-dialog-speaker-input:focus,
+.node .node-dialog-line-input:focus,
+.node .node-dialog-speaker-input:focus-visible,
+.node .node-dialog-line-input:focus-visible {
+  border-color: var(--interactive-accent);
+  outline: none;
+  background: var(--background-control);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
 .node-dialog-line + .node-dialog-line {
@@ -3235,6 +3346,10 @@ select:focus {
 }
 
 .inspector-float-window {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   width: min(880px, calc(100% - 32px));
@@ -3256,6 +3371,14 @@ select:focus {
   min-height: 58px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--background-modifier-border);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.inspector-float-window.is-moving .inspector-float-header,
+.play-dialog.is-moving .play-header {
+  cursor: grabbing;
 }
 
 .inspector-float-header h2 {
@@ -6128,6 +6251,59 @@ select:focus {
   z-index: 60;
 }
 
+.play-dialog.floating .play-header {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.floating-window-resize-handle {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  touch-action: none;
+}
+
+.play-dialog.floating .floating-window-resize-handle,
+.inspector-float-window .floating-window-resize-handle {
+  display: block;
+}
+
+.floating-window-resize-handle.n,
+.floating-window-resize-handle.s {
+  left: 10px;
+  right: 10px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.floating-window-resize-handle.n { top: -5px; }
+.floating-window-resize-handle.s { bottom: -5px; }
+
+.floating-window-resize-handle.e,
+.floating-window-resize-handle.w {
+  top: 10px;
+  bottom: 10px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.floating-window-resize-handle.e { right: -5px; }
+.floating-window-resize-handle.w { left: -5px; }
+
+.floating-window-resize-handle.ne,
+.floating-window-resize-handle.nw,
+.floating-window-resize-handle.se,
+.floating-window-resize-handle.sw {
+  width: 16px;
+  height: 16px;
+}
+
+.floating-window-resize-handle.ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.floating-window-resize-handle.nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.floating-window-resize-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.floating-window-resize-handle.sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+
 .play-header-actions {
   display: flex;
   align-items: center;
@@ -6961,6 +7137,11 @@ textarea[data-project-field="variables"]::selection {
   display: block;
 }
 
+.playbook-json-frame > textarea {
+  display: block;
+  width: 100%;
+}
+
 .playbook-json-highlight {
   position: absolute;
   left: 0;
@@ -7015,6 +7196,8 @@ textarea[data-project-field="variables"]::selection {
 .ai-message { padding:10px; border:1px solid var(--background-modifier-border); border-radius:10px; line-height:1.45; overflow-wrap:anywhere; }
 .ai-message-user { background:color-mix(in srgb, var(--interactive-accent) 12%, transparent); }
 .ai-message strong { display:block; margin-bottom:5px; font-size:11px; text-transform:uppercase; color:var(--text-muted); }
+.ai-message.streaming > div::after { content:""; display:inline-block; width:7px; height:1em; margin-left:3px; border-radius:2px; vertical-align:-2px; background:var(--interactive-accent); animation:ai-stream-caret .8s steps(1) infinite; }
+@keyframes ai-stream-caret { 50% { opacity:.2; } }
 .ai-workbench textarea { width:100%; resize:vertical; }
 .ai-actions { display:flex; gap:8px; flex-wrap:wrap; }
 /* Theme-aware action buttons (were unstyled browser defaults). */

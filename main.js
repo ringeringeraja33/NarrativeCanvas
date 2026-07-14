@@ -134,6 +134,57 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     return response.json;
   }
 
+  async requestAiStream(payload, onDelta, signal) {
+    const endpoint = String(this.settings.aiEndpoint || "").trim();
+    const apiKey = String(this.settings.aiApiKey || "").trim();
+    const model = String(this.settings.aiModel || "").trim();
+    if (!endpoint || !apiKey || !model) throw new Error("Configure AI endpoint, API key, and model in Narrative Canvas settings.");
+    let emitted = false;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ ...payload, model, stream: true }),
+        signal
+      });
+      if (!response.ok) throw new Error(`AI request failed (${response.status}): ${await response.text() || "Unknown error"}`);
+      if (!response.body?.getReader || !String(response.headers.get("content-type") || "").includes("text/event-stream")) {
+        const body = await response.json();
+        return body?.choices?.[0]?.message?.content || body?.output_text || body?.content || "";
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let content = "";
+      const consumeLine = (line) => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) return;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === "[DONE]") return;
+        try {
+          const event = JSON.parse(data);
+          const delta = event?.choices?.[0]?.delta?.content || event?.delta?.text || (typeof event?.delta === "string" ? event.delta : "") || event?.output_text || "";
+          if (delta) { emitted = true; content += delta; onDelta?.(delta); }
+        } catch (_error) { /* Ignore provider keep-alive or non-JSON event rows. */ }
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+        lines.forEach(consumeLine);
+        if (done) break;
+      }
+      if (buffer) consumeLine(buffer);
+      return content;
+    } catch (error) {
+      if (error?.name === "AbortError" || signal?.aborted || emitted) throw error;
+      if (error?.name !== "TypeError") throw error;
+      const fallback = await this.requestAi(payload);
+      return fallback?.choices?.[0]?.message?.content || fallback?.output_text || fallback?.content || "";
+    }
+  }
+
   async saveActiveCanvas() {
     let app = window.NarrativeCanvasApp;
     if (!app?.save) {
@@ -765,6 +816,7 @@ class NarrativeCanvasView extends ItemView {
         getAutoSaveIntervalMs: () => this.plugin.getAutoSaveIntervalMs(),
         getLanguage: () => this.plugin.getEffectiveLanguage(),
         aiChat: (payload) => this.plugin.requestAi(payload),
+        aiChatStream: (payload, onDelta, signal) => this.plugin.requestAiStream(payload, onDelta, signal),
         ensureProjectFile: (savedStateJson, options) => this.plugin.ensureProjectFile(savedStateJson, options),
         createProjectFile: (savedStateJson, options) => this.plugin.createProjectFile(savedStateJson, options),
         previewNewProjectFile: (savedStateJson, options) => this.plugin.previewNewProjectFile(savedStateJson, options),
@@ -1360,7 +1412,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003cmeta charset=\"utf-8\"\u003e",
   "    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\u003e",
   "    \u003ctitle\u003eNarrative Canvas\u003c/title\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260714a-1.2.2\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260714b-1.2.3\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -1552,7 +1604,7 @@ const CANVAS_INDEX_HTML = [
   "",
   "      \u003cdialog id=\"playDialog\" class=\"play-dialog\"\u003e",
   "        \u003cform method=\"dialog\" class=\"play-shell\"\u003e",
-  "          \u003cheader class=\"play-header\"\u003e",
+  "          \u003cheader class=\"play-header\" data-floating-window-drag=\"play\"\u003e",
   "            \u003cdiv\u003e",
   "              \u003cspan class=\"pane-kicker\"\u003eRuntime\u003c/span\u003e",
   "              \u003ch2 id=\"playTitle\"\u003ePreview\u003c/h2\u003e",
@@ -1566,6 +1618,14 @@ const CANVAS_INDEX_HTML = [
   "            \u003carticle id=\"playBody\" class=\"play-body\"\u003e\u003c/article\u003e",
   "            \u003cfooter id=\"playActions\" class=\"play-actions\"\u003e\u003c/footer\u003e",
   "          \u003c/div\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle n\" data-floating-window-resize=\"n\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle e\" data-floating-window-resize=\"e\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle s\" data-floating-window-resize=\"s\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle w\" data-floating-window-resize=\"w\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle ne\" data-floating-window-resize=\"ne\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle se\" data-floating-window-resize=\"se\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle sw\" data-floating-window-resize=\"sw\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle nw\" data-floating-window-resize=\"nw\" data-floating-window=\"play\"\u003e\u003c/span\u003e",
   "        \u003c/form\u003e",
   "      \u003c/dialog\u003e",
   "",
@@ -1608,7 +1668,7 @@ const CANVAS_INDEX_HTML = [
   "",
   "      \u003cdiv id=\"inspectorFloatOverlay\" class=\"inspector-float-overlay\" hidden\u003e",
   "        \u003csection class=\"inspector-float-window\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"inspectorFloatTitle\"\u003e",
-  "          \u003cheader class=\"inspector-float-header\"\u003e",
+  "          \u003cheader class=\"inspector-float-header\" data-floating-window-drag=\"inspector\"\u003e",
   "            \u003cdiv\u003e",
   "              \u003cspan class=\"pane-kicker\"\u003eInspector\u003c/span\u003e",
   "              \u003ch2 id=\"inspectorFloatTitle\"\u003eProject\u003c/h2\u003e",
@@ -1616,6 +1676,14 @@ const CANVAS_INDEX_HTML = [
   "            \u003cbutton class=\"icon-button\" data-action=\"close-floating-inspector\" type=\"button\" title=\"Close centered inspector\" aria-label=\"Close centered inspector\"\u003ex\u003c/button\u003e",
   "          \u003c/header\u003e",
   "          \u003cdiv id=\"inspectorFloatBody\" class=\"inspector-float-body\"\u003e\u003c/div\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle n\" data-floating-window-resize=\"n\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle e\" data-floating-window-resize=\"e\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle s\" data-floating-window-resize=\"s\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle w\" data-floating-window-resize=\"w\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle ne\" data-floating-window-resize=\"ne\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle se\" data-floating-window-resize=\"se\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle sw\" data-floating-window-resize=\"sw\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
+  "          \u003cspan class=\"floating-window-resize-handle nw\" data-floating-window-resize=\"nw\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
   "        \u003c/section\u003e",
   "      \u003c/div\u003e",
   "",
@@ -1847,7 +1915,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=20260714a-1.2.2\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=20260714b-1.2.3\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -2779,6 +2847,10 @@ function installNarrativeCanvasApp() {
 
   const uiTranslations = {
     zh: {
+      "Responding...": "\u56de\u590d\u4e2d\u2026\u2026",
+      "Stop": "\u505c\u6b62",
+      "AI response stopped.": "AI \u56de\u590d\u5df2\u505c\u6b62\u3002",
+      "AI request timed out.": "AI \u8bf7\u6c42\u8d85\u65f6\u3002",
       "Add": "添加",
       "Add character": "添加角色",
       "Add condition": "添加条件",
@@ -3210,6 +3282,7 @@ function installNarrativeCanvasApp() {
       "Reset columns": "重置列",
       "Reset sheet columns?": "重置表格列？",
       "Resize": "调整大小",
+      "Resize speaker column": "调整说话人栏宽",
       "Restore default types": "恢复默认类型",
       "Restore node type": "恢复节点类型",
       "Role": "定位",
@@ -3948,9 +4021,17 @@ function installNarrativeCanvasApp() {
     immersiveFullscreen: false,
     nodePanelPointerDown: false,
     floatingInspectorPanel: "",
+    floatingWindowGeometry: { play: null, inspector: null },
+    floatingWindowInteraction: null,
+    graphHover: null,
+    dialogColumnResize: null,
     aiMessages: [],
     aiPendingPatch: null,
     aiBusy: false,
+    aiAbortController: null,
+    aiRequestId: 0,
+    aiStreamIndex: -1,
+    aiStreamFrame: 0,
     aiError: "",
     aiOpen: false,
     frameCanvasId: "",
@@ -4207,6 +4288,9 @@ function installNarrativeCanvasApp() {
     eventRoot.addEventListener("mousedown", handleFormControlPointerEvent, { signal });
     eventRoot.addEventListener("click", handleFormControlClickEvent, { signal });
     eventRoot.addEventListener("pointerdown", handleSidebarPointerDown, { signal });
+    eventRoot.addEventListener("pointerdown", handleFloatingWindowPointerDown, { signal });
+    eventRoot.addEventListener("pointerdown", handleDialogColumnResizePointerDown, { signal });
+    eventRoot.addEventListener("pointermove", handleGraphHoverPointerMove, { signal });
     eventRoot.addEventListener("click", handleDocumentClick, { signal });
     eventRoot.addEventListener("contextmenu", handleContextMenu, { signal });
     eventRoot.addEventListener("input", handleInput, { signal });
@@ -4229,6 +4313,12 @@ function installNarrativeCanvasApp() {
     document.addEventListener("keydown", handleGlobalMenuKeyDown, { capture: true, signal });
     window.addEventListener("pointermove", handleSidebarPointerMove, { signal });
     window.addEventListener("pointerup", handleSidebarPointerUp, { signal });
+    window.addEventListener("pointermove", handleFloatingWindowPointerMove, { signal });
+    window.addEventListener("pointerup", handleFloatingWindowPointerUp, { signal });
+    window.addEventListener("pointercancel", handleFloatingWindowPointerUp, { signal });
+    window.addEventListener("pointermove", handleDialogColumnResizePointerMove, { signal });
+    window.addEventListener("pointerup", handleDialogColumnResizePointerUp, { signal });
+    window.addEventListener("pointercancel", handleDialogColumnResizePointerUp, { signal });
     window.addEventListener("pointermove", handleStoryPointerMove, { signal });
     window.addEventListener("pointerup", handleStoryPointerUp, { signal });
     window.addEventListener("keydown", handleGlobalHistoryKeyDown, { capture: true, signal });
@@ -4251,6 +4341,7 @@ function installNarrativeCanvasApp() {
     dom.viewport.addEventListener("pointermove", handleViewportPointerMove, { signal });
     dom.viewport.addEventListener("pointerup", endPointerActions, { signal });
     dom.viewport.addEventListener("pointerleave", endPointerActions, { signal });
+    dom.viewport.addEventListener("pointerleave", clearGraphHover, { signal });
     dom.viewport.addEventListener("dblclick", handleViewportDoubleClick, { signal });
     dom.viewport.addEventListener("wheel", handleWheel, { passive: false, signal });
     dom.minimap.addEventListener("pointerdown", handleMinimapPointerDown, { signal });
@@ -4417,7 +4508,191 @@ function installNarrativeCanvasApp() {
 
   function handleWindowResize() {
     hideNodeContextMenu();
+    constrainFloatingWindow("play");
+    constrainFloatingWindow("inspector");
     scheduleCanvasViewportRender();
+  }
+
+  function getFloatingWindowElement(kind) {
+    if (kind === "play") return dom.playDialog;
+    if (kind === "inspector") return dom.inspectorFloatOverlay?.querySelector(".inspector-float-window") || null;
+    return null;
+  }
+
+  function isFloatingWindowActive(kind) {
+    if (kind === "play") return Boolean(state.playFloating && dom.root?.hasAttribute("data-play-panel"));
+    return kind === "inspector" && Boolean(state.floatingInspectorPanel && !dom.inspectorFloatOverlay?.hidden);
+  }
+
+  function getFloatingWindowBounds(kind) {
+    if (kind === "inspector") {
+      const rect = dom.inspectorFloatOverlay?.getBoundingClientRect();
+      if (rect) return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+    return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  }
+
+  function readFloatingWindowGeometry(kind) {
+    const element = getFloatingWindowElement(kind);
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    const bounds = getFloatingWindowBounds(kind);
+    return {
+      x: rect.left - bounds.left,
+      y: rect.top - bounds.top,
+      width: rect.width,
+      height: rect.height
+    };
+  }
+
+  function clampFloatingWindowGeometry(kind, geometry) {
+    const bounds = getFloatingWindowBounds(kind);
+    const minWidth = Math.min(360, bounds.width);
+    const minHeight = Math.min(280, bounds.height);
+    const width = Math.min(Math.max(minWidth, geometry.width), bounds.width);
+    const height = Math.min(Math.max(minHeight, geometry.height), bounds.height);
+    return {
+      x: Math.min(Math.max(0, geometry.x), Math.max(0, bounds.width - width)),
+      y: Math.min(Math.max(0, geometry.y), Math.max(0, bounds.height - height)),
+      width,
+      height
+    };
+  }
+
+  function applyFloatingWindowGeometry(kind) {
+    if (!isFloatingWindowActive(kind)) return;
+    const element = getFloatingWindowElement(kind);
+    const geometry = state.floatingWindowGeometry?.[kind];
+    if (!element || !geometry) return;
+    const next = clampFloatingWindowGeometry(kind, geometry);
+    state.floatingWindowGeometry[kind] = next;
+    element.style.left = `${next.x}px`;
+    element.style.top = `${next.y}px`;
+    element.style.width = `${next.width}px`;
+    element.style.height = `${next.height}px`;
+    element.style.transform = "none";
+  }
+
+  function clearFloatingWindowStyles(kind) {
+    const element = getFloatingWindowElement(kind);
+    if (!element) return;
+    ["left", "top", "width", "height", "transform"].forEach((name) => element.style.removeProperty(name));
+  }
+
+  function constrainFloatingWindow(kind) {
+    if (!isFloatingWindowActive(kind) || !state.floatingWindowGeometry?.[kind]) return;
+    applyFloatingWindowGeometry(kind);
+  }
+
+  function handleFloatingWindowPointerDown(event) {
+    if (event.button !== 0) return;
+    const resizeHandle = event.target?.closest?.("[data-floating-window-resize]");
+    const dragHandle = event.target?.closest?.("[data-floating-window-drag]");
+    const kind = resizeHandle?.dataset.floatingWindow || dragHandle?.dataset.floatingWindowDrag;
+    if (!kind || !isFloatingWindowActive(kind)) return;
+    if (!resizeHandle && event.target.closest("button, input, textarea, select, a")) return;
+    const geometry = state.floatingWindowGeometry[kind] || readFloatingWindowGeometry(kind);
+    if (!geometry) return;
+    state.floatingWindowGeometry[kind] = geometry;
+    applyFloatingWindowGeometry(kind);
+    state.floatingWindowInteraction = {
+      kind,
+      direction: resizeHandle?.dataset.floatingWindowResize || "move",
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      start: { ...state.floatingWindowGeometry[kind] }
+    };
+    getFloatingWindowElement(kind)?.classList.add("is-moving");
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function handleFloatingWindowPointerMove(event) {
+    const interaction = state.floatingWindowInteraction;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    const dx = event.clientX - interaction.startX;
+    const dy = event.clientY - interaction.startY;
+    const next = { ...interaction.start };
+    const direction = interaction.direction;
+    if (direction === "move") {
+      next.x += dx;
+      next.y += dy;
+    } else {
+      if (direction.includes("e")) next.width += dx;
+      if (direction.includes("s")) next.height += dy;
+      if (direction.includes("w")) {
+        next.x += dx;
+        next.width -= dx;
+      }
+      if (direction.includes("n")) {
+        next.y += dy;
+        next.height -= dy;
+      }
+    }
+    state.floatingWindowGeometry[interaction.kind] = clampFloatingWindowGeometry(interaction.kind, next);
+    applyFloatingWindowGeometry(interaction.kind);
+    event.preventDefault();
+  }
+
+  function handleFloatingWindowPointerUp(event) {
+    const interaction = state.floatingWindowInteraction;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    getFloatingWindowElement(interaction.kind)?.classList.remove("is-moving");
+    state.floatingWindowInteraction = null;
+  }
+
+  function normalizeDialogSpeakerRatio(value) {
+    const ratio = Number(value);
+    return Number.isFinite(ratio) ? Math.min(68, Math.max(18, ratio)) : 34;
+  }
+
+  function handleDialogColumnResizePointerDown(event) {
+    if (event.button !== 0) return;
+    const handle = event.target?.closest?.("[data-dialog-column-resize][data-dialog-node-id]");
+    if (!handle) return;
+    const node = getNode(handle.dataset.dialogNodeId);
+    const preview = handle.closest(".node-dialog-preview");
+    if (!node || node.type !== "Dialog" || !preview) return;
+    state.dialogColumnResize = {
+      nodeId: node.id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startRatio: normalizeDialogSpeakerRatio(node.dialogSpeakerRatio),
+      previewWidth: Math.max(1, preview.getBoundingClientRect().width),
+      historyBefore: getHistorySnapshot(),
+      active: false
+    };
+    dom.root?.classList.add("dialog-column-resizing");
+    safeSetPointerCapture(handle, event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function handleDialogColumnResizePointerMove(event) {
+    const drag = state.dialogColumnResize;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientX - drag.startX;
+    if (Math.abs(delta) < 2 && !drag.active) return;
+    drag.active = true;
+    const ratio = normalizeDialogSpeakerRatio(drag.startRatio + delta / drag.previewWidth * 100);
+    const node = getNode(drag.nodeId);
+    if (!node) return;
+    node.dialogSpeakerRatio = ratio;
+    const element = getNodeElementById(node.id);
+    element?.querySelector(".node-dialog-preview")?.style.setProperty("--dialog-speaker-ratio", `${ratio}%`);
+    event.preventDefault();
+  }
+
+  function handleDialogColumnResizePointerUp(event) {
+    const drag = state.dialogColumnResize;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    state.dialogColumnResize = null;
+    dom.root?.classList.remove("dialog-column-resizing");
+    if (!drag.active) return;
+    setProjectDirty(true);
+    commitHistoryFromSnapshot(drag.historyBefore);
+    updateStatus();
   }
 
   function handleFullscreenChange() {
@@ -6976,7 +7251,7 @@ function installNarrativeCanvasApp() {
     const playbookJson = buildVariablesJson();
     const activeTab = getValidPlaybookTab(state.playbookTab);
     dom.variablesPanel.innerHTML = `
-      <div class="document-shell">
+      <div class="document-shell ${state.playbookJsonOpen ? "playbook-json-open" : ""}">
         <header class="document-header">
           <div>
             <span class="pane-kicker">Playbook</span>
@@ -10198,6 +10473,7 @@ function installNarrativeCanvasApp() {
     });
     if (dom.frameLayer) dom.frameLayer.innerHTML = frameMarkup.join("");
     dom.nodeLayer.innerHTML = nodeMarkup.join("");
+    refreshGraphHoverClasses();
     refreshWorkspaceSearchCount();
   }
 
@@ -10332,12 +10608,13 @@ function installNarrativeCanvasApp() {
   }
 
   function renderDialogNodeCardContent(node) {
+    const speakerRatio = normalizeDialogSpeakerRatio(node.dialogSpeakerRatio);
     return `
-      <div class="node-dialog-preview" role="region" aria-label="${escapeAttr(t("Dialog"))}" tabindex="0">
-        ${node.turns.map((turn) => {
-          const speaker = normalizeOptionalString(turn?.speaker).trim();
+      <div class="node-dialog-preview" data-dialog-node-id="${escapeAttr(node.id)}" role="region" aria-label="${escapeAttr(t("Dialog"))}" tabindex="0" style="--dialog-speaker-ratio:${speakerRatio}%">
+        ${node.turns.map((turn, index) => {
+          const speaker = normalizeOptionalString(turn?.speaker);
           const line = normalizeOptionalString(turn?.line);
-          return `<div class="node-dialog-line">${speaker ? `<strong>${escapeHtml(speaker)}</strong><span aria-hidden="true">: </span>` : ""}<span>${escapeHtml(line)}</span></div>`;
+          return `<div class="node-dialog-line"><input class="node-dialog-speaker-input" data-canvas-dialog-turn="true" data-dialog-node-id="${escapeAttr(node.id)}" data-dialog-turn-index="${index}" data-dialog-turn-field="speaker" data-dialog-initial-value="${escapeAttr(speaker)}" data-no-drag="true" value="${escapeAttr(speaker)}" placeholder="${escapeAttr(t("Speaker"))}" aria-label="${escapeAttr(t("Speaker"))}"><span class="node-dialog-separator" data-dialog-column-resize="true" data-dialog-node-id="${escapeAttr(node.id)}" data-no-drag="true" role="separator" aria-orientation="vertical" aria-label="${escapeAttr(t("Resize speaker column"))}" title="${escapeAttr(t("Resize speaker column"))}">:</span><textarea class="node-dialog-line-input" data-canvas-dialog-turn="true" data-dialog-node-id="${escapeAttr(node.id)}" data-dialog-turn-index="${index}" data-dialog-turn-field="line" data-dialog-initial-value="${escapeAttr(line)}" data-no-drag="true" rows="1" placeholder="${escapeAttr(t("Line"))}" aria-label="${escapeAttr(t("Line"))}">${escapeHtml(line)}</textarea></div>`;
         }).join("")}
       </div>
     `;
@@ -10739,7 +11016,7 @@ function installNarrativeCanvasApp() {
     const linkSvg = [
       `<defs>
         <marker id="arrow-head" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="5" markerHeight="5" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
-          <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--link-color)"></path>
+          <path d="M 0 0 L 8 4 L 0 8 z" fill="context-stroke"></path>
         </marker>
       </defs>`
     ];
@@ -10770,6 +11047,105 @@ function installNarrativeCanvasApp() {
     }
 
     dom.linkLayer.innerHTML = linkSvg.join("");
+    refreshGraphHoverClasses();
+  }
+
+  function getGraphHoverDescriptor(target) {
+    if (!target?.closest || !dom.viewport?.contains(target)) return null;
+    const option = target.closest("[data-canvas-choice-option][data-choice-node-id]");
+    if (option) {
+      return {
+        kind: "choice",
+        nodeId: option.dataset.choiceNodeId || "",
+        optionId: option.dataset.choiceOptionId || "",
+        optionIndex: Number(option.dataset.choiceOptionIndex)
+      };
+    }
+    const link = target.closest("[data-link-id]");
+    if (link && dom.linkLayer?.contains(link)) return { kind: "link", linkId: link.dataset.linkId || "" };
+    const node = target.closest(".node[data-node-id]");
+    if (node) return { kind: "node", nodeId: node.dataset.nodeId || "" };
+    return null;
+  }
+
+  function graphHoverKey(descriptor) {
+    if (!descriptor) return "";
+    if (descriptor.kind === "choice") return `choice:${descriptor.nodeId}:${descriptor.optionId}:${descriptor.optionIndex}`;
+    if (descriptor.kind === "link") return `link:${descriptor.linkId}`;
+    return `node:${descriptor.nodeId}`;
+  }
+
+  function handleGraphHoverPointerMove(event) {
+    const descriptor = getGraphHoverDescriptor(event.target);
+    if (graphHoverKey(descriptor) === graphHoverKey(state.graphHover)) return;
+    state.graphHover = descriptor;
+    refreshGraphHoverClasses();
+  }
+
+  function clearGraphHover() {
+    if (!state.graphHover && !dom.root?.querySelector(".graph-hover-node, .graph-hover-origin, .graph-hover-link")) return;
+    state.graphHover = null;
+    clearGraphHoverClasses();
+  }
+
+  function clearGraphHoverClasses() {
+    dom.nodeLayer?.querySelectorAll(".graph-hover-node, .graph-hover-origin").forEach((element) => element.classList.remove("graph-hover-node", "graph-hover-origin"));
+    dom.frameLayer?.querySelectorAll(".graph-hover-node, .graph-hover-origin").forEach((element) => element.classList.remove("graph-hover-node", "graph-hover-origin"));
+    dom.linkLayer?.querySelectorAll(".graph-hover-link").forEach((element) => element.classList.remove("graph-hover-link"));
+  }
+
+  function addGraphHoverNode(nodeId, origin = false) {
+    const element = getNodeElementById(nodeId);
+    if (!element) return;
+    element.classList.add("graph-hover-node");
+    if (origin) element.classList.add("graph-hover-origin");
+  }
+
+  function addGraphHoverLink(linkId) {
+    if (!linkId || !dom.linkLayer) return;
+    dom.linkLayer.querySelectorAll(`[data-link-id="${CSS.escape(linkId)}"]`).forEach((element) => element.classList.add("graph-hover-link"));
+  }
+
+  function getRenderedGraphLinkEntries() {
+    const nodeMap = getNodeIndex();
+    const activeFrame = getActiveFrameCanvas();
+    return state.project.links.map((link) => ({
+      link,
+      endpoints: getRenderedLinkEndpoints(link, nodeMap, { ignoredCollapsedFrameId: activeFrame?.id || "" })
+    })).filter((entry) => entry.endpoints);
+  }
+
+  function refreshGraphHoverClasses() {
+    clearGraphHoverClasses();
+    const descriptor = state.graphHover;
+    if (!descriptor) return;
+    const entries = getRenderedGraphLinkEntries();
+    if (descriptor.kind === "link") {
+      const entry = entries.find((item) => item.link.id === descriptor.linkId);
+      if (!entry) return;
+      addGraphHoverLink(entry.link.id);
+      addGraphHoverNode(entry.endpoints.from.id);
+      addGraphHoverNode(entry.endpoints.to.id);
+      return;
+    }
+    if (descriptor.kind === "node") {
+      addGraphHoverNode(descriptor.nodeId, true);
+      entries.filter((entry) => entry.endpoints.from.id === descriptor.nodeId || entry.endpoints.to.id === descriptor.nodeId).forEach((entry) => {
+        addGraphHoverLink(entry.link.id);
+        addGraphHoverNode(entry.endpoints.from.id);
+        addGraphHoverNode(entry.endpoints.to.id);
+      });
+      return;
+    }
+    if (descriptor.kind === "choice") {
+      entries.filter(({ link }) => link.from === descriptor.nodeId && (
+        (descriptor.optionId && link.choiceOptionId === descriptor.optionId)
+        || (!link.choiceOptionId && Number.isInteger(descriptor.optionIndex) && Number(link.choiceIndex) === descriptor.optionIndex)
+      )).forEach((entry) => {
+        addGraphHoverLink(entry.link.id);
+        addGraphHoverNode(entry.endpoints.to.id);
+      });
+    }
   }
 
   function renderInspector() {
@@ -10806,14 +11182,45 @@ function installNarrativeCanvasApp() {
     if (!dom.aiPanel) return;
     const config = getWebAiConfig();
     const selected = (state.selectedNodeIds?.length ? state.selectedNodeIds : [state.selectedNodeId]).filter(Boolean);
-    const messages = state.aiMessages.map((message) => `<article class="ai-message ai-message-${escapeAttr(message.role)}"><strong>${message.role === "user" ? t("You") : "AI"}</strong><div>${escapeHtml(message.content).replace(/\n/g, "<br>")}</div></article>`).join("");
+    const messages = state.aiMessages.map((message, index) => `<article class="ai-message ai-message-${escapeAttr(message.role)}${state.aiBusy && index === state.aiStreamIndex ? " streaming" : ""}" data-ai-message-index="${index}"><strong>${message.role === "user" ? t("You") : "AI"}</strong><div>${escapeHtml(message.content).replace(/\n/g, "<br>")}</div></article>`).join("");
     const patch = state.aiPendingPatch;
     const operations = Array.isArray(patch?.operations) ? patch.operations : [];
     const proposal = patch ? `<section class="ai-proposal"><h3>${escapeHtml(patch.summary || t("Canvas change proposal"))}</h3><ol>${operations.map((op) => `<li><code>${escapeHtml(op.op || "")}</code> ${escapeHtml(op.node?.title || op.id || op.from || "")}</li>`).join("")}</ol><div class="ai-actions"><button data-action="ai-apply-patch" type="button">${t("Apply to canvas")}</button><button data-action="ai-reject-patch" type="button">${t("Reject")}</button></div></section>` : "";
     const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
-    dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span></div><div class="ai-messages">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change..."))}" ${state.aiBusy ? "disabled" : ""}></textarea><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Thinking...") : t("Send")}</button><button data-action="ai-clear" type="button">${t("Clear")}</button></div></div>`;
+    dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span></div><div class="ai-messages" aria-live="polite">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change..."))}" ${state.aiBusy ? "disabled" : ""}></textarea><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Responding...") : t("Send")}</button>${state.aiBusy ? `<button data-action="ai-stop" type="button">${t("Stop")}</button>` : ""}<button data-action="ai-clear" type="button">${t("Clear")}</button></div></div>`;
     dom.aiPanel.querySelector(".ai-messages")?.scrollTo?.({ top: 999999 });
     renderAiFloatingState();
+  }
+
+  function renderAiStreamFrame() {
+    state.aiStreamFrame = 0;
+    const index = state.aiStreamIndex;
+    const message = state.aiMessages[index];
+    const body = dom.aiPanel?.querySelector(`[data-ai-message-index="${index}"] > div`);
+    if (!message || !body) return;
+    body.innerHTML = escapeHtml(message.content).replace(/\n/g, "<br>");
+    const list = dom.aiPanel.querySelector(".ai-messages");
+    if (list) list.scrollTop = list.scrollHeight;
+  }
+
+  function scheduleAiStreamFrame() {
+    if (state.aiStreamFrame) return;
+    state.aiStreamFrame = window.requestAnimationFrame(renderAiStreamFrame);
+  }
+
+  function stopAiMessage({ silent = false } = {}) {
+    if (!state.aiBusy) return;
+    const streamIndex = state.aiStreamIndex;
+    state.aiAbortController?.abort?.();
+    state.aiRequestId += 1;
+    state.aiAbortController = null;
+    state.aiBusy = false;
+    if (!silent) state.aiError = t("AI response stopped.");
+    if (streamIndex >= 0 && !state.aiMessages[streamIndex]?.content) state.aiMessages.splice(streamIndex, 1);
+    state.aiStreamIndex = -1;
+    if (state.aiStreamFrame) window.cancelAnimationFrame(state.aiStreamFrame);
+    state.aiStreamFrame = 0;
+    renderAiPanel();
   }
 
   function renderAiFloatingState() {
@@ -10870,8 +11277,56 @@ function installNarrativeCanvasApp() {
 
   // Web-only AI transport. Isolated so the Obsidian plugin build can strip fetch entirely;
   // inside Obsidian the request always goes through NarrativeCanvasHost.aiChat instead.
-  async function requestWebAiCompletion(_payload) {
+  function aiResponseContent(response) {
+    return response?.choices?.[0]?.message?.content || response?.output_text || response?.content || "";
+  }
+
+  function aiStreamDelta(event) {
+    return event?.choices?.[0]?.delta?.content || event?.delta?.text || (typeof event?.delta === "string" ? event.delta : "") || event?.output_text || "";
+  }
+
+  async function readAiEventStream(result, onDelta) {
+    if (!result.body?.getReader || !String(result.headers?.get?.("content-type") || "").includes("text/event-stream")) {
+      return aiResponseContent(await result.json());
+    }
+    const reader = result.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let content = "";
+    const consumeLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) return;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === "[DONE]") return;
+      try {
+        const delta = aiStreamDelta(JSON.parse(data));
+        if (delta) { content += delta; onDelta(delta); }
+      } catch (_error) { /* Ignore provider keep-alive or non-JSON event rows. */ }
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      lines.forEach(consumeLine);
+      if (done) break;
+    }
+    if (buffer) consumeLine(buffer);
+    return content;
+  }
+
+  async function requestWebAiCompletion(_payload, _options) {
     throw new Error("AI networking is only available through the Narrative Canvas host in Obsidian.");
+  }
+
+  async function revealBufferedAiText(content, onDelta, signal) {
+    const characters = Array.from(String(content || ""));
+    const perFrame = Math.max(1, Math.ceil(characters.length / 120));
+    for (let index = 0; index < characters.length; index += perFrame) {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      onDelta(characters.slice(index, index + perFrame).join(""));
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    }
   }
 
   async function sendAiMessage() {
@@ -10880,20 +11335,59 @@ function installNarrativeCanvasApp() {
     if (!prompt) return;
     saveWebAiConfig();
     state.aiMessages.push({ role: "user", content: prompt });
+    const payloadMessages = state.aiMessages.slice(-12).map(({ role, content }) => ({ role, content }));
+    state.aiMessages.push({ role: "assistant", content: "" });
+    const streamIndex = state.aiMessages.length - 1;
+    const requestId = state.aiRequestId + 1;
+    const controller = new AbortController();
+    state.aiRequestId = requestId;
+    state.aiStreamIndex = streamIndex;
+    state.aiAbortController = controller;
     state.aiBusy = true; state.aiError = ""; state.aiPendingPatch = null; renderAiPanel();
+    const signal = controller.signal;
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 120000);
+    let streamedContent = "";
+    const onDelta = (delta) => {
+      if (signal.aborted || !delta) return;
+      const firstDelta = !streamedContent;
+      streamedContent += delta;
+      const message = state.aiMessages[streamIndex];
+      if (message) message.content = streamedContent;
+      if (firstDelta) renderAiStreamFrame();
+      else scheduleAiStreamFrame();
+    };
     try {
-      const payload = { messages: [{ role: "system", content: aiSystemPrompt() }, { role: "system", content: `Canvas context:\n${JSON.stringify(buildAiContext())}` }, ...state.aiMessages.slice(-12)], temperature: 0.4 };
-      let response;
-      if (window.NarrativeCanvasHost?.aiChat) response = await window.NarrativeCanvasHost.aiChat(payload);
-      else response = await requestWebAiCompletion(payload);
-      const content = response?.choices?.[0]?.message?.content || response?.output_text || "";
+      const payload = { messages: [{ role: "system", content: aiSystemPrompt() }, { role: "system", content: `Canvas context:\n${JSON.stringify(buildAiContext())}` }, ...payloadMessages], temperature: 0.4 };
+      let content = "";
+      if (window.NarrativeCanvasHost?.aiChatStream) content = await window.NarrativeCanvasHost.aiChatStream(payload, onDelta, signal);
+      else if (window.NarrativeCanvasHost?.aiChat) content = aiResponseContent(await window.NarrativeCanvasHost.aiChat(payload));
+      else content = await requestWebAiCompletion(payload, { signal, onDelta });
+      content = String(content || streamedContent);
       if (!content) throw new Error("AI returned an empty response.");
+      if (!streamedContent) await revealBufferedAiText(content, onDelta, signal);
       const extracted = extractAiPatch(content);
       state.aiPendingPatch = extracted?.patch || null;
       const visibleContent = extracted ? content.replace(extracted.source, "").replace(/```(?:json)?\s*```/i, "").trim() : content.trim();
-      state.aiMessages.push({ role: "assistant", content: visibleContent || (extracted ? t("Canvas change proposal ready.") : content) });
-    } catch (error) { state.aiError = error?.message || String(error); }
-    state.aiBusy = false; renderAiPanel();
+      if (state.aiRequestId === requestId && state.aiMessages[streamIndex]) state.aiMessages[streamIndex].content = visibleContent || (extracted ? t("Canvas change proposal ready.") : content);
+    } catch (error) {
+      if (state.aiRequestId === requestId) {
+        if (timedOut) state.aiError = t("AI request timed out.");
+        else if (error?.name !== "AbortError") state.aiError = error?.message || String(error);
+      }
+    }
+    window.clearTimeout(timeoutId);
+    if (state.aiRequestId !== requestId) return;
+    if (!state.aiMessages[streamIndex]?.content) state.aiMessages.splice(streamIndex, 1);
+    if (state.aiStreamFrame) window.cancelAnimationFrame(state.aiStreamFrame);
+    state.aiStreamFrame = 0;
+    state.aiAbortController = null;
+    state.aiBusy = false;
+    state.aiStreamIndex = -1;
+    renderAiPanel();
   }
 
   function validateAiPatch(value) {
@@ -10965,6 +11459,7 @@ function installNarrativeCanvasApp() {
     if (!panelElement) return;
     if (panelElement.parentElement !== dom.inspectorFloatBody) dom.inspectorFloatBody.append(panelElement);
     dom.inspectorFloatOverlay.hidden = false;
+    applyFloatingWindowGeometry("inspector");
     if (dom.inspectorFloatTitle) {
       const node = panel === "node" ? getNode(state.selectedNodeId) : null;
       dom.inspectorFloatTitle.textContent = node ? node.title || t("Node") : t(titleCase(panel));
@@ -10985,6 +11480,7 @@ function installNarrativeCanvasApp() {
     state.floatingInspectorPanel = "";
     restoreInspectorPanels();
     if (dom.inspectorFloatOverlay) dom.inspectorFloatOverlay.hidden = true;
+    clearFloatingWindowStyles("inspector");
     renderInspectorTabs();
     if (options.restoreFocus !== false && previousPanel) {
       dom.scope?.querySelector?.(`[data-panel="${CSS.escape(previousPanel)}"]`)?.focus?.();
@@ -12822,9 +13318,10 @@ function installNarrativeCanvasApp() {
     if (action === "toggle-ai-window") { toggleAiWindow(); return; }
     if (action === "close-ai-window") { toggleAiWindow(false); return; }
     if (action === "ai-send") { void sendAiMessage(); return; }
+    if (action === "ai-stop") { stopAiMessage(); return; }
     if (action === "ai-apply-patch") { applyAiPatch(); return; }
     if (action === "ai-reject-patch") { state.aiPendingPatch = null; renderAiPanel(); return; }
-    if (action === "ai-clear") { state.aiMessages = []; state.aiPendingPatch = null; state.aiError = ""; renderAiPanel(); return; }
+    if (action === "ai-clear") { stopAiMessage({ silent: true }); state.aiMessages = []; state.aiPendingPatch = null; state.aiError = ""; renderAiPanel(); return; }
     if (action === "ai-save-config") { saveWebAiConfig(); setStatus("AI settings saved locally."); return; }
     if (action === "toggle-play-float") {
       togglePlayFloat();
@@ -13613,10 +14110,10 @@ function installNarrativeCanvasApp() {
     if (!target?.dataset) return "";
     if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
     const parts = [];
-    ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+    ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
       if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
     });
-    ["nodeId", "choiceNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
+    ["nodeId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
       if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
     });
     return parts.join("|");
@@ -13821,6 +14318,10 @@ function installNarrativeCanvasApp() {
       return;
     }
     if (target.dataset.dialogTurnField) {
+      if (target.dataset.canvasDialogTurn) {
+        setCanvasDialogTurnField(target.dataset.dialogNodeId, Number(target.dataset.dialogTurnIndex), target.dataset.dialogTurnField, target.value, false);
+        return;
+      }
       setDialogTurnField(Number(target.dataset.dialogTurnIndex), target.dataset.dialogTurnField, target.value, false);
       return;
     }
@@ -13993,6 +14494,11 @@ function installNarrativeCanvasApp() {
       return;
     }
     if (target.dataset.dialogTurnField) {
+      if (target.dataset.canvasDialogTurn) {
+        setCanvasDialogTurnField(target.dataset.dialogNodeId, Number(target.dataset.dialogTurnIndex), target.dataset.dialogTurnField, target.value, true);
+        commitFocusedEdit(target);
+        return;
+      }
       setDialogTurnField(Number(target.dataset.dialogTurnIndex), target.dataset.dialogTurnField, target.value, true);
       commitFocusedEdit(target);
       return;
@@ -14106,6 +14612,19 @@ function installNarrativeCanvasApp() {
         setCanvasChoiceOptionLabel(event.target.dataset.choiceNodeId, event.target.dataset.choiceOptionId, Number(event.target.dataset.choiceOptionIndex), original, true);
         return;
       }
+    }
+    if (event.target.dataset?.canvasDialogTurn) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        state.editHistoryTarget = null;
+        setCanvasDialogTurnField(event.target.dataset.dialogNodeId, Number(event.target.dataset.dialogTurnIndex), event.target.dataset.dialogTurnField, event.target.dataset.dialogInitialValue || "", true);
+        return;
+      }
+      if (event.key === "Enter" && (event.target.tagName === "INPUT" || event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        event.target.blur();
+      }
+      return;
     }
     const isField = isNativeEditingTarget(event.target);
     if (isField && handleDialogTurnKeyDown(event)) return;
@@ -16541,6 +17060,24 @@ function installNarrativeCanvasApp() {
     scheduleStoryPanelRender();
   }
 
+  function setCanvasDialogTurnField(nodeId, index, field, value, rerender) {
+    const node = getNode(nodeId);
+    if (!node || node.type !== "Dialog" || !Number.isInteger(index)) return;
+    const turns = ensureDialogTurns(node);
+    const turn = turns[index];
+    if (!turn) return;
+    if (field === "speaker") turn.speaker = normalizeOptionalString(value).trim();
+    else if (field === "line") turn.line = normalizeOptionalString(value);
+    else return;
+    syncDialogBodyFromTurns(node);
+    setProjectDirty(true);
+    updateStatus();
+    if (!rerender) return;
+    renderNodes();
+    if (state.selectedNodeId === node.id && state.panel === "node") renderNodePanel(node);
+    scheduleStoryPanelRender();
+  }
+
   function setChoiceOptionConditionPart(optionId, field, value, conditionIndex, rerender) {
     const node = getSelectedChoiceNode();
     if (!node || !optionId) return;
@@ -18170,7 +18707,7 @@ function installNarrativeCanvasApp() {
       if (typeof restoreFocus === "function") restoreFocus();
       centerPlaybookJsonOffset(textarea, offset);
     };
-    if (typeof restoreFocus === "function") restoreFocus();
+    apply();
     requestAnimationFrame(() => {
       apply();
       requestAnimationFrame(apply);
@@ -24062,8 +24599,10 @@ function installNarrativeCanvasApp() {
     if (normalized.type === "Dialog") {
       normalized.turns = normalizeDialogTurns(normalized);
       if (!normalized.turns.length) delete normalized.turns;
+      if (normalized.dialogSpeakerRatio != null) normalized.dialogSpeakerRatio = normalizeDialogSpeakerRatio(normalized.dialogSpeakerRatio);
     } else {
       delete normalized.turns;
+      delete normalized.dialogSpeakerRatio;
     }
     if (normalized.type === "Choice") {
       normalized.choiceRevealMode = normalizeChoiceRevealMode(normalized.choiceRevealMode || normalized.revealMode);
@@ -24285,6 +24824,8 @@ function installNarrativeCanvasApp() {
     const floating = Boolean(state.playFloating) && Boolean(dom.root?.hasAttribute("data-play-panel"));
     if (dom.root) dom.root.setAttribute("data-play-floating", floating ? "true" : "false");
     if (dom.playDialog) dom.playDialog.classList.toggle("floating", floating);
+    if (floating) applyFloatingWindowGeometry("play");
+    else clearFloatingWindowStyles("play");
     const button = dom.playDialog?.querySelector("[data-action='toggle-play-float']");
     if (button) {
       button.setAttribute("aria-pressed", String(floating));

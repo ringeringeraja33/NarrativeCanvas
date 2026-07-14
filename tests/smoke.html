@@ -57,7 +57,7 @@
         return new Promise((resolve) => setTimeout(resolve, ms));
       }
 
-      async function waitFor(name, predicate, timeout = 4000) {
+      async function waitFor(name, predicate, timeout = 4000, getDetail = null) {
         const started = performance.now();
         while (performance.now() - started < timeout) {
           if (predicate()) {
@@ -66,7 +66,8 @@
           }
           await wait(50);
         }
-        fail(name, "Timed out");
+        const detail = typeof getDetail === "function" ? getDetail() : "";
+        fail(name, detail ? `Timed out; ${detail}` : "Timed out");
         return false;
       }
 
@@ -308,22 +309,26 @@
         await waitFor(`${label}: canvas opens before radial menu check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
         const viewport = doc.querySelector("#canvasViewport");
         const viewportRect = viewport?.getBoundingClientRect();
-        const occupiedRects = [...doc.querySelectorAll(".node[data-node-id]")].map((node) => node.getBoundingClientRect());
         let clientX = viewportRect.left + 32;
         let clientY = viewportRect.top + 32;
+        let blankTarget = null;
         outer: for (let y = viewportRect.top + 32; y < viewportRect.bottom - 32; y += 44) {
           for (let x = viewportRect.left + 32; x < viewportRect.right - 32; x += 44) {
-            const occupied = occupiedRects.some((rect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+            const stack = typeof doc.elementsFromPoint === "function" ? doc.elementsFromPoint(x, y) : [];
+            const occupied = stack.some((element) => element.closest?.(".node[data-node-id], [data-port], [data-link-id]"));
             if (!occupied) {
               clientX = x;
               clientY = y;
+              blankTarget = stack.find((element) => viewport.contains(element)) || viewport;
               break outer;
             }
           }
         }
+        assert(`${label}: radial menu test finds blank canvas point`, Boolean(blankTarget));
+        if (!blankTarget) return;
         const beforeProject = win.NarrativeCanvasApp.getSavedState()?.project || {};
         const beforeCount = beforeProject.nodes?.length || 0;
-        viewport.dispatchEvent(new win.MouseEvent("contextmenu", {
+        blankTarget.dispatchEvent(new win.MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
           view: win,
@@ -335,6 +340,7 @@
         assert(`${label}: radial menu is one four-segment semicircle`, radialMenu?.querySelectorAll(".radial-arc .radial-button").length === 4);
         const addButton = radialMenu.querySelector("[data-radial-toggle='add']");
         assert(`${label}: radial menu exposes Add`, Boolean(addButton));
+        if (!addButton) return;
         click(addButton);
         await waitFor(`${label}: radial Add expands Node Library`, () => !radialMenu.querySelector(".radial-add-list")?.hidden);
         const addList = radialMenu.querySelector(".radial-add-list");
@@ -368,35 +374,15 @@
 
       async function verifyFrameContextMenu(label, win, doc) {
         let frame = doc.querySelector(".node.frame[data-node-id]");
-        const linkLayer = doc.querySelector("#linkLayer");
-        if (!frame || !linkLayer) {
+        if (!frame) {
           assert(`${label}: frame context-menu fixture exists`, false);
           return;
         }
         const frameId = frame.dataset.nodeId;
-        frame.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
-        await wait(100);
-        frame = doc.querySelector(`.node.frame[data-node-id='${frameId}']`) || frame;
-        const rect = frame.getBoundingClientRect();
-        const viewportRect = doc.querySelector("#canvasViewport")?.getBoundingClientRect();
-        const clientX = Math.max(viewportRect.left + 12, Math.min(viewportRect.right - 12, rect.left + rect.width * 0.7));
-        const clientY = Math.max(viewportRect.top + 12, Math.min(viewportRect.bottom - 12, rect.top + rect.height * 0.7));
-        linkLayer.dispatchEvent(new win.MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          view: win,
-          clientX,
-          clientY
-        }));
-        // Frame body right-click behaves like blank canvas: radial quick menu.
-        const frameRadialMenu = doc.querySelector("#canvasRadialMenu");
-        await waitFor(`${label}: frame body right-click opens radial menu`, () => frameRadialMenu && !frameRadialMenu.hidden);
-        doc.body.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true }));
-        await wait(80);
         // Frame header right-click opens the layer/delete menu.
-        const frameHeader = frame.querySelector(".node-header");
-        const headerRect = frameHeader.getBoundingClientRect();
-        linkLayer.dispatchEvent(new win.MouseEvent("contextmenu", {
+        let frameHeader = frame.querySelector(".node-header");
+        let headerRect = frameHeader.getBoundingClientRect();
+        frameHeader.dispatchEvent(new win.MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
           view: win,
@@ -407,7 +393,22 @@
         await waitFor(`${label}: frame header right-click opens context menu`, () => menu && !menu.hidden);
         assert(`${label}: frame context menu exposes layer actions`, menu?.querySelectorAll("[data-layer-action]").length === 4);
         assert(`${label}: frame context menu exposes frame deletion`, Boolean(menu?.querySelector("[data-action='delete-node']")) && menu.textContent.includes("Delete frame"));
-        doc.body.dispatchEvent(new win.MouseEvent("pointerdown", { bubbles: true }));
+        doc.body.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true }));
+        await wait(80);
+
+        // Frame body right-click behaves like blank canvas: radial quick menu.
+        frame = doc.querySelector(`.node.frame[data-node-id='${frameId}']`) || frame;
+        const rect = frame.getBoundingClientRect();
+        frame.dispatchEvent(new win.MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          view: win,
+          clientX: rect.left + rect.width * 0.7,
+          clientY: rect.top + rect.height * 0.7
+        }));
+        const frameRadialMenu = doc.querySelector("#canvasRadialMenu");
+        await waitFor(`${label}: frame body right-click opens radial menu`, () => frameRadialMenu && !frameRadialMenu.hidden);
+        doc.body.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true }));
       }
 
       async function verifyProjectDocument(label, win, doc) {
@@ -510,13 +511,42 @@
         click(nodeFloatButton);
         const overlay = doc.querySelector("#inspectorFloatOverlay");
         await waitFor(`${label}: node inspector opens in centered window`, () => overlay && !overlay.hidden && overlay.querySelector("#nodePanel"));
-        assert(`${label}: centered inspector is wider than sidebar`, overlay.querySelector(".inspector-float-window")?.getBoundingClientRect().width > doc.querySelector(".sidebar-right")?.getBoundingClientRect().width);
+        const inspectorWindow = overlay.querySelector(".inspector-float-window");
+        assert(`${label}: centered inspector is wider than sidebar`, inspectorWindow?.getBoundingClientRect().width > doc.querySelector(".sidebar-right")?.getBoundingClientRect().width);
+        const inspectorBeforeMove = inspectorWindow.getBoundingClientRect();
+        const inspectorHeader = inspectorWindow.querySelector("[data-floating-window-drag='inspector']");
+        inspectorHeader.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 41, button: 0, clientX: inspectorBeforeMove.left + 80, clientY: inspectorBeforeMove.top + 24 }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 41, clientX: inspectorBeforeMove.left + 110, clientY: inspectorBeforeMove.top + 44 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 41, clientX: inspectorBeforeMove.left + 110, clientY: inspectorBeforeMove.top + 44 }));
+        const inspectorAfterMove = inspectorWindow.getBoundingClientRect();
+        assert(`${label}: centered inspector can be dragged`, inspectorAfterMove.left > inspectorBeforeMove.left + 20 && inspectorAfterMove.top > inspectorBeforeMove.top + 10);
+        const inspectorResize = inspectorWindow.querySelector("[data-floating-window='inspector'][data-floating-window-resize='se']");
+        inspectorResize.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 42, button: 0, clientX: inspectorAfterMove.right, clientY: inspectorAfterMove.bottom }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 42, clientX: inspectorAfterMove.right + 30, clientY: inspectorAfterMove.bottom + 25 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 42, clientX: inspectorAfterMove.right + 30, clientY: inspectorAfterMove.bottom + 25 }));
+        const inspectorAfterResize = inspectorWindow.getBoundingClientRect();
+        assert(`${label}: centered inspector can resize from its edge`, inspectorAfterResize.width > inspectorAfterMove.width + 20 && inspectorAfterResize.height > inspectorAfterMove.height + 15);
         click(overlay.querySelector("[data-action='close-floating-inspector']"));
         await waitFor(`${label}: centered inspector closes`, () => overlay.hidden && doc.querySelector(".sidebar-right #nodePanel"));
 
         click(doc.querySelector("[data-action='play']"));
         const playDialog = doc.querySelector("#playDialog");
         await waitFor(`${label}: play panel opens`, () => playDialog?.open);
+        click(playDialog.querySelector("[data-action='toggle-play-float']"));
+        await waitFor(`${label}: play panel floats to center`, () => playDialog.classList.contains("floating"));
+        const playBeforeMove = playDialog.getBoundingClientRect();
+        const playHeader = playDialog.querySelector("[data-floating-window-drag='play']");
+        playHeader.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 43, button: 0, clientX: playBeforeMove.left + 80, clientY: playBeforeMove.top + 24 }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 43, clientX: playBeforeMove.left + 110, clientY: playBeforeMove.top + 44 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 43, clientX: playBeforeMove.left + 110, clientY: playBeforeMove.top + 44 }));
+        const playAfterMove = playDialog.getBoundingClientRect();
+        assert(`${label}: floating play window can be dragged`, playAfterMove.left > playBeforeMove.left + 20 && playAfterMove.top > playBeforeMove.top + 10);
+        const playResize = playDialog.querySelector("[data-floating-window='play'][data-floating-window-resize='se']");
+        playResize.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 44, button: 0, clientX: playAfterMove.right, clientY: playAfterMove.bottom }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 44, clientX: playAfterMove.right + 30, clientY: playAfterMove.bottom + 25 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 44, clientX: playAfterMove.right + 30, clientY: playAfterMove.bottom + 25 }));
+        const playAfterResize = playDialog.getBoundingClientRect();
+        assert(`${label}: floating play window can resize from its edge`, playAfterResize.width > playAfterMove.width + 20 && playAfterResize.height > playAfterMove.height + 15);
         await waitFor(`${label}: play focuses Node inspector`, () => doc.querySelector(".inspector-tab[data-panel='node']")?.classList.contains("active"));
         const saved = win.NarrativeCanvasApp.getSavedState();
         const selected = saved?.project?.nodes?.find((node) => node.id === saved?.ui?.selectedNodeId);
@@ -765,6 +795,36 @@
           assert(`${label}: AI button opens reliably ${index + 1}`, !aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "true");
           click(aiCloseButton);
           assert(`${label}: AI close button responds reliably ${index + 1}`, aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "false");
+        }
+        if (win.NarrativeCanvasHost) {
+          win.NarrativeCanvasHost.aiChatStream = async (_payload, onDelta, signal) => {
+            onDelta("Stream ");
+            await wait(80);
+            if (signal.aborted) throw new win.DOMException("Aborted", "AbortError");
+            onDelta("reply");
+            return "Stream reply";
+          };
+          click(aiButton);
+          const aiPrompt = doc.querySelector("[data-ai-prompt]");
+          setControlInputValue(win, aiPrompt, "Test streaming");
+          click(doc.querySelector("[data-action='ai-send']"));
+          await waitFor(`${label}: AI reply starts streaming before completion`, () => doc.querySelector(".ai-message-assistant.streaming")?.textContent.includes("Stream "));
+          assert(`${label}: AI stop control is available while streaming`, Boolean(doc.querySelector("[data-action='ai-stop']")));
+          await waitFor(`${label}: AI streamed reply completes`, () => doc.querySelector(".ai-message-assistant")?.textContent.includes("Stream reply") && !doc.querySelector(".ai-message-assistant.streaming"));
+          let finishStoppedRequest;
+          win.NarrativeCanvasHost.aiChatStream = () => new Promise((resolve) => { finishStoppedRequest = resolve; });
+          setControlInputValue(win, doc.querySelector("[data-ai-prompt]"), "Stop old request");
+          click(doc.querySelector("[data-action='ai-send']"));
+          await waitFor(`${label}: AI stop control appears for a pending request`, () => Boolean(doc.querySelector("[data-action='ai-stop']")));
+          click(doc.querySelector("[data-action='ai-stop']"));
+          win.NarrativeCanvasHost.aiChatStream = async (_payload, onDelta) => { onDelta("New reply"); return "New reply"; };
+          setControlInputValue(win, doc.querySelector("[data-ai-prompt]"), "Start new request");
+          click(doc.querySelector("[data-action='ai-send']"));
+          await waitFor(`${label}: a new AI request completes after stopping the old one`, () => [...doc.querySelectorAll(".ai-message-assistant")].some((message) => message.textContent.includes("New reply")) && !doc.querySelector("[data-action='ai-stop']"));
+          finishStoppedRequest("Old late reply");
+          await wait(100);
+          assert(`${label}: late stopped response cannot overwrite the new reply`, [...doc.querySelectorAll(".ai-message-assistant")].some((message) => message.textContent.includes("New reply")) && ![...doc.querySelectorAll(".ai-message-assistant")].some((message) => message.textContent.includes("Old late reply")));
+          click(aiCloseButton);
         }
         const clearStorageButton = doc.querySelector("[data-action='clear-browser-storage']");
         const sampleButton = doc.querySelector("[data-action='open-sample-project']");
@@ -1210,6 +1270,23 @@
               dataEnd: playbookHighlight.dataset.searchMatchEnd
             };
           };
+          const getPlaybookScrollDiagnostics = () => {
+            const textarea = doc.querySelector("textarea[data-project-field='variables']");
+            const ancestors = [];
+            let node = textarea?.parentElement;
+            while (node && node !== doc.body && ancestors.length < 8) {
+              const style = win.getComputedStyle(node);
+              ancestors.push({
+                tag: node.tagName,
+                className: node.className || "",
+                overflowY: style.overflowY,
+                scrollHeight: node.scrollHeight,
+                clientHeight: node.clientHeight
+              });
+              node = node.parentElement;
+            }
+            return { metrics: getPlaybookSearchCenterMetrics(), textareaHeight: textarea?.getBoundingClientRect().height, ancestors };
+          };
           await waitFor(`${label}: playbook search centers highlighted JSON line`, () => {
             const metrics = getPlaybookSearchCenterMetrics();
             return Boolean(metrics && metrics.ok);
@@ -1225,7 +1302,7 @@
           await waitFor(`${label}: playbook search centers next JSON line`, () => {
             const metrics = getPlaybookSearchCenterMetrics();
             return Boolean(metrics && metrics.ok && doc.activeElement === playbookSearch);
-          });
+          }, 4000, () => JSON.stringify(getPlaybookScrollDiagnostics()));
           assert(`${label}: playbook search preserves search caret`, [playbookSearch.selectionStart, playbookSearch.selectionEnd].join(":") === searchSelectionAfterFirst);
           assert(`${label}: playbook search preserves JSON editor selection`, [playbookJsonEditor.selectionStart, playbookJsonEditor.selectionEnd].join(":") === jsonSelectionBeforeSearch);
         }
@@ -1515,15 +1592,35 @@
           setControlInputValue(win, canvasChoiceInput, "Edited on canvas");
           assert(`${label}: Choice card keeps focus while editing`, canvasChoiceInput.isConnected && doc.activeElement === canvasChoiceInput && canvasChoiceInput.value === "Edited on canvas");
           canvasChoiceInput.dispatchEvent(new win.Event("change", { bubbles: true }));
+          await waitFor(`${label}: Choice edit updates bound link data`, () => win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === "l4")?.label === "Edited on canvas");
+          const editedSuccessorFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n5']");
+          if (editedSuccessorFocus) click(editedSuccessorFocus);
+          await waitFor(`${label}: Choice successor card renders for cue check`, () => Boolean(doc.querySelector(".node[data-node-id='n5']")));
           await waitFor(`${label}: Choice edit updates successor cue`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === "Choice: Edited on canvas");
+          const returnToChoice = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n4']");
+          if (returnToChoice) click(returnToChoice);
+          await waitFor(`${label}: Choice card returns after successor cue check`, () => Boolean(doc.querySelector(".node[data-node-id='n4'] .node-choice-label-input")));
           canvasChoiceInput = doc.querySelector(".node[data-node-id='n4'] .node-choice-label-input");
           setControlValue(win, canvasChoiceInput, originalChoiceLabel);
-          await waitFor(`${label}: Choice edit can restore original text`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === `Choice: ${originalChoiceLabel}`);
+          await waitFor(`${label}: Choice edit can restore original text`, () => win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === "l4")?.label === originalChoiceLabel);
         }
         assert(
           `${label}: Choice card generates option numbers`,
           [...doc.querySelectorAll(".node[data-node-id='n4'] .node-choice-index")].map((item) => item.textContent.trim()).join(",") === "1,2,3"
         );
+        const firstChoiceInput = doc.querySelector(".node[data-node-id='n4'] [data-choice-option-id='opt_map_story']");
+        firstChoiceInput?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 51 }));
+        assert(`${label}: Choice option hover highlights only its bound link`, doc.querySelector(".link-path[data-link-id='l4']")?.classList.contains("graph-hover-link") && !doc.querySelector(".link-path[data-link-id='l5']")?.classList.contains("graph-hover-link"));
+        assert(`${label}: Choice option hover highlights only its downstream card`, doc.querySelector(".node[data-node-id='n5']")?.classList.contains("graph-hover-node") && !doc.querySelector(".node[data-node-id='n6']")?.classList.contains("graph-hover-node"));
+        const choiceNode = doc.querySelector(".node[data-node-id='n4']");
+        choiceNode?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 52 }));
+        assert(`${label}: Node hover highlights incident upstream and downstream links`, ["l3", "l4", "l5", "l6"].every((id) => doc.querySelector(`.link-path[data-link-id='${id}']`)?.classList.contains("graph-hover-link")));
+        assert(`${label}: Node hover highlights adjacent cards`, doc.querySelector(".node[data-node-id='n3']")?.classList.contains("graph-hover-node") && doc.querySelector(".node[data-node-id='n5']")?.classList.contains("graph-hover-node") && doc.querySelector(".node[data-node-id='n6']")?.classList.contains("graph-hover-node"));
+        const choiceLink = doc.querySelector(".link-hitpath[data-link-id='l4']");
+        choiceLink?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 53 }));
+        assert(`${label}: Link hover highlights both endpoint cards`, doc.querySelector(".node[data-node-id='n4']")?.classList.contains("graph-hover-node") && doc.querySelector(".node[data-node-id='n5']")?.classList.contains("graph-hover-node"));
+        doc.querySelector("#canvasViewport")?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 54 }));
+        assert(`${label}: Graph hover clears over blank canvas`, !doc.querySelector(".graph-hover-node, .graph-hover-link"));
         const choicePreview = doc.querySelector(".node[data-node-id='n4'] .node-choice-preview");
         const choicePreviewClones = Array.from({ length: 16 }, () => choicePreview?.lastElementChild?.cloneNode(true)).filter(Boolean);
         choicePreviewClones.forEach((item) => choicePreview.append(item));
@@ -1536,6 +1633,42 @@
         if (dialogFocus) click(dialogFocus);
         await waitFor(`${label}: Dialog card renders after focus`, () => Boolean(doc.querySelector(".node[data-node-id='n6']")));
         assert(`${label}: Dialog card previews authored turns`, doc.querySelectorAll(".node[data-node-id='n6'] .node-dialog-line").length === 2);
+        const dialogColumnHandle = doc.querySelector(".node[data-node-id='n6'] [data-dialog-column-resize]");
+        const dialogPreviewBeforeResize = doc.querySelector(".node[data-node-id='n6'] .node-dialog-preview");
+        const dialogRatioBeforeResize = Number.parseFloat(dialogPreviewBeforeResize?.style.getPropertyValue("--dialog-speaker-ratio")) || 34;
+        assert(`${label}: Dialog card exposes a draggable speaker separator`, Boolean(dialogColumnHandle));
+        if (dialogColumnHandle && dialogPreviewBeforeResize) {
+          const previewRect = dialogPreviewBeforeResize.getBoundingClientRect();
+          dialogColumnHandle.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 61, button: 0, clientX: previewRect.left + previewRect.width * dialogRatioBeforeResize / 100 }));
+          win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 61, clientX: previewRect.left + previewRect.width * dialogRatioBeforeResize / 100 + 28 }));
+          win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 61, clientX: previewRect.left + previewRect.width * dialogRatioBeforeResize / 100 + 28 }));
+          const dialogRatioAfterResize = Number.parseFloat(dialogPreviewBeforeResize.style.getPropertyValue("--dialog-speaker-ratio"));
+          assert(`${label}: Dragging Dialog separator changes both rows column ratio`, dialogRatioAfterResize > dialogRatioBeforeResize);
+          await win.NarrativeCanvasApp.save({ silent: true });
+          assert(`${label}: Dialog speaker column ratio is saved`, readSavedProject(win)?.project?.nodes?.find((item) => item.id === "n6")?.dialogSpeakerRatio === dialogRatioAfterResize);
+        }
+        let canvasDialogLine = doc.querySelector(".node[data-node-id='n6'] .node-dialog-line-input");
+        let canvasDialogSpeaker = doc.querySelector(".node[data-node-id='n6'] .node-dialog-speaker-input");
+        assert(`${label}: Dialog card speaker and line are directly editable`, Boolean(canvasDialogLine && canvasDialogSpeaker));
+        if (canvasDialogLine && canvasDialogSpeaker) {
+          const originalSpeaker = canvasDialogSpeaker.value;
+          const originalLine = canvasDialogLine.value;
+          canvasDialogLine.focus({ preventScroll: true });
+          setControlInputValue(win, canvasDialogLine, "Edited dialog line on canvas");
+          assert(`${label}: Dialog card keeps focus while editing`, canvasDialogLine.isConnected && doc.activeElement === canvasDialogLine && canvasDialogLine.value === "Edited dialog line on canvas");
+          canvasDialogLine.dispatchEvent(new win.Event("change", { bubbles: true }));
+          await win.NarrativeCanvasApp.save({ silent: true });
+          assert(`${label}: Dialog card line edit reaches saved project`, readSavedProject(win)?.project?.nodes?.find((item) => item.id === "n6")?.turns?.[0]?.line === "Edited dialog line on canvas");
+          canvasDialogSpeaker = doc.querySelector(".node[data-node-id='n6'] .node-dialog-speaker-input");
+          setControlValue(win, canvasDialogSpeaker, "Edited speaker");
+          await win.NarrativeCanvasApp.save({ silent: true });
+          assert(`${label}: Dialog card speaker edit reaches saved project`, readSavedProject(win)?.project?.nodes?.find((item) => item.id === "n6")?.turns?.[0]?.speaker === "Edited speaker");
+          canvasDialogLine = doc.querySelector(".node[data-node-id='n6'] .node-dialog-line-input");
+          canvasDialogSpeaker = doc.querySelector(".node[data-node-id='n6'] .node-dialog-speaker-input");
+          setControlValue(win, canvasDialogLine, originalLine);
+          canvasDialogSpeaker = doc.querySelector(".node[data-node-id='n6'] .node-dialog-speaker-input");
+          setControlValue(win, canvasDialogSpeaker, originalSpeaker);
+        }
         const dialogPreview = doc.querySelector(".node[data-node-id='n6'] .node-dialog-preview");
         const dialogPreviewClones = Array.from({ length: 16 }, () => dialogPreview?.lastElementChild?.cloneNode(true)).filter(Boolean);
         dialogPreviewClones.forEach((item) => dialogPreview.append(item));

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Narrative Canvas</title>
-    <link rel="stylesheet" href="./canvas.css?v=20260714a-1.2.2">
+    <link rel="stylesheet" href="./canvas.css?v=20260714b-1.2.3">
   </head>
   <body>
     <div class="app-shell">
@@ -196,7 +196,7 @@
 
       <dialog id="playDialog" class="play-dialog">
         <form method="dialog" class="play-shell">
-          <header class="play-header">
+          <header class="play-header" data-floating-window-drag="play">
             <div>
               <span class="pane-kicker">Runtime</span>
               <h2 id="playTitle">Preview</h2>
@@ -210,6 +210,14 @@
             <article id="playBody" class="play-body"></article>
             <footer id="playActions" class="play-actions"></footer>
           </div>
+          <span class="floating-window-resize-handle n" data-floating-window-resize="n" data-floating-window="play"></span>
+          <span class="floating-window-resize-handle e" data-floating-window-resize="e" data-floating-window="play"></span>
+          <span class="floating-window-resize-handle s" data-floating-window-resize="s" data-floating-window="play"></span>
+          <span class="floating-window-resize-handle w" data-floating-window-resize="w" data-floating-window="play"></span>
+          <span class="floating-window-resize-handle ne" data-floating-window-resize="ne" data-floating-window="play"></span>
+          <span class="floating-window-resize-handle se" data-floating-window-resize="se" data-floating-window="play"></span>
+          <span class="floating-window-resize-handle sw" data-floating-window-resize="sw" data-floating-window="play"></span>
+          <span class="floating-window-resize-handle nw" data-floating-window-resize="nw" data-floating-window="play"></span>
         </form>
       </dialog>
 
@@ -252,7 +260,7 @@
 
       <div id="inspectorFloatOverlay" class="inspector-float-overlay" hidden>
         <section class="inspector-float-window" role="dialog" aria-modal="true" aria-labelledby="inspectorFloatTitle">
-          <header class="inspector-float-header">
+          <header class="inspector-float-header" data-floating-window-drag="inspector">
             <div>
               <span class="pane-kicker">Inspector</span>
               <h2 id="inspectorFloatTitle">Project</h2>
@@ -260,6 +268,14 @@
             <button class="icon-button" data-action="close-floating-inspector" type="button" title="Close centered inspector" aria-label="Close centered inspector">x</button>
           </header>
           <div id="inspectorFloatBody" class="inspector-float-body"></div>
+          <span class="floating-window-resize-handle n" data-floating-window-resize="n" data-floating-window="inspector"></span>
+          <span class="floating-window-resize-handle e" data-floating-window-resize="e" data-floating-window="inspector"></span>
+          <span class="floating-window-resize-handle s" data-floating-window-resize="s" data-floating-window="inspector"></span>
+          <span class="floating-window-resize-handle w" data-floating-window-resize="w" data-floating-window="inspector"></span>
+          <span class="floating-window-resize-handle ne" data-floating-window-resize="ne" data-floating-window="inspector"></span>
+          <span class="floating-window-resize-handle se" data-floating-window-resize="se" data-floating-window="inspector"></span>
+          <span class="floating-window-resize-handle sw" data-floating-window-resize="sw" data-floating-window="inspector"></span>
+          <span class="floating-window-resize-handle nw" data-floating-window-resize="nw" data-floating-window="inspector"></span>
         </section>
       </div>
 
@@ -491,6 +507,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260714a-1.2.2"></script>
+    <script src="./app.js?v=20260714b-1.2.3"></script>
   </body>
 </html>

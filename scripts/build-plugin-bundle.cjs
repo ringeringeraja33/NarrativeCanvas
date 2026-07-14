@@ -150,8 +150,8 @@ const pluginOnlyRewrites = [
 }`
   ],
   [
-    /async function requestWebAiCompletion\(payload\) \{/,
-    `async function requestWebAiCompletion(_payload) {
+    /async function requestWebAiCompletion\(payload, options\) \{/,
+    `async function requestWebAiCompletion(_payload, _options) {
   throw new Error("AI networking is only available through the Narrative Canvas host in Obsidian.");
 }`
   ]
