@@ -743,6 +743,19 @@
         assert(`${label}: export scale select exists`, Boolean(doc.querySelector("#exportImageScale")));
         assert(`${label}: theme toggle exists`, Boolean(doc.querySelector("#themeToggle")));
         assert(`${label}: project file status exists`, Boolean(doc.querySelector("#projectFileName")));
+        const firstChoiceFollowup = doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span");
+        const sharedChoiceFollowups = [...doc.querySelectorAll(".node[data-node-id='n6'] .node-choice-followup span")];
+        assert(`${label}: Choice successor shows its option above the title`, firstChoiceFollowup?.textContent.trim() === "Choice: An always-available option");
+        assert(`${label}: shared Choice successor shows every incoming option`, sharedChoiceFollowups.length === 2 && sharedChoiceFollowups.every((item) => item.textContent.trim()));
+        if (firstChoiceFollowup) {
+          const choiceFollowupStyle = win.getComputedStyle(firstChoiceFollowup);
+          assert(`${label}: Choice successor option uses a glow treatment`, choiceFollowupStyle.boxShadow !== "none" && choiceFollowupStyle.textShadow !== "none");
+        }
+        const originalUiLanguage = win.NarrativeCanvasApp.getLanguage();
+        win.NarrativeCanvasApp.setLanguage("zh", { persist: false });
+        await waitFor(`${label}: Choice successor cue adapts to Chinese`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === "选择：An always-available option");
+        win.NarrativeCanvasApp.setLanguage(originalUiLanguage, { persist: false });
+        await waitFor(`${label}: Choice successor cue restores English`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === "Choice: An always-available option");
         const aiButton = doc.querySelector("#aiFloatingButton");
         const aiWindow = doc.querySelector("#aiFloatingWindow");
         const aiCloseButton = doc.querySelector("[data-action='close-ai-window']");
@@ -1494,6 +1507,19 @@
         if (choiceFocus) click(choiceFocus);
         await waitFor(`${label}: Choice card renders after focus`, () => Boolean(doc.querySelector(".node[data-node-id='n4']")));
         assert(`${label}: Choice card lists configured options`, doc.querySelectorAll(".node[data-node-id='n4'] .node-choice-preview li").length === 3);
+        let canvasChoiceInput = doc.querySelector(".node[data-node-id='n4'] .node-choice-label-input");
+        assert(`${label}: Choice card option is directly editable`, Boolean(canvasChoiceInput));
+        if (canvasChoiceInput) {
+          const originalChoiceLabel = canvasChoiceInput.value;
+          canvasChoiceInput.focus({ preventScroll: true });
+          setControlInputValue(win, canvasChoiceInput, "Edited on canvas");
+          assert(`${label}: Choice card keeps focus while editing`, canvasChoiceInput.isConnected && doc.activeElement === canvasChoiceInput && canvasChoiceInput.value === "Edited on canvas");
+          canvasChoiceInput.dispatchEvent(new win.Event("change", { bubbles: true }));
+          await waitFor(`${label}: Choice edit updates successor cue`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === "Choice: Edited on canvas");
+          canvasChoiceInput = doc.querySelector(".node[data-node-id='n4'] .node-choice-label-input");
+          setControlValue(win, canvasChoiceInput, originalChoiceLabel);
+          await waitFor(`${label}: Choice edit can restore original text`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === `Choice: ${originalChoiceLabel}`);
+        }
         assert(
           `${label}: Choice card generates option numbers`,
           [...doc.querySelectorAll(".node[data-node-id='n4'] .node-choice-index")].map((item) => item.textContent.trim()).join(",") === "1,2,3"

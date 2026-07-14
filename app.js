@@ -1049,6 +1049,8 @@ const uiTranslations = {
     "Characters JSON exported.": "角色 JSON 已导出。",
     "Characters.md opened.": "Characters.md 已打开。",
     "Cast": "演员表",
+    "Choice: {label}": "选择：{label}",
+    "Edit choice option": "编辑选项",
     "Clear": "清除",
     "Open AI assistant": "打开 AI 助手",
     "Close AI assistant": "关闭 AI 助手",
@@ -2107,7 +2109,7 @@ function createInitialRuntimeState() {
   nodeIndex: null,
   linkIndex: null,
   outgoingIndex: null,
-  derived: { flowOrder: null, displayId: null, frameChildFlowOrder: null, frameDescendantNodes: null, nodeSearchText: null, eventSearchText: null, characterMentionContext: null, nodeTypeMap: null, projectNodeTypes: null },
+  derived: { flowOrder: null, displayId: null, frameChildFlowOrder: null, frameDescendantNodes: null, nodeSearchText: null, eventSearchText: null, characterMentionContext: null, choiceFollowupLabels: null, nodeTypeMap: null, projectNodeTypes: null },
   canvasViewportRenderFrame: null,
   storyPanelRenderTimer: null,
   documentRenderLimits: {
@@ -4134,6 +4136,7 @@ function markProjectStructureChanged(options = {}) {
   state.derived.nodeSearchText = null;
   state.derived.eventSearchText = null;
   state.derived.characterMentionContext = null;
+  state.derived.choiceFollowupLabels = null;
   if (options.nodeTypes) {
     state.derived.nodeTypeMap = null;
     state.derived.projectNodeTypes = null;
@@ -8381,6 +8384,7 @@ function renderCanvasNodeMarkup(node, query, focusedCharacterId, layerOrder = ge
           ${isFrame ? `<button class="frame-collapse-button" type="button" data-action="toggle-frame-collapse" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" title="${escapeAttr(isFrameCollapsed(node) ? t("Expand frame") : t("Collapse frame"))}" aria-label="${escapeAttr(isFrameCollapsed(node) ? t("Expand frame") : t("Collapse frame"))}">${isFrameCollapsed(node) ? "+" : "-"}</button>` : ""}
         </div>
         <div class="node-body">
+          ${renderChoiceFollowupLabels(node)}
           ${renderNodeTitle(node, inlineEditField)}
           ${renderNodeCastChips(node)}
           ${renderNodeCardContent(node, inlineEditField)}
@@ -8393,6 +8397,41 @@ function renderCanvasNodeMarkup(node, query, focusedCharacterId, layerOrder = ge
       <button class="port output ${node.id === state.connectingFrom ? "active" : ""}" style="${outputPortStyle}" data-port="output" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Output"))}" aria-label="${escapeAttr(t("Output port"))}"></button>
     </div>
   `;
+}
+
+function renderChoiceFollowupLabels(node) {
+  const labels = getChoiceFollowupLabels(node);
+  if (!labels.length) return "";
+  const renderedLabels = labels.map((label) => t("Choice: {label}", { label }));
+  return `<div class="node-choice-followup" aria-label="${escapeAttr(renderedLabels.join(" / "))}">${renderedLabels.map((label) => `<span title="${escapeAttr(label)}">${escapeHtml(label)}</span>`).join("")}</div>`;
+}
+
+function getChoiceFollowupLabels(node) {
+  if (!node?.id) return [];
+  return getChoiceFollowupLabelMap().get(node.id) || [];
+}
+
+function getChoiceFollowupLabelMap() {
+  const cached = state.derived.choiceFollowupLabels;
+  if (cached?.dirtyVersion === state.dirtyVersion && cached?.structureVersion === state.structureVersion) return cached.map;
+  const map = new Map();
+  const nodeMap = new Map((state.project?.nodes || []).map((node) => [node.id, node]));
+  (state.project?.links || []).forEach((link) => {
+    const source = nodeMap.get(link.from);
+    if (!source || source.type !== "Choice" || !link.to) return;
+    const options = Array.isArray(source.choiceOptions) ? source.choiceOptions : [];
+    const choiceIndex = normalizeChoiceIndex(link.choiceIndex);
+    const option = (link.choiceOptionId ? options.find((entry) => entry?.id === link.choiceOptionId) : null)
+      || (choiceIndex != null ? options[choiceIndex] : null);
+    const legacyChoice = choiceIndex != null && Array.isArray(source.choices) ? source.choices[choiceIndex] : "";
+    const label = stripChoiceDisplayOrdinal(normalizeOptionalString(option?.label || link.label || legacyChoice).trim());
+    if (!label) return;
+    const labels = map.get(link.to) || [];
+    if (!labels.includes(label)) labels.push(label);
+    map.set(link.to, labels);
+  });
+  state.derived.choiceFollowupLabels = { dirtyVersion: state.dirtyVersion, structureVersion: state.structureVersion, map };
+  return map;
 }
 
 function renderNodeTitle(node, inlineEditField) {
@@ -8418,14 +8457,14 @@ function renderNodeCardContent(node, inlineEditField) {
 
 function renderChoiceNodeCardContent(node) {
   const options = Array.isArray(node.choiceOptions) && node.choiceOptions.length
-    ? node.choiceOptions.map((option) => normalizeOptionalString(option?.label)).filter(Boolean)
-    : (Array.isArray(node.choices) ? node.choices.map(normalizeOptionalString).filter(Boolean) : []);
+    ? node.choiceOptions.map((option, index) => ({ id: normalizeOptionalString(option?.id), label: normalizeOptionalString(option?.label), index })).filter((option) => option.label)
+    : (Array.isArray(node.choices) ? node.choices.map((label, index) => ({ id: "", label: normalizeOptionalString(label), index })).filter((option) => option.label) : []);
   return `
     ${node.body ? `<div class="node-text node-text-summary">${escapeHtml(displayBody(node))}</div>` : ""}
     <ol class="node-choice-preview" aria-label="${escapeAttr(t("Choices"))}" tabindex="0">
-      ${options.map((label, index) => {
-        const displayLabel = stripChoiceDisplayOrdinal(label);
-        return `<li title="${escapeAttr(label)}"><span class="node-choice-index" aria-hidden="true">${index + 1}</span><span class="node-choice-label">${escapeHtml(displayLabel)}</span></li>`;
+      ${options.map((option, index) => {
+        const displayLabel = stripChoiceDisplayOrdinal(option.label);
+        return `<li><span class="node-choice-index" aria-hidden="true">${index + 1}</span><input class="node-choice-label-input" data-canvas-choice-option="true" data-choice-node-id="${escapeAttr(node.id)}" data-choice-option-id="${escapeAttr(option.id)}" data-choice-option-index="${option.index}" data-choice-option-field="label" data-choice-initial-value="${escapeAttr(option.label)}" data-no-drag="true" value="${escapeAttr(displayLabel)}" title="${escapeAttr(t("Edit choice option"))}" aria-label="${escapeAttr(t("Edit choice option"))}"></li>`;
       }).join("")}
     </ol>
   `;
@@ -11759,10 +11798,10 @@ function getEditableHistoryKey(target) {
   if (!target?.dataset) return "";
   if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
   const parts = [];
-  ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionEffectField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+  ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
-  ["nodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
+  ["nodeId", "choiceNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
   return parts.join("|");
@@ -11950,6 +11989,10 @@ function handleInput(event) {
     return;
   }
   if (target.dataset.choiceOptionField) {
+    if (target.dataset.canvasChoiceOption) {
+      setCanvasChoiceOptionLabel(target.dataset.choiceNodeId, target.dataset.choiceOptionId, Number(target.dataset.choiceOptionIndex), target.value, false);
+      return;
+    }
     setChoiceOptionField(target.dataset.choiceOptionId, target.dataset.choiceOptionField, target.value, false);
     updatePlaybookCodeStatusForControl(target);
     return;
@@ -12113,6 +12156,11 @@ function handleChange(event) {
     return;
   }
   if (target.dataset.choiceOptionField) {
+    if (target.dataset.canvasChoiceOption) {
+      setCanvasChoiceOptionLabel(target.dataset.choiceNodeId, target.dataset.choiceOptionId, Number(target.dataset.choiceOptionIndex), target.value, true);
+      commitFocusedEdit(target);
+      return;
+    }
     setChoiceOptionField(target.dataset.choiceOptionId, target.dataset.choiceOptionField, target.value, true);
     updatePlaybookCodeStatusForControl(target);
     commitFocusedEdit(target);
@@ -12230,6 +12278,20 @@ function handleKeyDown(event) {
   if (!isNarrativeCanvasTarget(event.target)) return;
   if (handleMentionKeyDown(event)) return;
   if (handleDocumentSourceKeyDown(event)) return;
+  if (event.target.dataset?.canvasChoiceOption) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.target.blur();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      const original = event.target.dataset.choiceInitialValue || "";
+      state.editHistoryTarget = null;
+      setCanvasChoiceOptionLabel(event.target.dataset.choiceNodeId, event.target.dataset.choiceOptionId, Number(event.target.dataset.choiceOptionIndex), original, true);
+      return;
+    }
+  }
   const isField = isNativeEditingTarget(event.target);
   if (isField && handleDialogTurnKeyDown(event)) return;
   if (event.target.dataset?.inlineNodeField && event.key === "Escape") {
@@ -14643,6 +14705,25 @@ function setChoiceOptionField(optionId, field, value, rerender) {
   if (field === "label") renderNodes();
   if (rerender) renderNodePanel(node);
   if (state.activeFileId === "variables") renderPlaybookSurfaces();
+}
+
+function setCanvasChoiceOptionLabel(nodeId, optionId, optionIndex, value, rerender) {
+  const node = getNode(nodeId);
+  if (!node || node.type !== "Choice") return;
+  const options = ensureChoiceOptionsArray(node);
+  const option = (optionId ? options.find((entry) => entry.id === optionId) : null)
+    || (Number.isInteger(optionIndex) ? options[optionIndex] : null);
+  if (!option) return;
+  option.label = normalizeOptionalString(value);
+  syncChoicesFromOptions(node);
+  syncChoiceBranchLinksForNode(node.id, { markDirty: false });
+  setProjectDirty(true);
+  updateStatus();
+  if (!rerender) return;
+  renderNodes();
+  renderLinks();
+  if (state.selectedNodeId === node.id && state.panel === "node") renderNodePanel(node);
+  scheduleStoryPanelRender();
 }
 
 function setChoiceOptionConditionPart(optionId, field, value, conditionIndex, rerender) {
@@ -25439,7 +25520,11 @@ function defaultNodeHeight(node, width = defaultNodeWidth(node)) {
     : 0;
   const castLine = normalizeNodeCast(node?.cast).length ? 1 : 0;
   const choicesLine = hasNodeChoices(node) ? 1 : 0;
-  const contentHeight = 34 + 26 + titleLines * 17 + bodyLines * 17 + castLine * 24 + choicesLine * 24;
+  const choiceFollowupLabels = getChoiceFollowupLabels(node);
+  const choiceFollowupLines = choiceFollowupLabels.length
+    ? Math.min(3, Math.max(1, estimateWrappedLineCount(choiceFollowupLabels.join(" · "), width - 28, 7)))
+    : 0;
+  const contentHeight = 34 + 26 + titleLines * 17 + bodyLines * 17 + castLine * 24 + choicesLine * 24 + choiceFollowupLines * 23;
   return Math.round(clamp(contentHeight, minNodeHeight(node), maxNodeHeight(node)));
 }
 
@@ -25463,6 +25548,7 @@ function getNodeLayoutSignature(node, manualWidth, manualHeight) {
     node?.type || "",
     getNodeTypeLabel(node?.type),
     getNodeDisplayTitle(node, "Untitled"),
+    getChoiceFollowupLabels(node).join("\n"),
     displayBody(node),
     parseChoiceLines(node?.choices).join("\n"),
     normalizeNodeCast(node?.cast).map((entry) => `${entry.role}:${entry.characterId}`).join("|"),

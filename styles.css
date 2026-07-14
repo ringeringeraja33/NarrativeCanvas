@@ -2126,6 +2126,40 @@
   -webkit-line-clamp: 2;
 }
 
+.narrative-canvas-plugin-host .node-choice-followup {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  max-height: 50px;
+  margin: -2px 0 7px;
+  overflow: hidden;
+}
+
+.narrative-canvas-plugin-host .node-choice-followup span {
+  max-width: 100%;
+  padding: 2px 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--interactive-accent) 42%, transparent), inset 0 0 8px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  color: color-mix(in srgb, var(--interactive-accent) 82%, white);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 7px color-mix(in srgb, var(--interactive-accent) 72%, transparent);
+  white-space: nowrap;
+}
+
+.narrative-canvas-plugin-host .app-shell[data-theme="light"] .node-choice-followup span {
+  background: color-mix(in srgb, var(--interactive-accent) 10%, white);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--interactive-accent) 24%, transparent), inset 0 0 7px color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+  color: color-mix(in srgb, var(--interactive-accent) 78%, #24173a);
+  text-shadow: 0 0 5px color-mix(in srgb, var(--interactive-accent) 34%, transparent);
+}
+
 .narrative-canvas-plugin-host .node-text {
   display: -webkit-box;
   flex: 1 1 auto;
@@ -2184,9 +2218,32 @@
   font-variant-numeric: tabular-nums;
 }
 
-.narrative-canvas-plugin-host .node-choice-label {
+.narrative-canvas-plugin-host .node .node-choice-label-input {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 2px 5px;
   overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font: inherit;
+  line-height: 1.4;
   text-overflow: ellipsis;
+}
+
+.narrative-canvas-plugin-host .node .node-choice-label-input:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);
+}
+
+.narrative-canvas-plugin-host .node .node-choice-label-input:focus, .narrative-canvas-plugin-host .node .node-choice-label-input:focus-visible {
+  border-color: var(--interactive-accent);
+  outline: none;
+  background: var(--background-control);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
 .narrative-canvas-plugin-host .node-dialog-preview {
