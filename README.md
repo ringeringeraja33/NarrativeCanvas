@@ -184,3 +184,9 @@ All exporters share one mapping of node slugs and variable names. Complex variab
 The **AI** button at the bottom-left of the canvas opens an experimental copilot. Discuss the story in your own language, then ask it to change the canvas — it replies with a proposal of operations (add / update nodes, add / remove links) that you **Apply to canvas** or **Reject**. Nothing changes until you apply. The current node selection is passed as context, and the panel is bilingual.
 
 In the web app, open **Connection settings** and point it at any OpenAI-compatible endpoint (endpoint URL, API key, model); that config is stored only in your browser. In the Obsidian plugin, configure the same fields in plugin settings; the API key is stored in the plugin's local `data.json`, and requests use Obsidian's `requestUrl`. The bundled canvas code contains no browser `fetch` or `localStorage` branch. The feature is experimental and marked **Beta**.
+
+## License
+
+© 2026 ringeringeraja33. Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+
+Note: this is a copyleft license. If you modify Narrative Canvas and make it available to others — including running a modified version as a network service (e.g. a hosted web app) — you must make your complete corresponding source code available to those users under the same license.
