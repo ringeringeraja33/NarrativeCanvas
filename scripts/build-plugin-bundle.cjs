@@ -5,6 +5,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const mainPath = path.join(projectRoot, "main.js");
 const indexPath = path.join(projectRoot, "index.html");
 const appPath = path.join(projectRoot, "app.js");
+const checkOnly = process.argv.includes("--check");
 
 function jsStringLine(line) {
   return JSON.stringify(line)
@@ -184,6 +185,11 @@ next = `${next.slice(0, appBodyStart)}${indentAppSource(app)}${next.slice(appEnd
 
 if (next === main) {
   process.exit(0);
+}
+
+if (checkOnly) {
+  console.error("main.js is stale. Run: node scripts/build-plugin-bundle.cjs");
+  process.exit(1);
 }
 
 fs.writeFileSync(mainPath, `${next.trimEnd()}\n`, "utf8");

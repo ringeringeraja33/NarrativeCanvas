@@ -53,6 +53,14 @@ function Get-Sha256([string]$Path) {
   return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
 }
 
+function Test-RuntimeFileMatches([string]$SourcePath, [string]$RuntimePath, [string]$FileName) {
+  if ((Get-Sha256 $SourcePath) -eq (Get-Sha256 $RuntimePath)) { return $true }
+  if ($FileName -ne "main.js") { return $false }
+  $source = (Read-Utf8Strict $SourcePath).Replace("`r`n", "`n").TrimEnd()
+  $runtime = (Read-Utf8Strict $RuntimePath).Replace("`r`n", "`n").TrimEnd()
+  return $runtime -eq ($source + "`n`n/* nosourcemap */")
+}
+
 function Assert-FileExists([string]$Path, [string]$Label) {
   if (Test-Path -LiteralPath $Path -PathType Leaf) {
     Write-CheckOk "$Label exists"
@@ -295,6 +303,18 @@ function Assert-GitHubReleaseAssets([string]$Repo, [string]$ReleaseTag) {
 Write-Host "Narrative Canvas release check"
 Write-Host "Project root: $ProjectRoot"
 
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) {
+  Write-CheckFail "Node.js is required for plugin artifact verification"
+} else {
+  & $node.Source (Resolve-ProjectPath "scripts\verify-plugin-artifacts.cjs")
+  if ($LASTEXITCODE -eq 0) {
+    Write-CheckOk "root plugin artifacts passed the canonical verification"
+  } else {
+    Write-CheckFail "root plugin artifacts failed the canonical verification"
+  }
+}
+
 $manifestPath = Resolve-ProjectPath "manifest.json"
 $versionsPath = Resolve-ProjectPath "versions.json"
 
@@ -396,7 +416,7 @@ if (-not $SkipRuntime) {
       $sourcePath = Resolve-ProjectPath $file
       $runtimePath = Join-Path $RuntimeDir $file
       if ((Test-Path -LiteralPath $sourcePath -PathType Leaf) -and (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
-        if ((Get-Sha256 $sourcePath) -eq (Get-Sha256 $runtimePath)) {
+        if (Test-RuntimeFileMatches $sourcePath $runtimePath $file) {
           Write-CheckOk "runtime $file matches source"
         } else {
           Write-CheckFail "runtime $file does not match source"

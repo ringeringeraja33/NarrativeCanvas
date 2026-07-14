@@ -1,0 +1,49 @@
+name: Verify published release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify tagged root artifacts
+        run: node scripts/verify-plugin-artifacts.cjs
+      - name: Run smoke tests
+        run: node scripts/run-browser-test.cjs tests/smoke.html smoke 30000
+      - name: Run fixture tests
+        run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 18000
+      - name: Run GUI regression tests
+        run: node scripts/run-browser-test.cjs tests/gui-regression.html gui 45000
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir release-assets
+          gh release download "$RELEASE_TAG" \
+            --pattern main.js \
+            --pattern manifest.json \
+            --pattern styles.css \
+            --dir release-assets
+      - name: Compare release assets with tag root
+        run: |
+          cmp main.js release-assets/main.js
+          cmp manifest.json release-assets/manifest.json
+          cmp styles.css release-assets/styles.css
+          printf '%s\n' main.js manifest.json styles.css | sort > expected-assets.txt
+          gh release view "${{ github.event.release.tag_name }}" --json assets --jq '.assets[].name' | sort > actual-assets.txt
+          diff -u expected-assets.txt actual-assets.txt
+        env:
+          GH_TOKEN: ${{ github.token }}

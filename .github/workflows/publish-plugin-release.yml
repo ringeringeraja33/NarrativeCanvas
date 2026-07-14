@@ -1,0 +1,68 @@
+name: Publish plugin release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag; must match manifest.json exactly
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plugin-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify root plugin artifacts
+        run: node scripts/verify-plugin-artifacts.cjs
+      - name: Run smoke tests
+        run: node scripts/run-browser-test.cjs tests/smoke.html smoke 30000
+      - name: Run fixture tests
+        run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 18000
+      - name: Run GUI regression tests
+        run: node scripts/run-browser-test.cjs tests/gui-regression.html gui 45000
+      - name: Verify requested version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          test "$RELEASE_TAG" = "$MANIFEST_VERSION"
+      - name: Publish verified root artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Narrative Canvas $RELEASE_TAG" \
+            --notes-file RELEASE_NOTES.md \
+            --latest \
+            main.js manifest.json styles.css
+      - name: Verify uploaded release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          mkdir release-assets
+          gh release download "$RELEASE_TAG" \
+            --pattern main.js \
+            --pattern manifest.json \
+            --pattern styles.css \
+            --dir release-assets
+          cmp main.js release-assets/main.js
+          cmp manifest.json release-assets/manifest.json
+          cmp styles.css release-assets/styles.css
+          printf '%s\n' main.js manifest.json styles.css | sort > expected-assets.txt
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | sort > actual-assets.txt
+          diff -u expected-assets.txt actual-assets.txt
