@@ -66,8 +66,12 @@ function scopeCss(source) {
       break;
     }
     const body = source.slice(openIndex + 1, closeIndex);
-    const trimmedPrelude = prelude.trim();
-    const leading = prelude.slice(0, prelude.indexOf(trimmedPrelude));
+    // Keep comments and whitespace outside the selector. Treating a leading
+    // comment as selector text makes commas inside the comment split the rule
+    // and can leave the first selector unscoped in the generated plugin CSS.
+    const triviaMatch = prelude.match(/^(\s*(?:\/\*[\s\S]*?\*\/\s*)*)/);
+    const leading = triviaMatch?.[0] || "";
+    const trimmedPrelude = prelude.slice(leading.length).trim();
     if (trimmedPrelude.startsWith("@")) {
       if (/^@(media|supports|container)\b/.test(trimmedPrelude)) {
         output += `${leading}${trimmedPrelude} {\n${scopeCss(body).trim()}\n}`;

@@ -1266,8 +1266,8 @@
   display: grid;
 }
 
-.narrative-canvas-plugin-host /* Project Document: a full-bleed, .narrative-canvas-plugin-host VSCode-style code editor (edit strip + gutter + editor). */
-.document-source-panel {
+/* Project Document: a full-bleed, VSCode-style code editor (edit strip + gutter + editor). */
+.narrative-canvas-plugin-host .document-source-panel {
   overflow: hidden;
   padding: 0;
 }
@@ -1448,8 +1448,8 @@
   overflow: auto;
 }
 
-.narrative-canvas-plugin-host /* Beat the global input/textarea color + -webkit-text-fill-color so the syntax layer shows. */
-.app-shell .document-editor-input textarea.document-source-editor, .narrative-canvas-plugin-host .app-shell:not([data-theme="light"]) .document-editor-input textarea.document-source-editor {
+/* Beat the global input/textarea color + -webkit-text-fill-color so the syntax layer shows. */
+.narrative-canvas-plugin-host .app-shell .document-editor-input textarea.document-source-editor, .narrative-canvas-plugin-host .app-shell:not([data-theme="light"]) .document-editor-input textarea.document-source-editor {
   color: transparent;
   -webkit-text-fill-color: transparent;
   caret-color: var(--text-normal);
@@ -1570,8 +1570,8 @@
   min-height: 0;
 }
 
-.narrative-canvas-plugin-host /* Keep enough scroll-past-end space to center matches near the end of Advanced JSON. */
-.document-shell.playbook-json-open {
+/* Keep enough scroll-past-end space to center matches near the end of Advanced JSON. */
+.narrative-canvas-plugin-host .document-shell.playbook-json-open {
   align-self: start;
   min-height: max-content;
   padding-bottom: min(44vh, 360px);
@@ -2666,9 +2666,9 @@
   filter: drop-shadow(0 9px 18px rgba(0, 0, 0, 0.34));
 }
 
-.narrative-canvas-plugin-host /* Right-half ring around the cursor: four 45-degree segments running from
+/* Right-half ring around the cursor: four 45-degree segments running from
    12 o'clock through 3 o'clock down to 6 o'clock. */
-.canvas-radial-menu .radial-segment-1 {
+.narrative-canvas-plugin-host .canvas-radial-menu .radial-segment-1 {
   clip-path: polygon(50% 0, 85.4% 14.6%, 65.7% 34.3%, 50% 27.8%);
 }
 
@@ -3853,13 +3853,13 @@
   align-items: center;
 }
 
-.narrative-canvas-plugin-host /* The floating controls belong to the four document-style tabs, .narrative-canvas-plugin-host not the canvas. */
-.app-shell:not([data-active-file="characters"]):not([data-active-file="events"]):not([data-active-file="variables"]):not([data-active-file="document"]) .workspace-floating-controls {
+/* The floating controls belong to the four document-style tabs, not the canvas. */
+.narrative-canvas-plugin-host .app-shell:not([data-active-file="characters"]):not([data-active-file="events"]):not([data-active-file="variables"]):not([data-active-file="document"]) .workspace-floating-controls {
   display: none;
 }
 
-.narrative-canvas-plugin-host /* The outline toggle is document-only. */
-.app-shell:not([data-active-file="document"]) .workspace-toc-button {
+/* The outline toggle is document-only. */
+.narrative-canvas-plugin-host .app-shell:not([data-active-file="document"]) .workspace-toc-button {
   display: none;
 }
 
@@ -4720,9 +4720,9 @@
   font-weight: 700;
 }
 
-.narrative-canvas-plugin-host /* Standardize every inspector button to one size (the Add choice reference)
-   so Add condition, .narrative-canvas-plugin-host Add effect, .narrative-canvas-plugin-host Add choice, .narrative-canvas-plugin-host and the rest match. */
-.inspector-panel .small-button {
+/* Standardize every inspector button to one size (the Add choice reference)
+   so Add condition, Add effect, Add choice, and the rest match. */
+.narrative-canvas-plugin-host .inspector-panel .small-button {
   font-size: 12px;
 }
 
@@ -4936,8 +4936,8 @@
   line-height: 1.4;
 }
 
-.narrative-canvas-plugin-host /* Add buttons sit at the bottom of the list so repeated adds never need scrolling up. */
-.dialog-turns-footer, .narrative-canvas-plugin-host .choice-options-footer {
+/* Add buttons sit at the bottom of the list so repeated adds never need scrolling up. */
+.narrative-canvas-plugin-host .dialog-turns-footer, .narrative-canvas-plugin-host .choice-options-footer {
   display: grid;
 }
 
@@ -6009,8 +6009,8 @@
   background: transparent;
 }
 
-.narrative-canvas-plugin-host /* Floating preview: lift the docked panel into a centered window and reclaim its column. */
-.app-shell[data-play-panel="open"][data-play-floating="true"] {
+/* Floating preview: lift the docked panel into a centered window and reclaim its column. */
+.narrative-canvas-plugin-host .app-shell[data-play-panel="open"][data-play-floating="true"] {
   --play-panel-track: 0px;
 }
 
@@ -6561,9 +6561,9 @@
   min-height: 0;
 }
 
-.narrative-canvas-plugin-host /* Body and actions scroll together so the buttons sit right below the
+/* Body and actions scroll together so the buttons sit right below the
    content (debug section) instead of being pinned to the panel bottom. */
-.play-scroll {
+.narrative-canvas-plugin-host .play-scroll {
   min-height: 0;
   overflow: auto;
   background: var(--background-primary);
@@ -6671,8 +6671,8 @@
   background: var(--background-primary);
 }
 
-.narrative-canvas-plugin-host /* Each choice option takes a full row of its own. */
-.play-actions .play-choice-action {
+/* Each choice option takes a full row of its own. */
+.narrative-canvas-plugin-host .play-actions .play-choice-action {
   flex: 1 1 100%;
 }
 
@@ -6940,8 +6940,8 @@
 @keyframes ai-stream-caret { 50% { opacity:.2; } }
 .narrative-canvas-plugin-host .ai-workbench textarea { width:100%; resize:vertical; }
 .narrative-canvas-plugin-host .ai-actions { display:flex; gap:8px; flex-wrap:wrap; }
-.narrative-canvas-plugin-host /* Theme-aware action buttons (were unstyled browser defaults). */
-.ai-actions button {
+/* Theme-aware action buttons (were unstyled browser defaults). */
+.narrative-canvas-plugin-host .ai-actions button {
   padding:7px 14px;
   border:1px solid var(--background-modifier-border);
   border-radius:var(--radius-s, 6px);
