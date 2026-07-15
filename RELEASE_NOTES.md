@@ -1,43 +1,29 @@
-# Narrative Canvas 1.2.3
+# Narrative Canvas 1.2.4
 
-Compared with GitHub release `1.2.2`.
+What's different since 1.2.3, from what you'll actually see.
 
 ## English
 
-### Added
-
-- AI assistant replies now appear progressively as they arrive. Streaming can be stopped at any time, requests time out cleanly, and non-streaming providers use a short progressive reveal instead of inserting a full paragraph at once.
-- Dialogue lines can be edited directly on Dialog cards. The speaker and dialogue columns can be resized per card by dragging the colon separator.
-- Centered Play and Inspector windows can be moved and resized from every edge and corner.
-
-### Improved
-
-- Hovering a link highlights both endpoint cards. Hovering a node highlights its immediate upstream and downstream links and cards. Hovering a Choice option isolates its own outgoing link and successor card.
-- Graph emphasis now uses a brighter purple glow. The light theme uses neutral white and light-gray surfaces with coordinated purple accents.
-- Choice successors show the originating option above the title, and Choice option text remains directly editable on the card.
-
-### Fixed
-
-- AI open and close controls remain responsive during repeated use. Streaming updates are batched per animation frame to avoid repaint stalls, and requests can be cancelled without leaving the panel locked.
-- Playbook JSON search centers matches immediately and retries after layout, preventing missed jumps when the document has just opened.
-- Smoke-test interactions around virtualized Choice cards, radial-menu blank space, and frame context menus are more deterministic.
+- **AI chat** — Messages render Markdown and rich text with a copy button. Enter sends, Shift+Enter adds a line break. The AI window can be moved and resized anywhere across the app.
+- **Pinned windows** — AI, Play, and the centered Inspector views have a pin button so they stay open while you work elsewhere.
+- **Node types in one editor** — Click a node's icon (in the Node Library or on the canvas) to edit everything about that type, including its icon. The separate icon popup and the "…" button are gone. The Appearance section is compact: a small color swatch, an icon field with a reset, and an opacity slider with a live percentage.
+- **Node templates** — When adding a custom type, start from Basic Node, Dialog, Choice, or Frame.
+- **Document page** — Now has the same header and export controls as the other files, plus a collapsible header for distraction-free writing.
+- **Cards & characters** — Dialog cards show speakers more clearly with a resizable speaker column; Choice cues wrap fully and click through to their source node. Character chips and Frame cards open the Characters page focused on that character; Frame cards list every character and use translucent surfaces.
+- **Narrow screens** — Sidebars, toolbars, dialogs, editors, and floating windows adapt to portrait and narrow widths.
+- **Plugin** — Configurable hotkeys for common actions, higher-contrast light theme, and card glow / hover emphasis that now match the web app.
+- **Removed** — The old Condition and Set node types are gone. Conditions and effects still live on nodes, choices, and Playbook rules.
+- **Starter project** — Each choice now leads to its own clear outcome before rejoining the main path.
 
 ## 中文
 
-### 新增
-
-- AI 助手回复会随内容到达逐步显示。生成期间可随时停止，请求超时后会正常退出；不支持流式返回的服务也会短时逐字呈现，不再整段突然出现。
-- Dialog 卡片中的角色名和每行对话可直接编辑；拖动冒号分隔位置，可为每张卡片调整角色栏与对话栏宽度。
-- 居中的演示窗口和检查器窗口可拖动，并可从四边及四角调整大小。
-
-### 改进
-
-- 光标移到连线上时强调两端节点；移到节点上时强调一层上下游连线与卡片；移到 Choice 选项上时，仅强调该选项对应的连线与后续卡片。
-- 画布强调效果统一为更亮的紫色辉光；浅色主题改用白色、浅灰表面与协调的紫色强调色。
-- Choice 后续节点继续在标题上方显示来源选项，Choice 选项文字可直接在卡片中编辑。
-
-### 修复
-
-- AI 按钮反复呼出和关闭时保持响应。流式内容按动画帧合并更新，降低重绘卡顿；停止请求后不会残留锁定状态。
-- Playbook JSON 搜索会先立即居中，再在布局完成后复核，避免文档刚打开时定位失效。
-- 提高虚拟化 Choice 卡片、径向菜单空白点和框架右键菜单相关 smoke 测试的稳定性。
+- **AI 对话** — 消息支持 Markdown 与富文本显示,并可一键复制。回车发送,Shift+回车换行。AI 窗口可在整个界面内自由拖动和缩放。
+- **窗口钉住** — AI、演示和三个居中检查器都新增钉住按钮,钉住后可一直开着,方便边看边改。
+- **节点类型合并为一个弹窗** — 点击节点库(或画布)里的节点图标,即可编辑该类型的一切设置,图标也在里面改。独立的图标弹窗和「…」按钮已移除。外观区更紧凑:小色块、带复位的图标输入、以及带实时百分比的透明度滑块。
+- **节点模版** — 新增自定义类型时,可从基础节点、对话、选择、框架四种模版开始。
+- **文档页** — 采用与其他文件一致的上栏和导出按钮,并可收起上栏进入沉浸式写作。
+- **卡片与角色** — 对话卡片更清晰地显示说话者,列宽可调;选择提示完整换行,点击可跳到来源节点。卡片上的角色标签和框架卡片都能跳到角色页并聚焦对应角色;框架卡片列出全部角色,采用半透明表面。
+- **窄屏适配** — 侧栏、工具栏、弹窗、编辑器和浮动窗口都会随竖屏和窄屏自适应排列。
+- **插件** — 常用操作可配置快捷键,浅色主题对比度更高,卡片辉光与悬停强调与 Web App 一致。
+- **移除** — 旧的 Condition 与 Set 节点类型已删除。条件与效果仍保留在节点、选择和演示设置规则中。
+- **上手示例** — 每个选项现在都会走向各自明确的结果,再收束回主线。

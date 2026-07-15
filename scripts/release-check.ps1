@@ -370,7 +370,7 @@ foreach ($file in $releaseFiles) {
   Assert-FileExists (Resolve-ProjectPath $file) "release asset $file" | Out-Null
 }
 
-$sourceFiles = @("app.js", "canvas.css", "index.html")
+$sourceFiles = @("app.js", "canvas.css", "plugin.css", "index.html")
 foreach ($file in $sourceFiles) {
   Assert-FileExists (Resolve-ProjectPath $file) "source asset $file" | Out-Null
 }
@@ -404,11 +404,19 @@ $stylesText = Read-Utf8Strict (Resolve-ProjectPath "styles.css")
 Assert-TextContains $stylesText "Narrative Canvas web app styles (scoped; generated from canvas.css)" "styles.css includes scoped generated canvas styles"
 Assert-TextDoesNotMatch $stylesText ':root\[data-theme=' "styles.css does not rely on scoped :root theme selectors"
 Assert-TextDoesNotMatch $stylesText '\.narrative-canvas-plugin-host\s+@media' "styles.css has valid scoped media queries"
-Assert-TextDoesNotMatch $stylesText '!important' "styles.css avoids !important"
+$stylesWithoutCheckboxHostResets = $stylesText `
+  -replace 'background-image:\s*none\s*!important\s*;', '' `
+  -replace 'content:\s*none\s*!important\s*;', '' `
+  -replace 'display:\s*none\s*!important\s*;', ''
+Assert-TextDoesNotMatch $stylesWithoutCheckboxHostResets '!important' "styles.css limits !important to checkbox host resets"
 
 $canvasCssText = Read-Utf8Strict (Resolve-ProjectPath "canvas.css")
 Assert-TextDoesNotMatch $canvasCssText 'column-width|column-gap|break-inside|page-break-inside' "canvas.css avoids multicolumn CSS"
-Assert-TextDoesNotMatch $canvasCssText '!important' "canvas.css avoids !important"
+$canvasCssWithoutCheckboxHostResets = $canvasCssText `
+  -replace 'background-image:\s*none\s*!important\s*;', '' `
+  -replace 'content:\s*none\s*!important\s*;', '' `
+  -replace 'display:\s*none\s*!important\s*;', ''
+Assert-TextDoesNotMatch $canvasCssWithoutCheckboxHostResets '!important' "canvas.css limits !important to checkbox host resets"
 
 if (-not $SkipRuntime) {
   if (Test-Path -LiteralPath $RuntimeDir -PathType Container) {

@@ -94,7 +94,7 @@
       // Build a saved-state payload with N nodes laid out in a grid plus a chain
       // of links and some cross links, so the graph resembles a large real project.
       function generateProject(n) {
-        const types = ["Content", "Dialog", "Choice", "Condition", "Set", "Jump", "Marker"];
+        const types = ["Content", "Dialog", "Choice", "Clue", "InterviewNote", "Jump", "Marker"];
         const columns = Math.max(1, Math.round(Math.sqrt(n)));
         const spacingX = 320;
         const spacingY = 200;
@@ -111,9 +111,7 @@
             body: `Body text for node ${index}. Some narrative content to give the node realistic size.`,
             x: 120 + col * spacingX,
             y: 120 + row * spacingY,
-            ...(type === "Choice" ? { choices: ["Continue", "Turn back"] } : {}),
-            ...(type === "Set" ? { variable: "flag", value: "true" } : {}),
-            ...(type === "Condition" ? { condition: "flag === true" } : {})
+            ...(type === "Choice" ? { choices: ["Continue", "Turn back"] } : {})
           });
           // Bound the longest directed path to ~O(sqrt(n)) so a branching graph is
           // exercised without a single deep chain (which would overflow the recursive

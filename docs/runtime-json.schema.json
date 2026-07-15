@@ -119,10 +119,8 @@
         "typeLabel",
         "body",
         "requirements",
-        "condition",
         "effects",
         "choices",
-        "conditionBranches",
         "next",
         "routing",
         "cast",
@@ -137,7 +135,6 @@
         "typeLabel": { "type": "string" },
         "body": { "type": "string" },
         "requirements": { "type": "string" },
-        "condition": { "type": "string" },
         "effects": {
           "type": "array",
           "items": { "$ref": "#/$defs/effect" }
@@ -145,10 +142,6 @@
         "choices": {
           "type": "array",
           "items": { "$ref": "#/$defs/choice" }
-        },
-        "conditionBranches": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/conditionBranch" }
         },
         "next": {
           "type": "array",
@@ -193,18 +186,6 @@
         "targetId": { "type": "string" },
         "target": { "type": "string" },
         "linkId": { "type": "string" }
-      }
-    },
-    "conditionBranch": {
-      "type": "object",
-      "required": ["branch", "targetId", "target", "linkId", "condition"],
-      "additionalProperties": false,
-      "properties": {
-        "branch": { "enum": ["true", "false"] },
-        "targetId": { "type": "string" },
-        "target": { "type": "string" },
-        "linkId": { "type": "string" },
-        "condition": { "type": "string" }
       }
     },
     "transition": {

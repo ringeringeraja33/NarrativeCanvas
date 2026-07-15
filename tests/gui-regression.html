@@ -180,7 +180,8 @@
           const clips = /(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`);
           if (clips) {
             const ancestorRect = ancestor.getBoundingClientRect();
-            if (!isPointInsideRect(x, y, ancestorRect)) return false;
+            const inset = 1;
+            if (x < ancestorRect.left + inset || x > ancestorRect.right - inset || y < ancestorRect.top + inset || y > ancestorRect.bottom - inset) return false;
           }
           if (ancestor === scope) break;
           ancestor = ancestor.parentElement;
@@ -712,9 +713,6 @@
         } else if (gateParts[0] === "node") {
           const node = savedNodes.find((candidate) => candidate.id === gateParts[1]);
           savedGateCondition = { mode: node?.stateLogic?.requirementsMode, expression: node?.stateLogic?.requirements };
-        } else if (gateParts[0] === "condition") {
-          const node = savedNodes.find((candidate) => candidate.id === gateParts[1]);
-          savedGateCondition = { mode: node?.conditionMode, expression: node?.condition };
         }
         assert(
           `${label}: choice condition any relation is saved`,
@@ -743,6 +741,9 @@
         win.dispatchEvent(new win.Event("resize"));
         await wait(200);
         assertMainShellNoPageOverflow(`${label}: compact`, doc, { allowDeclaredMinWidth: true });
+        assert(`${label}: compact layout starts with both sidebars collapsed`, doc.querySelector(".app-shell")?.getAttribute("data-sidebar-left") === "collapsed" && doc.querySelector(".app-shell")?.getAttribute("data-sidebar-right") === "collapsed");
+        const compactActiveView = doc.querySelector(".canvas-workspace-view.active");
+        if (compactActiveView) compactActiveView.scrollTop = 0;
         assertActivePanelFits(`${label}: compact`, doc);
         assertToolbarDoesNotOverlap(`${label}: compact`, doc);
         assertNoUnexpectedTextOverflow(`${label}: compact`, doc);

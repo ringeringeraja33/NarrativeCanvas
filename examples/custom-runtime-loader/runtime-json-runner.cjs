@@ -177,8 +177,8 @@ function createRuntimeSession(document) {
   function current() {
     const node = nodeById.get(currentNodeId);
     if (!node) throw new Error(`Missing current node: ${currentNodeId}`);
-    if (node.condition && !evaluateCondition(node.condition, state)) {
-      throw new Error(`Current node condition is false: ${node.title || node.id}`);
+    if (node.requirements && !evaluateCondition(node.requirements, state)) {
+      throw new Error(`Current node requirements are false: ${node.title || node.id}`);
     }
     applyEffects(node.effects, state);
     return {
@@ -193,8 +193,7 @@ function createRuntimeSession(document) {
   function advance() {
     const node = nodeById.get(currentNodeId);
     if (node?.routing?.mode === "end") return false;
-    const branch = (node?.conditionBranches || []).find((item) => !item.condition || evaluateCondition(item.condition, state));
-    const transition = branch || (node?.next || []).find((item) => !item.condition || evaluateCondition(item.condition, state));
+    const transition = (node?.next || []).find((item) => !item.condition || evaluateCondition(item.condition, state));
     const targetId = transition?.targetId || node?.routing?.targetId || "";
     if (!targetId) return false;
     currentNodeId = targetId;

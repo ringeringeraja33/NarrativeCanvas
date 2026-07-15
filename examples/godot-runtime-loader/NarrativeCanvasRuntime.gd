@@ -62,15 +62,10 @@ func advance() -> bool:
     if str(node.get("routing", {}).get("mode", "")) == "end":
         return false
     var target_id := ""
-    for branch in node.get("conditionBranches", []):
-        if typeof(branch) == TYPE_DICTIONARY and _condition_passes(str(branch.get("condition", ""))):
-            target_id = str(branch.get("targetId", ""))
+    for transition in node.get("next", []):
+        if typeof(transition) == TYPE_DICTIONARY and _condition_passes(str(transition.get("condition", ""))):
+            target_id = str(transition.get("targetId", ""))
             break
-    if target_id == "":
-        for transition in node.get("next", []):
-            if typeof(transition) == TYPE_DICTIONARY and _condition_passes(str(transition.get("condition", ""))):
-                target_id = str(transition.get("targetId", ""))
-                break
     if target_id == "":
         target_id = str(node.get("routing", {}).get("targetId", ""))
     if target_id == "" or not nodes_by_id.has(target_id):

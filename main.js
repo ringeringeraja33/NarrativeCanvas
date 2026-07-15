@@ -55,6 +55,28 @@ const PLUGIN_TEXT = {
     "Available placeholders: ": "可用占位符："
   }
 };
+const CANVAS_COMMAND_DEFINITIONS = [
+  { id: "new-project", name: "New project" },
+  { id: "undo", name: "Undo" },
+  { id: "redo", name: "Redo" },
+  { id: "add-content-node", name: "Add Basic Node" },
+  { id: "add-dialog-node", name: "Add Dialog" },
+  { id: "add-choice-node", name: "Add Choice" },
+  { id: "add-frame", name: "Add Frame" },
+  { id: "duplicate-selected-node", name: "Duplicate selected node" },
+  { id: "delete-selection", name: "Delete selection" },
+  { id: "zoom-in", name: "Zoom in" },
+  { id: "zoom-out", name: "Zoom out" },
+  { id: "fit-canvas-to-view", name: "Fit canvas to view" },
+  { id: "focus-selected-node", name: "Focus selected node" },
+  { id: "focus-workspace-search", name: "Focus workspace search" },
+  { id: "open-characters", name: "Open Characters" },
+  { id: "open-events", name: "Open Events Sheet" },
+  { id: "open-playbook", name: "Open Playbook" },
+  { id: "open-document", name: "Open Document" },
+  { id: "start-play-preview", name: "Start play preview" },
+  { id: "toggle-immersive-fullscreen", name: "Toggle immersive fullscreen" }
+];
 const LEGACY_PROJECT_FILE = "NarrativeCanvas/project.json";
 const STATE_FILE = "data.json";
 
@@ -74,21 +96,23 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
 
     this.addCommand({
       id: "open",
-      name: pluginText(this, "Open Narrative Canvas"),
+      name: "Open canvas",
       callback: () => this.openCanvas().catch((error) => this.reportOpenError(error))
     });
 
     this.addCommand({
       id: "save-to-vault",
-      name: pluginText(this, "Save project file to vault"),
+      name: "Save current project",
       callback: () => this.saveActiveCanvas().catch((error) => this.reportOpenError(error))
     });
 
     this.addCommand({
       id: "create-sample-project",
-      name: pluginText(this, "Open sample Narrative Canvas project"),
+      name: "Create sample project",
       callback: () => this.openSampleProject().catch((error) => this.reportOpenError(error))
     });
+
+    this.registerCanvasCommands();
 
     // Duplicate-tab handling lives in View.onOpen — when Obsidian creates a fresh leaf for a
     // file we already have open, that leaf's onOpen detects the survivor and detaches itself
@@ -115,6 +139,36 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
         .then(() => window.NarrativeCanvasApp?.loadVaultProject?.())
         .catch((error) => console.error(error));
     }));
+  }
+
+  registerCanvasCommands() {
+    CANVAS_COMMAND_DEFINITIONS.forEach((definition) => {
+      this.addCommand({
+        id: definition.id,
+        name: definition.name,
+        checkCallback: (checking) => {
+          const activeLeaf = this.app.workspace?.activeLeaf;
+          const canvasApp = window.NarrativeCanvasApp;
+          const available = this.isNarrativeCanvasLeaf(activeLeaf)
+            && Boolean(canvasApp?.canExecuteCommand?.(definition.id));
+          if (checking || !available) return available;
+          try {
+            const result = canvasApp.executeCommand(definition.id);
+            if (result && typeof result.catch === "function") {
+              result.catch((error) => this.reportCommandError(definition.name, error));
+            }
+          } catch (error) {
+            this.reportCommandError(definition.name, error);
+          }
+          return true;
+        }
+      });
+    });
+  }
+
+  reportCommandError(name, error) {
+    console.error(error);
+    new Notice(`${pluginText(this, name)} failed.`);
   }
 
   async requestAi(payload) {
@@ -822,6 +876,7 @@ class NarrativeCanvasView extends ItemView {
         previewNewProjectFile: (savedStateJson, options) => this.plugin.previewNewProjectFile(savedStateJson, options),
         chooseProjectFile: () => this.plugin.chooseProjectFile(),
         getProjectFile: () => this.plugin.getCurrentProjectPath(),
+        showNotice: (text) => { new Notice(String(text || "")); },
         stateFile: STATE_FILE,
         legacyProjectFile: LEGACY_PROJECT_FILE
       };
@@ -1412,7 +1467,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003cmeta charset=\"utf-8\"\u003e",
   "    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\u003e",
   "    \u003ctitle\u003eNarrative Canvas\u003c/title\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260714b-1.2.3\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260716d-1.2.4\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -1423,8 +1478,6 @@ const CANVAS_INDEX_HTML = [
   "            \u003ch1 id=\"vaultProjectTitle\"\u003eSample\u003c/h1\u003e",
   "          \u003c/div\u003e",
   "          \u003cdiv class=\"header-actions\"\u003e",
-  "            \u003cbutton class=\"icon-button save-project-button\" title=\"Save project state\" data-action=\"save-project\" type=\"button\"\u003eSave\u003c/button\u003e",
-  "            \u003cbutton class=\"icon-button new-project-button\" title=\"New project\" data-action=\"new-project\" type=\"button\"\u003eNew\u003c/button\u003e",
   "            \u003cbutton class=\"icon-button sidebar-toggle-button\" title=\"Collapse left sidebar\" aria-label=\"Collapse left sidebar\" data-sidebar-toggle=\"left\" type=\"button\"\u003e",
   "              \u003cspan class=\"sidebar-toggle-icon sidebar-toggle-icon-left\" aria-hidden=\"true\"\u003e\u003c/span\u003e",
   "            \u003c/button\u003e",
@@ -1448,6 +1501,8 @@ const CANVAS_INDEX_HTML = [
   "            \u003cbutton class=\"small-button\" data-action=\"reload-project-file\" type=\"button\"\u003eReload\u003c/button\u003e",
   "            \u003cbutton class=\"small-button\" data-action=\"clear-browser-storage\" data-web-only type=\"button\"\u003eClear storage\u003c/button\u003e",
   "            \u003cbutton class=\"small-button project-file-sample-button\" data-action=\"open-sample-project\" data-web-only type=\"button\"\u003eOpen sample file\u003c/button\u003e",
+  "            \u003cbutton class=\"small-button save-project-button\" title=\"Save project state\" data-action=\"save-project\" type=\"button\"\u003eSave\u003c/button\u003e",
+  "            \u003cbutton class=\"small-button new-project-button\" title=\"New project\" data-action=\"new-project\" type=\"button\"\u003eNew\u003c/button\u003e",
   "          \u003c/div\u003e",
   "        \u003c/section\u003e",
   "",
@@ -1484,8 +1539,10 @@ const CANVAS_INDEX_HTML = [
   "              \u003cinput id=\"customNodeColor\" type=\"color\" value=\"#7fdbca\" title=\"Node color\"\u003e",
   "              \u003cbutton class=\"small-button\" data-action=\"add-custom-node-type\" type=\"button\"\u003eAdd\u003c/button\u003e",
   "            \u003c/div\u003e",
-  "            \u003cselect id=\"customNodeKind\" title=\"Node behavior\"\u003e",
-  "              \u003coption value=\"node\"\u003eNode\u003c/option\u003e",
+  "            \u003cselect id=\"customNodeKind\" title=\"Node template\"\u003e",
+  "              \u003coption value=\"node\"\u003eBasic Node\u003c/option\u003e",
+  "              \u003coption value=\"dialog\"\u003eDialog\u003c/option\u003e",
+  "              \u003coption value=\"choice\"\u003eChoice\u003c/option\u003e",
   "              \u003coption value=\"frame\"\u003eFrame\u003c/option\u003e",
   "            \u003c/select\u003e",
   "            \u003ctextarea id=\"customNodeFields\" class=\"custom-node-fields\" rows=\"3\" placeholder=\"Fields, one per line\" spellcheck=\"false\"\u003e\u003c/textarea\u003e",
@@ -1500,11 +1557,19 @@ const CANVAS_INDEX_HTML = [
   "            \u003cspan class=\"pane-kicker\"\u003eFile\u003c/span\u003e",
   "            \u003cstrong id=\"activeFileTab\"\u003eNarrative.canvas\u003c/strong\u003e",
   "          \u003c/div\u003e",
-  "          \u003cspan class=\"project-history\" role=\"group\" aria-label=\"History\"\u003e",
-  "            \u003cbutton id=\"fullscreenButton\" class=\"icon-button history-button immersive-toggle-button\" data-action=\"toggle-immersive-fullscreen\" type=\"button\" title=\"Enter immersive fullscreen\" aria-label=\"Enter immersive fullscreen\" aria-pressed=\"false\"\u003e\u003csvg class=\"history-icon immersive-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"\u003e\u003cpath d=\"M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
-  "            \u003cbutton id=\"undoButton\" class=\"icon-button history-button\" data-action=\"undo\" type=\"button\" title=\"Undo (Ctrl+Z)\" aria-label=\"Undo\" disabled\u003e↶\u003c/button\u003e",
-  "            \u003cbutton id=\"redoButton\" class=\"icon-button history-button\" data-action=\"redo\" type=\"button\" title=\"Redo (Ctrl+Shift+Z or Ctrl+Y)\" aria-label=\"Redo\" disabled\u003e↷\u003c/button\u003e",
-  "          \u003c/span\u003e",
+  "          \u003cdiv class=\"workspace-global-actions\"\u003e",
+  "            \u003cspan class=\"project-history\" role=\"group\" aria-label=\"History\"\u003e",
+  "              \u003cbutton id=\"languageToggle\" class=\"language-toggle-button\" data-web-only data-action=\"toggle-language\" type=\"button\" title=\"Switch language\" aria-label=\"Switch language\"\u003e",
+  "                \u003cspan class=\"language-toggle-option\" data-lang=\"en\"\u003eEN\u003c/span\u003e",
+  "                \u003cspan class=\"language-toggle-divider\" aria-hidden=\"true\"\u003e/\u003c/span\u003e",
+  "                \u003cspan class=\"language-toggle-option\" data-lang=\"zh\"\u003e中\u003c/span\u003e",
+  "              \u003c/button\u003e",
+  "              \u003cbutton id=\"fullscreenButton\" class=\"icon-button history-button immersive-toggle-button\" data-action=\"toggle-immersive-fullscreen\" type=\"button\" title=\"Enter immersive fullscreen\" aria-label=\"Enter immersive fullscreen\" aria-pressed=\"false\"\u003e\u003csvg class=\"history-icon immersive-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"\u003e\u003cpath d=\"M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "              \u003cbutton id=\"undoButton\" class=\"icon-button history-button\" data-action=\"undo\" type=\"button\" title=\"Undo (Ctrl+Z)\" aria-label=\"Undo\" disabled\u003e↶\u003c/button\u003e",
+  "              \u003cbutton id=\"redoButton\" class=\"icon-button history-button\" data-action=\"redo\" type=\"button\" title=\"Redo (Ctrl+Shift+Z or Ctrl+Y)\" aria-label=\"Redo\" disabled\u003e↷\u003c/button\u003e",
+  "            \u003c/span\u003e",
+  "            \u003cbutton id=\"themeToggle\" class=\"icon-button theme-toggle-button\" title=\"Switch theme\" data-action=\"toggle-theme\" type=\"button\" aria-pressed=\"true\"\u003eDark\u003c/button\u003e",
+  "          \u003c/div\u003e",
   "        \u003c/header\u003e",
   "        \u003cheader id=\"workspaceToolbar\" class=\"canvas-workspace-tabs\"\u003e",
   "          \u003cdiv class=\"toolbar-group\"\u003e",
@@ -1583,7 +1648,9 @@ const CANVAS_INDEX_HTML = [
   "        \u003c/footer\u003e",
   "        \u003cdiv class=\"workspace-floating-controls\"\u003e",
   "          \u003cbutton class=\"workspace-toc-button\" type=\"button\" data-action=\"toggle-document-toc\" aria-pressed=\"false\" title=\"Toggle outline\" aria-label=\"Toggle outline\"\u003e",
-  "            \u003cspan aria-hidden=\"true\"\u003e☰\u003c/span\u003e",
+  "            \u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"\u003e",
+  "              \u003cpath d=\"M5 7h14M5 12h14M5 17h14\"\u003e\u003c/path\u003e",
+  "            \u003c/svg\u003e",
   "          \u003c/button\u003e",
   "          \u003cbutton class=\"workspace-scroll-top-button playbook-scroll-top-button\" type=\"button\" data-action=\"scroll-workspace-top\" title=\"Back to top\" aria-label=\"Back to top\"\u003e",
   "            \u003cspan aria-hidden=\"true\"\u003e↑\u003c/span\u003e",
@@ -1593,14 +1660,26 @@ const CANVAS_INDEX_HTML = [
   "        \u003cbutton id=\"aiFloatingButton\" class=\"ai-floating-button\" data-action=\"toggle-ai-window\" type=\"button\" title=\"Open AI assistant\" aria-label=\"Open AI assistant\" aria-expanded=\"false\"\u003e",
   "          \u003cspan aria-hidden=\"true\"\u003eAI\u003c/span\u003e",
   "        \u003c/button\u003e",
-  "        \u003caside id=\"aiFloatingWindow\" class=\"ai-floating-window\" aria-label=\"AI assistant\" hidden\u003e",
-  "          \u003cheader class=\"ai-floating-header\"\u003e",
-  "            \u003cdiv\u003e\u003cspan class=\"pane-kicker\"\u003eCanvas copilot\u003c/span\u003e\u003cdiv class=\"ai-title\"\u003e\u003ch2\u003eAI\u003c/h2\u003e\u003cspan class=\"ai-beta-badge\" data-ai-beta\u003eBeta\u003c/span\u003e\u003c/div\u003e\u003c/div\u003e",
-  "            \u003cbutton class=\"icon-button\" data-action=\"close-ai-window\" type=\"button\" title=\"Close AI assistant\" aria-label=\"Close AI assistant\"\u003e×\u003c/button\u003e",
-  "          \u003c/header\u003e",
-  "          \u003cdiv id=\"aiPanel\" class=\"ai-floating-body\"\u003e\u003c/div\u003e",
-  "        \u003c/aside\u003e",
   "      \u003c/main\u003e",
+  "",
+  "      \u003caside id=\"aiFloatingWindow\" class=\"ai-floating-window\" aria-label=\"AI assistant\" hidden\u003e",
+  "        \u003cheader class=\"ai-floating-header\" data-floating-window-drag=\"ai\"\u003e",
+  "          \u003cdiv\u003e\u003cspan class=\"pane-kicker\"\u003eCanvas copilot\u003c/span\u003e\u003cdiv class=\"ai-title\"\u003e\u003ch2\u003eAI\u003c/h2\u003e\u003cspan class=\"project-feature-badge ai-beta-badge\" data-ai-beta title=\"Experimental feature\"\u003eBeta\u003c/span\u003e\u003c/div\u003e\u003c/div\u003e",
+  "          \u003cdiv class=\"floating-window-header-actions\"\u003e",
+  "            \u003cbutton class=\"icon-button floating-window-pin-button\" data-action=\"toggle-floating-window-pin\" data-floating-window-pin=\"ai\" type=\"button\" aria-pressed=\"false\" title=\"Pin window\" aria-label=\"Pin window\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"m9 4 6 0-1 5 3 3v2H7v-2l3-3-1-5ZM12 14v6\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "            \u003cbutton class=\"icon-button\" data-action=\"close-ai-window\" type=\"button\" title=\"Close AI assistant\" aria-label=\"Close AI assistant\"\u003e×\u003c/button\u003e",
+  "          \u003c/div\u003e",
+  "        \u003c/header\u003e",
+  "        \u003cdiv id=\"aiPanel\" class=\"ai-floating-body\"\u003e\u003c/div\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle n\" data-floating-window-resize=\"n\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle e\" data-floating-window-resize=\"e\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle s\" data-floating-window-resize=\"s\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle w\" data-floating-window-resize=\"w\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle ne\" data-floating-window-resize=\"ne\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle se\" data-floating-window-resize=\"se\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle sw\" data-floating-window-resize=\"sw\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "        \u003cspan class=\"floating-window-resize-handle nw\" data-floating-window-resize=\"nw\" data-floating-window=\"ai\"\u003e\u003c/span\u003e",
+  "      \u003c/aside\u003e",
   "",
   "      \u003cdialog id=\"playDialog\" class=\"play-dialog\"\u003e",
   "        \u003cform method=\"dialog\" class=\"play-shell\"\u003e",
@@ -1611,6 +1690,7 @@ const CANVAS_INDEX_HTML = [
   "            \u003c/div\u003e",
   "            \u003cdiv class=\"play-header-actions\"\u003e",
   "              \u003cbutton class=\"icon-button play-float-button\" type=\"button\" data-action=\"toggle-play-float\" aria-pressed=\"false\" title=\"Float preview to center\" aria-label=\"Float preview to center\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"M17 17 7 7M7 7v7M7 7h7\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "              \u003cbutton class=\"icon-button floating-window-pin-button\" data-action=\"toggle-floating-window-pin\" data-floating-window-pin=\"play\" type=\"button\" aria-pressed=\"false\" title=\"Pin window\" aria-label=\"Pin window\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"m9 4 6 0-1 5 3 3v2H7v-2l3-3-1-5ZM12 14v6\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
   "              \u003cbutton class=\"icon-button\" value=\"close\" aria-label=\"Close preview\"\u003ex\u003c/button\u003e",
   "            \u003c/div\u003e",
   "          \u003c/header\u003e",
@@ -1632,15 +1712,14 @@ const CANVAS_INDEX_HTML = [
   "      \u003cdiv class=\"sidebar-resizer sidebar-resizer-right\" data-sidebar-resizer=\"right\" role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize right sidebar\"\u003e\u003c/div\u003e",
   "      \u003caside class=\"sidebar sidebar-right\" data-sidebar=\"right\"\u003e",
   "        \u003cheader class=\"pane-header compact\"\u003e",
-  "          \u003cdiv class=\"pane-title\"\u003e",
-  "            \u003cspan class=\"pane-kicker\"\u003eInspector\u003c/span\u003e",
-  "            \u003ch1 id=\"inspectorTitle\"\u003eProject\u003c/h1\u003e",
-  "          \u003c/div\u003e",
   "          \u003cdiv class=\"header-actions\"\u003e",
   "            \u003cbutton class=\"icon-button sidebar-toggle-button\" title=\"Collapse right sidebar\" aria-label=\"Collapse right sidebar\" data-sidebar-toggle=\"right\" type=\"button\"\u003e",
   "              \u003cspan class=\"sidebar-toggle-icon sidebar-toggle-icon-right\" aria-hidden=\"true\"\u003e\u003c/span\u003e",
   "            \u003c/button\u003e",
-  "            \u003cbutton id=\"themeToggle\" class=\"icon-button theme-toggle-button\" title=\"Switch theme\" data-action=\"toggle-theme\" type=\"button\" aria-pressed=\"true\"\u003eDark\u003c/button\u003e",
+  "          \u003c/div\u003e",
+  "          \u003cdiv class=\"pane-title\"\u003e",
+  "            \u003cspan class=\"pane-kicker\"\u003eInspector\u003c/span\u003e",
+  "            \u003ch1 id=\"inspectorTitle\"\u003eProject\u003c/h1\u003e",
   "          \u003c/div\u003e",
   "        \u003c/header\u003e",
   "",
@@ -1667,13 +1746,16 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/aside\u003e",
   "",
   "      \u003cdiv id=\"inspectorFloatOverlay\" class=\"inspector-float-overlay\" hidden\u003e",
-  "        \u003csection class=\"inspector-float-window\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"inspectorFloatTitle\"\u003e",
+  "        \u003csection class=\"inspector-float-window\" role=\"dialog\" aria-modal=\"false\" aria-labelledby=\"inspectorFloatTitle\"\u003e",
   "          \u003cheader class=\"inspector-float-header\" data-floating-window-drag=\"inspector\"\u003e",
   "            \u003cdiv\u003e",
   "              \u003cspan class=\"pane-kicker\"\u003eInspector\u003c/span\u003e",
   "              \u003ch2 id=\"inspectorFloatTitle\"\u003eProject\u003c/h2\u003e",
   "            \u003c/div\u003e",
-  "            \u003cbutton class=\"icon-button\" data-action=\"close-floating-inspector\" type=\"button\" title=\"Close centered inspector\" aria-label=\"Close centered inspector\"\u003ex\u003c/button\u003e",
+  "            \u003cdiv class=\"floating-window-header-actions\"\u003e",
+  "              \u003cbutton class=\"icon-button floating-window-pin-button\" data-action=\"toggle-floating-window-pin\" data-floating-window-pin=\"inspector\" type=\"button\" aria-pressed=\"false\" title=\"Pin window\" aria-label=\"Pin window\"\u003e\u003csvg viewBox=\"0 0 24 24\" aria-hidden=\"true\"\u003e\u003cpath d=\"m9 4 6 0-1 5 3 3v2H7v-2l3-3-1-5ZM12 14v6\"\u003e\u003c/path\u003e\u003c/svg\u003e\u003c/button\u003e",
+  "              \u003cbutton class=\"icon-button\" data-action=\"close-floating-inspector\" type=\"button\" title=\"Close centered inspector\" aria-label=\"Close centered inspector\"\u003ex\u003c/button\u003e",
+  "            \u003c/div\u003e",
   "          \u003c/header\u003e",
   "          \u003cdiv id=\"inspectorFloatBody\" class=\"inspector-float-body\"\u003e\u003c/div\u003e",
   "          \u003cspan class=\"floating-window-resize-handle n\" data-floating-window-resize=\"n\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
@@ -1686,12 +1768,6 @@ const CANVAS_INDEX_HTML = [
   "          \u003cspan class=\"floating-window-resize-handle nw\" data-floating-window-resize=\"nw\" data-floating-window=\"inspector\"\u003e\u003c/span\u003e",
   "        \u003c/section\u003e",
   "      \u003c/div\u003e",
-  "",
-  "      \u003cbutton id=\"languageToggle\" class=\"language-toggle-button\" data-web-only data-action=\"toggle-language\" type=\"button\" title=\"Switch language\" aria-label=\"Switch language\"\u003e",
-  "        \u003cspan class=\"language-toggle-option\" data-lang=\"en\"\u003eEN\u003c/span\u003e",
-  "        \u003cspan class=\"language-toggle-divider\" aria-hidden=\"true\"\u003e/\u003c/span\u003e",
-  "        \u003cspan class=\"language-toggle-option\" data-lang=\"zh\"\u003e中\u003c/span\u003e",
-  "      \u003c/button\u003e",
   "",
   "      \u003c!-- Canvas overlays live inside .app-shell so they render in immersive/native fullscreen,",
   "           which fullscreens .app-shell; a sibling here would be hidden by the browser. --\u003e",
@@ -1848,24 +1924,6 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/form\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cdialog id=\"nodeIconDialog\" class=\"icon-dialog\" aria-label=\"Edit node type icon\"\u003e",
-  "      \u003cform method=\"dialog\" class=\"icon-shell\"\u003e",
-  "        \u003cheader\u003e",
-  "          \u003cspan class=\"pane-kicker\"\u003eNode Icon\u003c/span\u003e",
-  "          \u003ch2 id=\"nodeIconDialogTitle\"\u003eEdit node type icon\u003c/h2\u003e",
-  "        \u003c/header\u003e",
-  "        \u003clabel class=\"field\"\u003e",
-  "          \u003cspan\u003eCustom icon\u003c/span\u003e",
-  "          \u003cinput id=\"nodeIconInput\" maxlength=\"8\" spellcheck=\"false\" autocomplete=\"off\" inputmode=\"text\" aria-label=\"Custom icon text or emoji\"\u003e",
-  "        \u003c/label\u003e",
-  "        \u003cfooter class=\"confirm-actions\"\u003e",
-  "          \u003cbutton class=\"small-button\" data-action=\"reset-node-icon\" type=\"button\"\u003eUse type initial\u003c/button\u003e",
-  "          \u003cbutton class=\"small-button primary\" value=\"confirm\"\u003eApply\u003c/button\u003e",
-  "          \u003cbutton class=\"small-button confirm-cancel\" value=\"cancel\"\u003eCancel\u003c/button\u003e",
-  "        \u003c/footer\u003e",
-  "      \u003c/form\u003e",
-  "    \u003c/dialog\u003e",
-  "",
   "    \u003cdialog id=\"nodeTypeDialog\" class=\"type-dialog\" aria-label=\"Edit node type\"\u003e",
   "      \u003cform method=\"dialog\" class=\"type-shell\"\u003e",
   "        \u003cheader\u003e",
@@ -1877,29 +1935,59 @@ const CANVAS_INDEX_HTML = [
   "          \u003cinput id=\"nodeTypeNameInput\" maxlength=\"40\" spellcheck=\"false\" autocomplete=\"off\"\u003e",
   "        \u003c/label\u003e",
   "        \u003clabel class=\"field\"\u003e",
-  "          \u003cspan\u003eBehavior\u003c/span\u003e",
+  "          \u003cspan\u003eTemplate\u003c/span\u003e",
   "          \u003cselect id=\"nodeTypeKindInput\"\u003e",
-  "            \u003coption value=\"node\"\u003eNode\u003c/option\u003e",
+  "            \u003coption value=\"node\"\u003eBasic Node\u003c/option\u003e",
+  "            \u003coption value=\"dialog\"\u003eDialog\u003c/option\u003e",
+  "            \u003coption value=\"choice\"\u003eChoice\u003c/option\u003e",
   "            \u003coption value=\"frame\"\u003eFrame\u003c/option\u003e",
   "          \u003c/select\u003e",
   "        \u003c/label\u003e",
+  "        \u003csection class=\"node-type-field-section\" aria-labelledby=\"nodeTypeBuiltinFieldsLabel\"\u003e",
+  "          \u003cspan id=\"nodeTypeBuiltinFieldsLabel\" class=\"node-type-field-heading\"\u003eBuilt-in fields\u003c/span\u003e",
+  "          \u003cdiv id=\"nodeTypeBuiltinFields\" class=\"node-type-field-list\"\u003e\u003c/div\u003e",
+  "        \u003c/section\u003e",
   "        \u003clabel class=\"field\"\u003e",
-  "          \u003cspan\u003eFields\u003c/span\u003e",
+  "          \u003cspan id=\"nodeTypeCustomFieldsLabel\"\u003eCustom fields\u003c/span\u003e",
   "          \u003ctextarea id=\"nodeTypeFieldsInput\" rows=\"5\" spellcheck=\"false\" placeholder=\"Fields, one per line\"\u003e\u003c/textarea\u003e",
   "        \u003c/label\u003e",
-  "        \u003cdiv class=\"type-dialog-row\"\u003e",
-  "          \u003clabel class=\"field\"\u003e",
-  "            \u003cspan\u003eColor\u003c/span\u003e",
-  "            \u003cinput id=\"nodeTypeColorInput\" type=\"color\"\u003e",
-  "          \u003c/label\u003e",
-  "          \u003clabel class=\"nc-checkbox-field\"\u003e",
-  "            \u003cinput id=\"nodeTypeHiddenInput\" type=\"checkbox\"\u003e",
-  "            \u003cspan\u003eHide from library\u003c/span\u003e",
-  "          \u003c/label\u003e",
-  "          \u003clabel class=\"nc-checkbox-field\"\u003e",
-  "            \u003cinput id=\"nodeTypeEventHiddenInput\" type=\"checkbox\"\u003e",
-  "            \u003cspan\u003eHide frame rows from Events Sheet\u003c/span\u003e",
-  "          \u003c/label\u003e",
+  "        \u003csection id=\"nodeTypeExistingFieldsSection\" class=\"node-type-field-section\" aria-labelledby=\"nodeTypeExistingFieldsLabel\" hidden\u003e",
+  "          \u003cspan id=\"nodeTypeExistingFieldsLabel\" class=\"node-type-field-heading\"\u003eExisting fields not in this type\u003c/span\u003e",
+  "          \u003cdiv id=\"nodeTypeExistingFields\" class=\"node-type-existing-fields\"\u003e\u003c/div\u003e",
+  "        \u003c/section\u003e",
+  "        \u003cdiv class=\"type-dialog-settings\"\u003e",
+  "          \u003cdiv class=\"type-dialog-setting-group type-dialog-appearance-group\"\u003e",
+  "            \u003cspan class=\"type-dialog-setting-label\" id=\"nodeTypeAppearanceLabel\"\u003eAppearance\u003c/span\u003e",
+  "            \u003cdiv class=\"type-dialog-appearance\"\u003e",
+  "              \u003clabel class=\"type-dialog-field-row type-dialog-icon-field\"\u003e",
+  "                \u003cspan class=\"type-dialog-setting-label\"\u003eIcon\u003c/span\u003e",
+  "                \u003cinput id=\"nodeTypeIconInput\" class=\"type-dialog-icon-input\" maxlength=\"8\" spellcheck=\"false\" autocomplete=\"off\" inputmode=\"text\" aria-label=\"Icon text or emoji\"\u003e",
+  "                \u003cbutton class=\"type-dialog-inline-reset\" data-action=\"reset-node-type-icon\" type=\"button\" title=\"Use type initial\" aria-label=\"Use type initial\"\u003e↺\u003c/button\u003e",
+  "              \u003c/label\u003e",
+  "              \u003clabel class=\"type-dialog-field-row type-dialog-color-field\"\u003e",
+  "                \u003cspan class=\"type-dialog-setting-label\"\u003eColor\u003c/span\u003e",
+  "                \u003cinput id=\"nodeTypeColorInput\" type=\"color\"\u003e",
+  "              \u003c/label\u003e",
+  "              \u003clabel id=\"nodeTypeOpacityField\" class=\"type-dialog-field-row type-dialog-opacity-field\" hidden\u003e",
+  "                \u003cspan class=\"type-dialog-setting-label\"\u003eCard opacity\u003c/span\u003e",
+  "                \u003cinput id=\"nodeTypeOpacityInput\" type=\"range\" min=\"0\" max=\"100\" step=\"5\"\u003e",
+  "                \u003cspan class=\"type-dialog-opacity-value\" data-node-type-opacity-value\u003e100%\u003c/span\u003e",
+  "              \u003c/label\u003e",
+  "            \u003c/div\u003e",
+  "          \u003c/div\u003e",
+  "          \u003csection class=\"type-dialog-setting-group type-dialog-visibility-group\" aria-labelledby=\"nodeTypeVisibilityLabel\"\u003e",
+  "            \u003cspan id=\"nodeTypeVisibilityLabel\" class=\"type-dialog-setting-label\"\u003eVisibility\u003c/span\u003e",
+  "            \u003cdiv class=\"type-dialog-visibility\"\u003e",
+  "              \u003clabel class=\"nc-checkbox-field\"\u003e",
+  "                \u003cinput id=\"nodeTypeHiddenInput\" type=\"checkbox\"\u003e",
+  "                \u003cspan\u003eHide from library\u003c/span\u003e",
+  "              \u003c/label\u003e",
+  "              \u003clabel class=\"nc-checkbox-field\"\u003e",
+  "                \u003cinput id=\"nodeTypeEventHiddenInput\" type=\"checkbox\"\u003e",
+  "                \u003cspan\u003eHide frame rows from Events Sheet\u003c/span\u003e",
+  "              \u003c/label\u003e",
+  "            \u003c/div\u003e",
+  "          \u003c/section\u003e",
   "        \u003c/div\u003e",
   "        \u003cfooter class=\"confirm-actions\"\u003e",
   "          \u003cbutton class=\"small-button primary\" value=\"confirm\"\u003eSave\u003c/button\u003e",
@@ -1915,7 +2003,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=20260714b-1.2.3\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=20260716d-1.2.4\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -1943,6 +2031,7 @@ function installNarrativeCanvasApp() {
   const DEFAULT_VISUAL_FRAME_COLOR = "#9ca3af";
   const DEFAULT_EVENT_FRAME_COLOR = "#b48cff";
   const NODE_TYPE_ICON_MAX_UNITS = 3;
+  const RETIRED_NODE_TYPES = new Set(["Condition", "Set"]);
   const SAVED_STATE_VERSION = 1;
   const WEB_LANGUAGE_STORAGE_KEY = "narrative-canvas-language-v1";
   const FRAME_CONTAINMENT_INDEX_CELL_SIZE = 1024;
@@ -2041,7 +2130,6 @@ function installNarrativeCanvasApp() {
     { value: "hide", label: "Hide unavailable choices" },
     { value: "disabled", label: "Show unavailable choices disabled" }
   ];
-  const CONDITION_BRANCH_LABELS = Object.freeze(["true", "false"]);
   const SAMPLE_PROJECT_FILENAMES = {
     en: "Narrative Canvas Guide Sample.ncanvas",
     zh: "叙事画布功能指南示例.ncanvas"
@@ -2074,10 +2162,10 @@ function installNarrativeCanvasApp() {
   const AUTO_LAYOUT_FRAME_PADDING = 36;
   const AUTO_LAYOUT_FRAME_HEADER = 38;
   const FALLBACK_NODE_META = { badge: "N", color: DEFAULT_CUSTOM_NODE_COLOR, width: 200, label: "Node" };
-  const LEGACY_DEFAULT_NODE_BADGES = { Content: "T", Choice: "?", Set: "$", Event: "EV" };
+  const LEGACY_DEFAULT_NODE_BADGES = { Content: "T", Choice: "?", Event: "EV" };
   const LEGACY_EVENT_FRAME_COLORS = new Set(["#98c379"]);
-  const DIRECT_NODE_FIELD_KEYS = new Set(["variable", "variables", "value", "condition", "choices"]);
-  const INLINE_NODE_FIELD_KEYS = new Set(["title", "body", "condition", "value"]);
+  const DIRECT_NODE_FIELD_KEYS = new Set(["choices"]);
+  const INLINE_NODE_FIELD_KEYS = new Set(["title", "body"]);
   const CAST_RELATIONS = ["POV", "Speaker", "Present", "Mentioned", "Target", "Owner"];
   const CAST_RELATION_LABELS = {
     POV: "POV",
@@ -2116,13 +2204,12 @@ function installNarrativeCanvasApp() {
     Content: { badge: "C", color: "#61afef", width: 200 },
     Dialog: { badge: "D", color: "#56b6c2", width: 200 },
     Choice: { badge: "C", color: "#d19a66", width: 200 },
-    Condition: { badge: "C", color: "#e06c75", width: 190, legacy: true },
-    Set: { badge: "S", color: "#98c379", width: 190, legacy: true },
     Marker: { badge: "M", color: "#7fdbca", width: 170 },
     Event: { badge: "E", color: DEFAULT_EVENT_FRAME_COLOR, width: 420 }
   };
 
   const SPECIAL_EDITOR_NODE_TYPES = ["Choice", "Dialog"];
+  const NODE_TYPE_TEMPLATES = new Set(["node", "dialog", "choice", "frame"]);
 
   const defaultAdvancedNodeTypes = [
     {
@@ -2291,7 +2378,7 @@ function installNarrativeCanvasApp() {
     const zh = lang === "zh";
     const text = zh ? {
       title: "你的第一个 Narrative Canvas",
-      notes: "内置上手示例。点击“演示”后从入口节点开始，依次检查节点、连线、选项、条件、效果、对话、角色、事件表、文档和演示设置。文档把整份运行时叙事显示为可编辑的纯文本 / Ink / Yarn / Twee，并提供语法高亮、目录和查找；修改会增量写回项目。示例面向第一次使用编辑工具的文字工作者，重点说明正文、分支、状态和备注的组织方式。",
+      notes: "内置上手示例。点击“演示”后从入口节点开始，通过几次有明确差异的选择，依次检查节点、连线、条件、效果、对话、角色、事件表、文档和演示设置。每个选项先进入独立反馈节点，再收束回主线，便于观察选择、状态与后续内容的关系。文档支持纯文本 / Ink / Yarn / Twee，并可增量写回项目。",
       protagonist: "你",
       route: "overview",
       projectFile: "你的第一个画布",
@@ -2308,7 +2395,7 @@ function installNarrativeCanvasApp() {
         Content: { title: "{title}", body: "{body}\n\n变量：当前路线 {route}；进度 {workflow_progress}；资料完整度 {data_integrity}。" },
         Dialog: { title: "对话节点 · {title}", body: "{body}" },
         Choice: { title: "选择节点 · {title}", body: "{body}\n\n（这些变量可用于选项条件：正文重点 {draft_focus} / 资料完整度 {data_integrity} / 复核完成 {revision_ready}。）" },
-        Clue: { title: "自定义节点 · {title}", body: "{body}\n说明对象: {owner}\n处理结果: {outcome}", set: { key: "active_feature", value: "{title}" } },
+        Clue: { title: "自定义节点 · {title}", body: "{body}\n说明对象: {owner}\n处理结果: {outcome}" },
         InterviewNote: { title: "记录节点 · {title}", body: "{body}\n记录者: {recorder}" },
         ConversationFrame: { title: "对话框 · {title}", body: "{body}" },
         StorySequence: { title: "章节框 · {title}", body: "{body}" },
@@ -2375,9 +2462,9 @@ function installNarrativeCanvasApp() {
       characters: [
         { id: "c0", name: "你", role: "第一次使用者", voice: "按节点顺序阅读说明。", notes: "正文里的 {protagonist} 显示为这个角色名；角色页按出场顺序列出相关节点。" },
         { id: "c1", name: "向导", role: "解说", voice: "在对话节点里说明下一步操作。", notes: "演示对话节点的发言者，以及 Speaker / Present 角色关系。" },
-        { id: "c2", name: "角色甲", role: "示例角色", voice: "用于演示角色反链。", notes: "演示角色名与对话发言者的对应关系。" },
-        { id: "c3", name: "角色乙", role: "示例角色", voice: "用于演示被提及关系。", notes: "演示 Mentioned 角色关系。" },
-        { id: "c4", name: "校对标记", role: "复核提示", voice: "提示变量和条件的读写位置。", notes: "对应校验、演示预览和状态复核。" },
+        { id: "c2", name: "作者", role: "内容创作者", voice: "从写作角度说明节点和对白如何使用。", notes: "在对话节点发言，并演示角色页反链。" },
+        { id: "c3", name: "编辑", role: "内容编辑", voice: "关注结构、可达性和信息是否清楚。", notes: "在复核节点发言，并演示 Mentioned 关系。" },
+        { id: "c4", name: "校对员", role: "状态复核", voice: "指出变量、条件和效果的读写位置。", notes: "关联校验、演示预览和状态复核节点。" },
         { id: "c5", name: "读者", role: "未来的读者", voice: "最终会读到这个故事的人。", notes: "演示“被提及”这一角色关系。" }
       ],
       nodes: {
@@ -2387,43 +2474,47 @@ function installNarrativeCanvasApp() {
         n1: { title: "内容节点", body: "这是常用内容节点。可用于正文、场景说明或设计笔记。连线决定默认阅读顺序；节点标题用于搜索和跳转。", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
         n2: { title: "自定义节点和变量", body: "这是自定义节点类型。可在左侧节点库新建类型并添加字段；字段会出现在节点检查器和对应事件表列中。正文中的花括号会显示变量值，例如项目名「{project_file}」、当前功能「{active_feature}」。", customFields: { evidence: "变量 / 模板 / 自定义字段", owner: "演示设置", outcome: "花括号在正文里读取变量" }, cast: [{ characterId: "c4", role: "Owner" }] },
         n3: { title: "演示设置是什么", body: "演示设置管理运行时变量、脚本构建、选项逻辑、变量动作、演示规则和校验。脚本构建与右侧节点检查器编辑的是同一份节点条件、效果和路线；高级 JSON 用于精确检查底层配置。文档（Document）把同一份有效叙事显示为纯文本、Ink、Yarn 或 Twee，可直接编辑并增量写回项目。", customFields: { recorder: "脚本构建", reliability: "与节点检查器和文档同步" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
-        n4: { title: "选择节点", body: "这是选择节点。可添加多个选项，为每个选项设置可用条件和选择后效果。卡片会自动给选项编号，无需把序号写进选项文字；点击选项后，效果会修改变量。", choices: ["一个始终可用的选项", "一个会改变变量的选项", "一个有前置条件的选项"], choiceOptions: [
-          { id: "opt_map_story", label: "一个始终可用的选项", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "map_story" }] },
-          { id: "opt_write_dialog", label: "一个会改变变量的选项", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
-          { id: "opt_open_playbook", label: "一个有前置条件的选项", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
+        n4: { title: "选择节点", body: "三个选项分别进入变量、对话和演示设置的独立反馈节点，随后再收束到主线。这样既能看到不同后果，也能控制分支规模。卡片会自动编号，无需在选项文字里手写序号。", choices: ["先看变量如何变化", "先看对话与角色", "先看演示设置如何门控选项"], choiceOptions: [
+          { id: "opt_map_story", label: "先看变量如何变化", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "state_branch" }] },
+          { id: "opt_write_dialog", label: "先看对话与角色", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
+          { id: "opt_open_playbook", label: "先看演示设置如何门控选项", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
-        n5: { title: "效果改变了变量", body: "所选选项已执行效果，workflow_progress 变为第 {workflow_progress} 步。后续节点和选项可以读取该变量，决定是否出现。", variable: "workflow_progress", value: "1", cast: [{ characterId: "c0", role: "POV" }] },
-        n6: { title: "对话节点", body: "这是对话节点。可记录多轮发言，每轮包含说话者和台词。说话者与角色同名时，角色页会把该场景归入对应角色。", turns: [{ speaker: "向导", line: "在对话节点里，每一行就是一次发言。" }, { speaker: "角色甲", line: "说话者使用角色名，角色页会统计每个角色出现的场景。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+        n5: { title: "效果改变了变量", body: "所选选项已执行效果，workflow_progress 变为第 {workflow_progress} 步。后续节点和选项可以读取该变量，决定是否出现。", cast: [{ characterId: "c0", role: "POV" }] },
+        n6: { title: "对话节点", body: "这是对话分支的独立反馈。每轮包含说话者和台词；说话者与角色同名时，角色页会自动建立反链。", turns: [{ speaker: "向导", line: "你选择了对话分支，所以这里展示多轮发言。" }, { speaker: "作者", line: "我的名字与角色表一致，角色页会列出这次出场。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+        n20: { title: "演示设置反馈", body: "这个分支展示门控选项：上一选项只有在 script_builder_seen 为 true 时才可用。条件决定能不能选，选择后效果负责写入 data_integrity 和 route；两者分工清楚，后续校验也更容易定位。", customFields: { evidence: "选项条件 / 选择后效果", owner: "演示设置", outcome: "确认门控条件与状态写入" }, cast: [{ characterId: "c4", role: "Owner" }] },
         e2: { title: "第二章：条件和效果", body: "这一段说明条件和效果的配合方式：选项用「选择后效果」改变变量，节点用「条件要求」决定能否通过。", beatList: "选项效果 / 节点效果 / 变量动作", eventType: "状态逻辑", eventDescription: "选项、节点和变量动作都能写状态；校验页汇总每个变量的写入位置和读取位置。", location: "演示设置", timeWeather: "梳理逻辑", questEpisode: "导览-02", status: "进行中" },
-        cf1: { title: "对话框", body: "这是对话框（会话框）。可用于圈定一组对话或状态说明节点；折叠后仍保留为画布结构。", customFields: { participants: "向导 / 角色甲 / 校对标记", summary: "变量确定后，检查每条路线在预览中是否可达。" }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
-        n7: { title: "状态写在哪里", body: "状态可写在三个位置：选项的「选择后效果」只在选择该选项时触发；节点的「效果」在进入节点时触发；演示设置中的「变量动作」用于手动、导入或节点行之外的状态写入。", choices: ["写在选项效果里", "写在节点效果里", "写在变量动作里"], choiceOptions: [
-          { id: "opt_choice_effects", label: "写在选项效果里", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_node_effects", label: "写在节点效果里", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
-          { id: "opt_action_rules", label: "写在变量动作里", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
+        cf1: { title: "对话框", body: "这是对话框（会话框）。可用于圈定一组对话或状态说明节点；折叠后仍保留为画布结构。", customFields: { participants: "向导 / 作者 / 校对员", summary: "变量确定后，检查每条路线在预览中是否可达。" }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
+        n7: { title: "状态写在哪里", body: "状态可写在选项效果、节点进入效果或演示设置的变量动作中。这里始终保留一个无条件选项；另外两个条件直接对应前面已经看到的内容，避免新手进入后无路可走。", choices: ["由选项效果写入状态", "由节点进入效果写入状态", "由变量动作写入状态"], choiceOptions: [
+          { id: "opt_choice_effects", label: "由选项效果写入状态", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_node_effects", label: "由节点进入效果写入状态", requires: "type_dialog_seen === true", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
+          { id: "opt_action_rules", label: "由变量动作写入状态", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
         n8: { title: "变量命名", body: "状态键建议使用小写英文下划线，例如 data_integrity。命名保持一致后，条件、效果、文本模板和校验页会更容易对应。", customFields: { evidence: "状态键命名", owner: "状态逻辑", outcome: "统一条件和效果里的变量名" }, cast: [{ characterId: "c4", role: "Owner" }] },
-        n9: { title: "角色和反链", body: "记录节点可保存来源、备注和相关角色。角色页按出场顺序列出每个角色的反链，便于定位角色出现位置。", turns: [{ speaker: "校对标记", line: "请确认每个变量的写入位置和读取位置。" }, { speaker: "角色乙", line: "角色名一致时，角色页会归并相关节点。" }], customFields: { recorder: "校对标记", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Speaker" }, { characterId: "c3", role: "Speaker" }, { characterId: "c0", role: "POV" }] },
-        n10: { title: "条件门（节点要求）", body: "section_notes_ready === true || data_integrity >= 2", condition: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
-        e3: { title: "第三章：整理和复核", body: "这一段用于复核章节内容。先确认变量、条件和文本模板，再整理事件表字段；字段记录状态、风险和说明对象。", beatList: "状态索引 / 校验 / 演示预览", eventType: "内容复核", eventDescription: "确认变量、条件、文本模板和节点备注是否一致。", location: "复核面板", timeWeather: "整理阶段", questEpisode: "导览-03", status: "待检查", clueStatus: "进行中", risk: "中", evidenceOwner: "校对标记" },
+        n9: { title: "角色和反链", body: "记录节点可保存来源、备注和相关角色。校对员负责确认变量的读写位置，编辑负责检查角色名是否一致；角色页会按出场顺序归并他们发言、在场或被提及的节点。", customFields: { recorder: "校对员", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
+        n23: { title: "变量动作反馈", body: "变量动作适合处理不依附某个选项或节点行的状态写入。这个分支把一条记录追加到 walkthrough_notes，并提高 review_pressure；随后与其它路线一起进入条件门。", customFields: { evidence: "变量动作", owner: "演示设置", outcome: "写入复核记录并继续主线" }, cast: [{ characterId: "c4", role: "Owner" }] },
+        n10: { title: "条件门（节点要求）", body: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
+        e3: { title: "第三章：整理和复核", body: "这一段使用分支—收束结构：三种复核操作分别给出反馈，然后汇合到最后练习。事件表字段记录状态、风险和说明对象。", beatList: "状态索引 / 三种复核 / 收束", eventType: "内容复核", eventDescription: "确认变量、条件、文本模板和节点备注是否一致。", location: "复核面板", timeWeather: "整理阶段", questEpisode: "导览-03", status: "待检查", clueStatus: "进行中", risk: "中", evidenceOwner: "校对员" },
         n11: { title: "状态索引", body: "状态索引列出变量初始值、引用位置和当前状态，便于确认哪些节点读取或写入同一变量。", customFields: { evidence: "变量引用", owner: "校验页", outcome: "确认状态读写位置" }, cast: [{ characterId: "c4", role: "Mentioned" }] },
-        n12: { title: "整理前的复核", body: "继续前可以检查状态引用、补充节点备注，或标记复核完成。", choices: ["检查状态引用", "补充节点备注", "标记复核完成"], choiceOptions: [
-          { id: "opt_run_validation", label: "检查状态引用", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_document_notes", label: "补充节点备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
-          { id: "opt_mark_review_ready", label: "标记复核完成", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
+        n12: { title: "整理前的复核", body: "三项操作会进入不同反馈节点，再共同前往最后练习。第一项展示状态校验，第二项展示文档备注，第三项展示条件门控。", choices: ["检查状态并运行预览", "在文档里补充备注", "确认本轮复核完成"], choiceOptions: [
+          { id: "opt_run_validation", label: "检查状态并运行预览", requires: "state_index_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_document_notes", label: "在文档里补充备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
+          { id: "opt_mark_review_ready", label: "确认本轮复核完成", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
         ], cast: [{ characterId: "c5", role: "Present" }, { characterId: "c2", role: "Mentioned" }] },
         n13: { title: "演示预览", body: "演示预览用于检查条件、选项显示、访问记录和调试状态。演示走到哪个节点，右侧检查器会同步聚焦；演示期间修改当前节点后，后续显示和路线会立即重算。", customFields: { evidence: "预览记录", owner: "演示", outcome: "确认路线与状态变化" }, cast: [{ characterId: "c4", role: "Owner" }, { characterId: "c5", role: "Mentioned" }] },
+        n21: { title: "文档备注反馈", body: "Document 可集中查看并编辑整份叙事。这里把 revision_ready 设为 true，表示备注已经补齐；回到画布后，最后练习会立即读取这个状态。", customFields: { evidence: "文档 / 节点备注", owner: "文档", outcome: "复核状态已更新" }, cast: [{ characterId: "c2", role: "Owner" }] },
+        n22: { title: "复核完成反馈", body: "你通过了 review_pressure 条件，并把 revision_ready 设为 true。这是门控选项的即时反馈；下一节点会据此开放“完成练习”。", customFields: { evidence: "门控选项", owner: "校验", outcome: "开放完成路线" }, cast: [{ characterId: "c3", role: "Owner" }] },
         e4: { title: "第四章：完成一次练习", body: "最后一段把前面内容收束为一次练习。每个选项有不同前置条件，用于演示选项条件、选择后效果、指定跳转和结束路线。", beatList: "正文 / 演示 / 备注 / 完成", eventType: "练习分支", eventDescription: "同一结构支持返回正文、继续预览、整理备注或结束练习。", location: "练习面板", timeWeather: "收束阶段", questEpisode: "导览-04", status: "待定" },
-        n14: { title: "下一步练习", body: "最后一步，选择接下来的练习目标。四个选项各有不同前置条件；条件不满足时，选项会按本节点的「不可用选项」设置显示或隐藏。当前项目「{project_file}」，当前功能「{active_feature}」，资料完整度 {data_integrity}。", choices: ["回到正文节点", "继续演示预览", "整理备注", "完成练习"], choiceOptions: [
-          { id: "opt_return_content", label: "回到正文节点（需进度和资料完整度达标）", requires: "workflow_progress >= 2 && data_integrity >= 3", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "content_review" }] },
-          { id: "opt_play_preview", label: "继续演示预览（需复核完成且已校验）", requires: "revision_ready === true && validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
-          { id: "opt_organize_notes", label: "整理备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "notes_review" }, { trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }] },
-          { id: "opt_finish_practice", label: "完成练习（需完成复核和演示预览）", requires: "revision_ready === true && preview_checked === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
+        n14: { title: "下一步练习", body: "最后一步读取前面累积的状态。条件不满足的选项会显示为不可用；“整理草稿与备注”始终可选，因此不会卡住。当前项目「{project_file}」，当前功能「{active_feature}」，资料完整度 {data_integrity}。", choices: ["回到正文继续写作", "再跑一次演示", "整理草稿与备注", "完成并离开示例"], choiceOptions: [
+          { id: "opt_return_content", label: "回到正文继续写作", requires: "workflow_progress >= 2", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "content_review" }] },
+          { id: "opt_play_preview", label: "再跑一次演示", requires: "validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
+          { id: "opt_organize_notes", label: "整理草稿与备注", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "notes_review" }, { trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }] },
+          { id: "opt_finish_practice", label: "完成并离开示例", requires: "revision_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }, { characterId: "c5", role: "Mentioned" }] },
         n15: { title: "回到正文节点", body: "重新进入内容节点，补充正文、场景说明或设计笔记。这是一条结束路线。", routing: { mode: "end" } },
         n16: { title: "继续演示预览", body: "继续使用演示预览检查条件、选项显示、访问记录和调试状态。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c5", role: "Speaker" }] },
         n17: { title: "整理备注", body: "把暂存想法放入草稿框，把已确定的信息写入正文节点或事件表字段。这是一条结束路线。", routing: { mode: "end" } },
-        n18: { title: "完成练习", body: "本示例到此结束。你已经检查节点、连线、选项、条件、效果、对话、角色、事件表、文档和演示设置。这是一条结束路线。", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
-        n19: { title: "操作便签", body: "这是标记节点（Marker），用于记录操作提示，不进入玩家路线。首次演示建议顺序：选择第一个选项；选择「写在选项效果里」；选择「检查状态引用」；选择「完成练习」。", routing: { mode: "goTo", target: "下一步练习" } },
+        n18: { title: "完成练习", body: "本示例到此结束。你已经体验独立分支、状态反馈、条件门、对话、角色反链、事件表、文档和演示设置。关闭结果后再次点击“演示”，运行状态会从项目初始变量重新开始。", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
+        n19: { title: "操作便签", body: "这是不进入玩家路线的 Marker。建议首次路线：先看变量如何变化 → 由选项效果写入状态 → 确认本轮复核完成 → 完成并离开示例。", routing: { mode: "goTo", target: "下一步练习" } },
         df1: { title: "你的草稿区", body: "这是草稿框，默认在节点菜单中隐藏。可将未确定的设定放在这里；它不进入玩家路线，也不会写入事件表。", customFields: { reason: "保留草稿内容，避免把内部备注当作最终正文。" } }
       },
       labels: {
@@ -2432,7 +2523,7 @@ function installNarrativeCanvasApp() {
       }
     } : {
       title: "Your First Narrative Canvas",
-      notes: "Built-in onboarding sample. Press Play from the entry node to inspect nodes, links, choices, conditions, effects, dialog, characters, the Events Sheet, the Document, and Playbook. The Document shows the whole runtime narrative as editable Plain text / Ink / Yarn / Twee with syntax highlighting, an outline, and find; edits sync back to the project. It is written for a text worker using an editor for the first time, with emphasis on organizing prose, branches, state, and notes.",
+      notes: "Built-in onboarding sample. Press Play and make a few clearly differentiated choices to inspect nodes, links, conditions, effects, dialog, characters, the Events Sheet, the Document, and Playbook. Every option reaches its own feedback node before the branches fold back into the main route, making the relationship between choice, state, and later content visible. The Document supports Plain text / Ink / Yarn / Twee and incrementally syncs edits back to the project.",
       protagonist: "You",
       route: "overview",
       projectFile: "Your first canvas",
@@ -2449,7 +2540,7 @@ function installNarrativeCanvasApp() {
         Content: { title: "{title}", body: "{body}\n\nState: route {route}; progress {workflow_progress}; data integrity {data_integrity}." },
         Dialog: { title: "Dialog Node · {title}", body: "{body}" },
         Choice: { title: "Choice Node · {title}", body: "{body}\n\n(Variables a choice condition can read: draft focus {draft_focus} / data integrity {data_integrity} / revision ready {revision_ready}.)" },
-        Clue: { title: "Custom Node · {title}", body: "{body}\nSubject: {owner}\nOutcome: {outcome}", set: { key: "active_feature", value: "{title}" } },
+        Clue: { title: "Custom Node · {title}", body: "{body}\nSubject: {owner}\nOutcome: {outcome}" },
         InterviewNote: { title: "Note Node · {title}", body: "{body}\nRecorder: {recorder}" },
         ConversationFrame: { title: "Dialog Frame · {title}", body: "{body}" },
         StorySequence: { title: "Chapter Frame · {title}", body: "{body}" },
@@ -2516,9 +2607,9 @@ function installNarrativeCanvasApp() {
       characters: [
         { id: "c0", name: "You", role: "First-time user", voice: "Read each node in order.", notes: "Body text renders {protagonist} as this character name; the Characters page lists related nodes in story order." },
         { id: "c1", name: "Guide", role: "Narrator", voice: "Explains the next operation in dialog nodes.", notes: "Demonstrates a Dialog speaker and the Speaker / Present roles." },
-        { id: "c2", name: "Character A", role: "Sample character", voice: "Demonstrates character backlinks.", notes: "Demonstrates the link between character names and dialog speakers." },
-        { id: "c3", name: "Character B", role: "Sample character", voice: "Demonstrates mentioned characters.", notes: "Demonstrates the Mentioned role." },
-        { id: "c4", name: "Revision Note", role: "Review marker", voice: "Points to where variables and conditions are read or written.", notes: "Connects to Validation, Play preview, and state review." },
+        { id: "c2", name: "Writer", role: "Content creator", voice: "Explains nodes and dialog from a writing perspective.", notes: "Speaks in a Dialog node and demonstrates character backlinks." },
+        { id: "c3", name: "Editor", role: "Content editor", voice: "Checks structure, reachability, and clarity.", notes: "Speaks during review and demonstrates the Mentioned role." },
+        { id: "c4", name: "Reviewer", role: "State review", voice: "Points to where variables, conditions, and effects are read or written.", notes: "Connects Validation, Play preview, and state review." },
         { id: "c5", name: "Reader", role: "Future reader", voice: "Whoever eventually reads the prose.", notes: "Demonstrates the mentioned role." }
       ],
       nodes: {
@@ -2528,43 +2619,47 @@ function installNarrativeCanvasApp() {
         n1: { title: "The Content Node", body: "This is the standard Content node. Use it for prose, scene notes, or design notes. Links set default reading order; node titles support search and routing.", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
         n2: { title: "Custom Nodes and Variables", body: "This is a custom node type. Add types and fields in the Node Library on the left; those fields appear in the Events Sheet. Braces render variable values in body text, such as project {project_file} and active feature {active_feature}.", customFields: { evidence: "Variables / templates / custom fields", owner: "Playbook", outcome: "Braces read variables in body text" }, cast: [{ characterId: "c4", role: "Owner" }] },
         n3: { title: "What Playbook Is", body: "Playbook manages runtime variables, Script Builder rows, choice logic, variable actions, preview rules, and validation. Script Builder and the node inspector edit the same conditions, effects, and routing; Advanced JSON exposes the exact configuration. The Document shows the same effective narrative as Plain text, Ink, Yarn, or Twee and incrementally syncs edits back to the project.", customFields: { recorder: "Script Builder", reliability: "Synced with the node inspector and Document" }, cast: [{ characterId: "c1", role: "Mentioned" }, { characterId: "c4", role: "Mentioned" }] },
-        n4: { title: "The Choice Node", body: "This is a Choice node. Add options, set availability conditions, and set on-choose effects. Cards number options automatically, so option text does not need a typed ordinal.", choices: ["An always-available option", "An option that changes a variable", "An option with a prerequisite"], choiceOptions: [
-          { id: "opt_map_story", label: "An always-available option", requires: "workflow_progress >= 0", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "outline_branch" }] },
-          { id: "opt_write_dialog", label: "An option that changes a variable", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
-          { id: "opt_open_playbook", label: "An option with a prerequisite", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
+        n4: { title: "The Choice Node", body: "These options lead to separate feedback about variables, dialog, and Playbook, then fold back into the main route. This preserves visible consequences without multiplying the rest of the walkthrough. Cards number options automatically.", choices: ["See a variable change", "See dialog and characters", "See Playbook gate an option"], choiceOptions: [
+          { id: "opt_map_story", label: "See a variable change", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "state_branch" }] },
+          { id: "opt_write_dialog", label: "See dialog and characters", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "draft_focus", value: "dialog" }, { trigger: "onChoose", op: "set", key: "route", value: "dialog_branch" }] },
+          { id: "opt_open_playbook", label: "See Playbook gate an option", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
-        n5: { title: "An Effect Changed a Variable", body: "The selected option ran an effect and set workflow_progress to step {workflow_progress}. Later nodes and options can read this variable to decide whether to appear.", variable: "workflow_progress", value: "1", cast: [{ characterId: "c0", role: "POV" }] },
-        n6: { title: "The Dialog Node", body: "This is a Dialog node. Record turns; each turn has a speaker and a line. When the speaker matches a character name, the Characters page assigns the scene to that character.", turns: [{ speaker: "Guide", line: "In a dialog node, each line is one turn." }, { speaker: "Character A", line: "Use character names as speakers, and the character page tracks who appears in which scenes." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+        n5: { title: "An Effect Changed a Variable", body: "The selected option ran an effect and set workflow_progress to step {workflow_progress}. Later nodes and options can read this variable to decide whether to appear.", cast: [{ characterId: "c0", role: "POV" }] },
+        n6: { title: "The Dialog Node", body: "This is the dialog branch's distinct feedback. Each turn has a speaker and a line; matching a speaker to a character name creates a backlink on the Characters page.", turns: [{ speaker: "Guide", line: "You chose the dialog branch, so this node demonstrates multiple turns." }, { speaker: "Writer", line: "My name matches the character list, so the Characters page records this appearance." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+        n20: { title: "Playbook Feedback", body: "This branch demonstrates a gated option. The previous option was available only when script_builder_seen was true. Its condition controlled availability; its effects wrote data_integrity and route. Keeping those jobs separate makes validation easier.", customFields: { evidence: "Choice condition / on-choose effects", owner: "Playbook", outcome: "Confirm gating and state writes" }, cast: [{ characterId: "c4", role: "Owner" }] },
         e2: { title: "Chapter 2: Conditions and Effects", body: "This chapter shows how conditions and effects work together: options change variables with on-choose effects, and node requirements decide whether the route can continue.", beatList: "Choice effects / node effects / variable actions", eventType: "State Logic", eventDescription: "Options, nodes, and variable actions all write state; Validation shows where each variable is written and read.", location: "Playbook", timeWeather: "Working out the logic", questEpisode: "Tour-02", status: "In progress" },
-        cf1: { title: "The Dialog Frame", body: "This is a Dialog Frame. Use it to group dialog or state explanation nodes; when collapsed, it remains a canvas structure.", customFields: { participants: "Guide / Character A / Revision Note", summary: "Once variables are set, check that each route is reachable in preview." }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
-        n7: { title: "Where State Is Written", body: "State can be written in a choice option's on-choose effects, a node's on-visit effects, or Playbook variable actions used for manual, imported, or out-of-row writes.", choices: ["On a choice option's effects", "On a node's effects", "In a variable action"], choiceOptions: [
-          { id: "opt_choice_effects", label: "On a choice option's effects", requires: "workflow_progress >= 1", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_node_effects", label: "On a node's effects", requires: "data_integrity >= 1", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
-          { id: "opt_action_rules", label: "In a variable action", requires: "", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
+        cf1: { title: "The Dialog Frame", body: "This is a Dialog Frame. Use it to group dialog or state explanation nodes; when collapsed, it remains a canvas structure.", customFields: { participants: "Guide / Writer / Reviewer", summary: "Once variables are set, check that each route is reachable in preview." }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
+        n7: { title: "Where State Is Written", body: "State can be written in choice effects, node-entry effects, or Playbook variable actions. One option always remains available; the other conditions directly reflect content already visited, preventing a first-time user from reaching a dead end.", choices: ["Write state in choice effects", "Write state on node entry", "Write state in a variable action"], choiceOptions: [
+          { id: "opt_choice_effects", label: "Write state in choice effects", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_node_effects", label: "Write state on node entry", requires: "type_dialog_seen === true", effects: [{ trigger: "onChoose", op: "set", key: "draft_focus", value: "state_logic" }, { trigger: "onChoose", op: "set", key: "route", value: "node_effects" }] },
+          { id: "opt_action_rules", label: "Write state in a variable action", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
         n8: { title: "Naming Variables", body: "Use lower-case snake_case state keys, such as data_integrity. Consistent names make conditions, effects, text templates, and Validation easier to match.", customFields: { evidence: "State-key naming", owner: "State logic", outcome: "Use one variable name across conditions and effects" }, cast: [{ characterId: "c4", role: "Owner" }] },
-        n9: { title: "Characters and Backlinks", body: "A note node can store source, remarks, and related characters. The Characters page lists each character's backlinks in story order, making character appearances easy to locate.", turns: [{ speaker: "Revision Note", line: "Confirm where each variable is written and read." }, { speaker: "Character B", line: "Matching character names let the character page group related nodes." }], customFields: { recorder: "Revision Note", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Speaker" }, { characterId: "c3", role: "Speaker" }, { characterId: "c0", role: "POV" }] },
-        n10: { title: "A Condition Gate", body: "section_notes_ready === true || data_integrity >= 2", condition: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
-        e3: { title: "Chapter 3: Organize and Review", body: "This chapter reviews the content before the final practice step. Confirm variables, conditions, and text templates, then organize the Events Sheet fields; the fields track status, risk, and subject.", beatList: "State index / Validation / Play preview", eventType: "Content Review", eventDescription: "Confirm that variables, conditions, text templates, and node notes match.", location: "Review panel", timeWeather: "Organizing", questEpisode: "Tour-03", status: "Needs check", clueStatus: "Open", risk: "Medium", evidenceOwner: "Revision Note" },
+        n9: { title: "Characters and Backlinks", body: "A note node can store source, remarks, and related characters. The Reviewer checks variable reads and writes, while the Editor checks character naming; the Characters page groups where they speak, appear, or are mentioned in story order.", customFields: { recorder: "Reviewer", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
+        n23: { title: "Variable Action Feedback", body: "Variable actions handle state writes that do not belong to one option or node row. This branch appends a record to walkthrough_notes and raises review_pressure, then joins the other routes at the condition gate.", customFields: { evidence: "Variable action", owner: "Playbook", outcome: "Write a review record and continue" }, cast: [{ characterId: "c4", role: "Owner" }] },
+        n10: { title: "A Condition Gate", body: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
+        e3: { title: "Chapter 3: Organize and Review", body: "This chapter uses branch-and-bottleneck structure: three review actions give distinct feedback, then converge on the final practice step. Events Sheet fields track status, risk, and subject.", beatList: "State index / three review actions / convergence", eventType: "Content Review", eventDescription: "Confirm that variables, conditions, text templates, and node notes match.", location: "Review panel", timeWeather: "Organizing", questEpisode: "Tour-03", status: "Needs check", clueStatus: "Open", risk: "Medium", evidenceOwner: "Reviewer" },
         n11: { title: "State Index", body: "The state index lists initial values, reference locations, and current status for variables, so you can confirm which nodes read or write the same variable.", customFields: { evidence: "Variable references", owner: "Validation", outcome: "Confirm state reads and writes" }, cast: [{ characterId: "c4", role: "Mentioned" }] },
-        n12: { title: "Review Before Continuing", body: "Before continuing, check state references, add node notes, or mark the review complete.", choices: ["Check state references", "Add node notes", "Mark review complete"], choiceOptions: [
-          { id: "opt_run_validation", label: "Check state references", requires: "section_notes_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
-          { id: "opt_document_notes", label: "Add node notes", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
-          { id: "opt_mark_review_ready", label: "Mark review complete", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
+        n12: { title: "Review Before Continuing", body: "Each action reaches a different feedback node before converging on the final practice. The first demonstrates state validation, the second Document notes, and the third a gated review action.", choices: ["Check state and run preview", "Add notes in the Document", "Confirm this review pass"], choiceOptions: [
+          { id: "opt_run_validation", label: "Check state and run preview", requires: "state_index_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "validation_reviewed", value: "true" }, { trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }] },
+          { id: "opt_document_notes", label: "Add notes in the Document", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] },
+          { id: "opt_mark_review_ready", label: "Confirm this review pass", requires: "review_pressure >= 1", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "set", key: "revision_ready", value: "true" }] }
         ], cast: [{ characterId: "c5", role: "Present" }, { characterId: "c2", role: "Mentioned" }] },
         n13: { title: "Play Preview", body: "Play preview checks conditions, option display, visit records, and debug state. It verifies reading routes and variable changes inside the current canvas.", customFields: { evidence: "Preview record", owner: "Play", outcome: "Confirm routes and state changes" }, cast: [{ characterId: "c4", role: "Owner" }, { characterId: "c5", role: "Mentioned" }] },
+        n21: { title: "Document Notes Feedback", body: "The Document shows and edits the whole narrative in one place. This branch sets revision_ready to true; when you return to the canvas, the final practice reads that state immediately.", customFields: { evidence: "Document / node notes", owner: "Document", outcome: "Review state updated" }, cast: [{ characterId: "c2", role: "Owner" }] },
+        n22: { title: "Review Complete Feedback", body: "You passed the review_pressure condition and set revision_ready to true. This is immediate feedback for a gated option; the next node can now enable Complete the practice.", customFields: { evidence: "Gated option", owner: "Validation", outcome: "Enable the completion route" }, cast: [{ characterId: "c3", role: "Owner" }] },
         e4: { title: "Chapter 4: Complete One Practice Run", body: "The final chapter turns the previous material into one practice run. Each option has a prerequisite and demonstrates choice conditions, on-choose effects, goTo routing, and end routes.", beatList: "Prose / Play / notes / finish", eventType: "Practice Split", eventDescription: "The same structure can return to prose, continue preview, organize notes, or end the practice.", location: "Practice panel", timeWeather: "Wrap-up", questEpisode: "Tour-04", status: "Pending" },
-        n14: { title: "Next Practice Step", body: "Choose the next practice target. Each option has prerequisites; unmet options are hidden or disabled according to this node's Unavailable choices setting. Project: {project_file}. Active feature: {active_feature}. Data integrity: {data_integrity}.", choices: ["Return to a content node", "Continue Play preview", "Organize notes", "Complete the practice"], choiceOptions: [
-          { id: "opt_return_content", label: "Return to a content node (needs progress and data integrity)", requires: "workflow_progress >= 2 && data_integrity >= 3", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "content_review" }] },
-          { id: "opt_play_preview", label: "Continue Play preview (needs review and validation)", requires: "revision_ready === true && validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
-          { id: "opt_organize_notes", label: "Organize notes", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "notes_review" }, { trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }] },
-          { id: "opt_finish_practice", label: "Complete the practice (needs review and Play preview)", requires: "revision_ready === true && preview_checked === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
+        n14: { title: "Next Practice Step", body: "This final choice reads the state accumulated earlier. Unmet options appear disabled; Organize drafts and notes always remains available, so the route cannot dead-end. Project: {project_file}. Active feature: {active_feature}. Data integrity: {data_integrity}.", choices: ["Return to writing", "Run another preview", "Organize drafts and notes", "Complete and leave the sample"], choiceOptions: [
+          { id: "opt_return_content", label: "Return to writing", requires: "workflow_progress >= 2", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "content_review" }] },
+          { id: "opt_play_preview", label: "Run another preview", requires: "validation_reviewed === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "play_preview" }] },
+          { id: "opt_organize_notes", label: "Organize drafts and notes", requires: "", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "notes_review" }, { trigger: "onChoose", op: "add", key: "scope_pressure", value: "1" }] },
+          { id: "opt_finish_practice", label: "Complete and leave the sample", requires: "revision_ready === true", effects: [{ trigger: "onChoose", op: "set", key: "route", value: "finish" }, { trigger: "onChoose", op: "add", key: "workflow_progress", value: "1" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }, { characterId: "c5", role: "Mentioned" }] },
         n15: { title: "Return to a Content Node", body: "Re-enter a content node and add prose, scene notes, or design notes. This is an end route.", routing: { mode: "end" } },
         n16: { title: "Continue Play Preview", body: "Continue using Play preview to check conditions, option display, visit records, and debug state. This is an end route.", routing: { mode: "end" }, cast: [{ characterId: "c5", role: "Speaker" }] },
         n17: { title: "Organize Notes", body: "Place unsettled ideas in the Draft Frame, and put confirmed information in content nodes or Events Sheet fields. This is an end route.", routing: { mode: "end" } },
-        n18: { title: "Complete the Practice", body: "This sample ends here. You have completed a basic practice run for nodes, links, choices, conditions, effects, dialog, characters, and the Events Sheet. This is an end route.", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
-        n19: { title: "Operation Note", body: "This Marker node records operation notes and stays out of the player route. Suggested first run: choose the first option; choose On a choice option's effects; choose Check state references; choose Complete the practice.", routing: { mode: "goTo", target: "Next Practice Step" } },
+        n18: { title: "Complete the Practice", body: "The sample ends here. You have used distinct branches, state feedback, a condition gate, dialog, character backlinks, the Events Sheet, the Document, and Playbook. Close the result and press Play again to restart from the project's initial variables.", routing: { mode: "end" }, cast: [{ characterId: "c3", role: "Mentioned" }, { characterId: "c4", role: "Owner" }] },
+        n19: { title: "Operation Note", body: "This Marker stays outside the player route. Suggested first run: See a variable change → Write state in choice effects → Confirm this review pass → Complete and leave the sample.", routing: { mode: "goTo", target: "Next Practice Step" } },
         df1: { title: "Your Draft Area", body: "This Draft Frame is hidden in the node menu by default. Put unsettled ideas here; it stays out of the player route and the Events Sheet.", customFields: { reason: "Keep draft material separate from final prose." } }
       },
       labels: {
@@ -2588,6 +2683,7 @@ function installNarrativeCanvasApp() {
       notes: text.notes,
       variables: {
         sample_id: "narrative_canvas_feature_guide",
+        sample_version: 2,
         sample_language: lang,
         protagonist: text.protagonist,
         route: text.route,
@@ -2771,33 +2867,37 @@ function installNarrativeCanvasApp() {
       ],
       characters: text.characters,
       nodes: [
-        { id: "n0", type: "Entry", x: 80, y: 680, ...text.nodes.n0 },
-        { id: "lf1", type: "LocationFrame", x: 210, y: 220, width: 1140, height: 940, ...text.nodes.lf1 },
+        { id: "n0", type: "Entry", x: 80, y: 680, frameId: "", ...text.nodes.n0 },
+        { id: "lf1", type: "LocationFrame", x: 210, y: 220, width: 1140, height: 940, frameId: "", ...text.nodes.lf1 },
         { id: "e1", type: "StorySequence", x: 270, y: 340, width: 980, height: 760, act: "I", chapter: "1", frameId: "lf1", customFields: { status: text.nodes.e1.status }, ...text.nodes.e1 },
         { id: "n1", type: "Content", x: 320, y: 520, frameId: "e1", ...text.nodes.n1 },
         { id: "n2", type: "Clue", x: 620, y: 520, frameId: "e1", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "playbook_seen", value: "true" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n2.title }] }, ...text.nodes.n2 },
         { id: "n3", type: "InterviewNote", x: 920, y: 520, frameId: "e1", routing: { mode: "goTo", target: text.nodes.n4.title }, stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "script_builder_seen", value: "true" }, { trigger: "onVisit", op: "append", key: "walkthrough_notes", value: "playbook_manual" }] }, ...text.nodes.n3 },
         { id: "n4", type: "Choice", x: 620, y: 820, frameId: "e1", choiceRevealMode: "disabled", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n2.title }] }, ...text.nodes.n4 },
-        { id: "n5", type: "Content", x: 1280, y: 540, ...text.nodes.n5, body: workflowBranchBody, variable: "", value: "" },
-        { id: "n6", type: "Dialog", x: 1280, y: 820, ...text.nodes.n6 },
-        { id: "e2", type: "StorySequence", x: 1540, y: 340, width: 1280, height: 840, act: "II", chapter: "2", customFields: { status: text.nodes.e2.status }, ...text.nodes.e2 },
+        { id: "n5", type: "Content", x: 1280, y: 540, frameId: "", ...text.nodes.n5, body: workflowBranchBody },
+        { id: "n6", type: "Dialog", x: 1280, y: 820, frameId: "", ...text.nodes.n6 },
+        { id: "n20", type: "Clue", x: 1280, y: 1080, frameId: "", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n20.title }] }, ...text.nodes.n20 },
+        { id: "e2", type: "StorySequence", x: 1540, y: 340, width: 1280, height: 840, frameId: "", act: "II", chapter: "2", customFields: { status: text.nodes.e2.status }, ...text.nodes.e2 },
         { id: "cf1", type: "ConversationFrame", x: 1840, y: 430, width: 900, height: 370, frameId: "e2", ...text.nodes.cf1 },
         { id: "n7", type: "Choice", x: 1600, y: 560, frameId: "e2", choiceRevealMode: "disabled", ...text.nodes.n7 },
         { id: "n8", type: "Clue", x: 1960, y: 560, frameId: "e2", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "section_notes_ready", value: "true" }, { trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n8.title }] }, ...text.nodes.n8 },
         { id: "n9", type: "InterviewNote", x: 2320, y: 560, frameId: "cf1", stateLogic: { effects: [{ trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "append", key: "walkthrough_notes", value: "cast_backlinks" }] }, ...text.nodes.n9 },
-        { id: "n10", type: "Content", x: 2320, y: 850, frameId: "e2", ...text.nodes.n10, body: conditionGateBody, condition: "", stateLogic: { requirements: conditionGateRequirement } },
-        { id: "e3", type: "InvestigationEvent", x: 2900, y: 340, width: 1220, height: 900, act: "III", chapter: "3", customFields: { status: text.nodes.e3.status, clueStatus: text.nodes.e3.clueStatus, risk: text.nodes.e3.risk, evidenceOwner: text.nodes.e3.evidenceOwner }, ...text.nodes.e3 },
+        { id: "n23", type: "Clue", x: 1960, y: 850, frameId: "e2", stateLogic: { effects: [{ trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n23.title }] }, ...text.nodes.n23 },
+        { id: "n10", type: "Content", x: 2320, y: 850, frameId: "e2", ...text.nodes.n10, body: conditionGateBody, stateLogic: { requirements: conditionGateRequirement } },
+        { id: "e3", type: "InvestigationEvent", x: 2900, y: 340, width: 1220, height: 900, frameId: "", act: "III", chapter: "3", customFields: { status: text.nodes.e3.status, clueStatus: text.nodes.e3.clueStatus, risk: text.nodes.e3.risk, evidenceOwner: text.nodes.e3.evidenceOwner }, ...text.nodes.e3 },
         { id: "n11", type: "Clue", x: 2960, y: 540, frameId: "e3", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "state_index_ready", value: "true" }, { trigger: "onVisit", op: "add", key: "workflow_progress", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n11.title }] }, ...text.nodes.n11 },
         { id: "n12", type: "Choice", x: 3290, y: 540, frameId: "e3", choiceRevealMode: "disabled", ...text.nodes.n12 },
-        { id: "n13", type: "Clue", x: 3660, y: 540, frameId: "e3", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "preview_checked", value: "true" }, { trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n13.title }] }, ...text.nodes.n13 },
-        { id: "e4", type: "StorySequence", x: 1450, y: 1320, width: 1480, height: 760, act: "IV", chapter: "4", customFields: { status: text.nodes.e4.status }, ...text.nodes.e4 },
+        { id: "n13", type: "Clue", x: 2960, y: 850, frameId: "e3", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "preview_checked", value: "true" }, { trigger: "onVisit", op: "add", key: "data_integrity", value: "1" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n13.title }] }, ...text.nodes.n13 },
+        { id: "n21", type: "Clue", x: 3320, y: 850, frameId: "e3", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n21.title }] }, ...text.nodes.n21 },
+        { id: "n22", type: "Clue", x: 3680, y: 850, frameId: "e3", stateLogic: { effects: [{ trigger: "onVisit", op: "set", key: "revision_ready", value: "true" }, { trigger: "onVisit", op: "set", key: "active_feature", value: text.nodes.n22.title }] }, ...text.nodes.n22 },
+        { id: "e4", type: "StorySequence", x: 1450, y: 1320, width: 1480, height: 760, frameId: "", act: "IV", chapter: "4", customFields: { status: text.nodes.e4.status }, ...text.nodes.e4 },
         { id: "n14", type: "Choice", x: 1520, y: 1520, frameId: "e4", choiceRevealMode: "disabled", ...text.nodes.n14 },
         { id: "n15", type: "Content", x: 1960, y: 1360, frameId: "e4", ...text.nodes.n15 },
         { id: "n16", type: "Content", x: 2240, y: 1500, frameId: "e4", ...text.nodes.n16 },
         { id: "n17", type: "Content", x: 1960, y: 1660, frameId: "e4", ...text.nodes.n17 },
         { id: "n18", type: "Content", x: 2540, y: 1660, frameId: "e4", ...text.nodes.n18 },
-        { id: "n19", type: "Marker", x: 3180, y: 1500, ...text.nodes.n19 },
-        { id: "df1", type: "DraftFrame", x: 4300, y: 540, width: 620, height: 360, ...text.nodes.df1 }
+        { id: "n19", type: "Marker", x: 3180, y: 1500, frameId: "", ...text.nodes.n19 },
+        { id: "df1", type: "DraftFrame", x: 4300, y: 540, width: 620, height: 360, frameId: "", ...text.nodes.df1 }
       ],
       links: [
         { id: "l0", from: "n0", to: "n1" },
@@ -2806,20 +2906,24 @@ function installNarrativeCanvasApp() {
         { id: "l3", from: "n3", to: "n4" },
         { id: "l4", from: "n4", to: "n5", label: text.nodes.n4.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_map_story" },
         { id: "l5", from: "n4", to: "n6", label: text.nodes.n4.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_write_dialog" },
-        { id: "l6", from: "n4", to: "n6", label: text.nodes.n4.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_open_playbook" },
+        { id: "l6", from: "n4", to: "n20", label: text.nodes.n4.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_open_playbook" },
         { id: "l7", from: "n5", to: "n7" },
         { id: "l8", from: "n6", to: "n7" },
+        { id: "l15", from: "n20", to: "n7" },
         { id: "l9", from: "n7", to: "n8", label: text.nodes.n7.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_choice_effects" },
         { id: "l10", from: "n7", to: "n9", label: text.nodes.n7.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_node_effects" },
-        { id: "l11", from: "n7", to: "n14", label: text.nodes.n7.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_action_rules" },
+        { id: "l11", from: "n7", to: "n23", label: text.nodes.n7.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_action_rules" },
         { id: "l12", from: "n8", to: "n9" },
         { id: "l13", from: "n9", to: "n10" },
+        { id: "l26", from: "n23", to: "n10" },
         { id: "l14", from: "n10", to: "n11" },
         { id: "l16", from: "n11", to: "n12" },
         { id: "l17", from: "n12", to: "n13", label: text.nodes.n12.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_run_validation" },
-        { id: "l18", from: "n12", to: "n13", label: text.nodes.n12.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_document_notes" },
-        { id: "l19", from: "n12", to: "n13", label: text.nodes.n12.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_mark_review_ready" },
+        { id: "l18", from: "n12", to: "n21", label: text.nodes.n12.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_document_notes" },
+        { id: "l19", from: "n12", to: "n22", label: text.nodes.n12.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_mark_review_ready" },
         { id: "l20", from: "n13", to: "n14" },
+        { id: "l27", from: "n21", to: "n14" },
+        { id: "l28", from: "n22", to: "n14" },
         { id: "l21", from: "n14", to: "n15", label: text.nodes.n14.choiceOptions[0].label, choiceIndex: 0, choiceOptionId: "opt_return_content" },
         { id: "l22", from: "n14", to: "n16", label: text.nodes.n14.choiceOptions[1].label, choiceIndex: 1, choiceOptionId: "opt_play_preview" },
         { id: "l23", from: "n14", to: "n17", label: text.nodes.n14.choiceOptions[2].label, choiceIndex: 2, choiceOptionId: "opt_organize_notes" },
@@ -2850,6 +2954,12 @@ function installNarrativeCanvasApp() {
       "Responding...": "\u56de\u590d\u4e2d\u2026\u2026",
       "Stop": "\u505c\u6b62",
       "AI response stopped.": "AI \u56de\u590d\u5df2\u505c\u6b62\u3002",
+      "Copy message": "复制消息",
+      "Copy conversation": "复制对话",
+      "Message copied.": "消息已复制。",
+      "Conversation copied.": "对话已复制。",
+      "Could not copy the text.": "无法复制文本。",
+      "Ask about the story or request a canvas change. Enter to send; Shift+Enter for a new line.": "询问剧情或请求修改画布。回车发送；Shift+回车换行。",
       "AI request timed out.": "AI \u8bf7\u6c42\u8d85\u65f6\u3002",
       "Add": "添加",
       "Add character": "添加角色",
@@ -2874,6 +2984,7 @@ function installNarrativeCanvasApp() {
       "Invalid expression": "表达式无法解析",
       "JSON": "JSON",
       "Option": "选项",
+      "Choice": "选择",
       "Choice condition": "选择条件",
       "Is true": "为真",
       "Is false": "为假",
@@ -2891,6 +3002,7 @@ function installNarrativeCanvasApp() {
       "Mixed conditions": "混合关系",
       "Condition relation": "条件关系",
       "Delete condition": "删除条件",
+      "Dialog": "对话",
       "Condition value is required.": "需要填写条件值。",
       "Condition deleted.": "已删除条件。",
       "Unknown variable: {key}": "未识别的变量：{key}",
@@ -2960,6 +3072,8 @@ function installNarrativeCanvasApp() {
       "Auto references": "自动引用",
       "auto": "自动",
       "Body": "正文",
+      "Basic Node": "基础节点",
+      "Built-in fields": "内置字段",
       "Build state changes with Playbook categories.": "用演示设置分类构建状态变化。",
       "Build state changes with Playbook state groups.": "用演示设置状态分组构建状态变化。",
       "Buttons": "按钮",
@@ -2975,12 +3089,15 @@ function installNarrativeCanvasApp() {
       "Characters Markdown exported.": "角色 Markdown 已导出。",
       "Characters JSON exported.": "角色 JSON 已导出。",
       "Characters.md opened.": "Characters.md 已打开。",
+      "Search character: {name}": "搜索角色：{name}",
       "Cast": "演员表",
       "Choice: {label}": "选择：{label}",
+      "Focus source Choice node: {label}": "聚焦来源选择节点：{label}",
       "Edit choice option": "编辑选项",
       "Clear": "清除",
       "Open AI assistant": "打开 AI 助手",
       "Close AI assistant": "关闭 AI 助手",
+      "Experimental feature": "实验性功能",
       "AI assistant": "AI 助手",
       "Canvas copilot": "画布助手",
       "Apply to canvas": "应用到画布",
@@ -3004,8 +3121,11 @@ function installNarrativeCanvasApp() {
       "Clear browser storage and load a blank project? This deletes the project saved in this browser.": "清除浏览器存储并载入空项目？这会删除当前浏览器中保存的项目。",
       "Clear storage": "清除存储",
       "Close centered inspector": "关闭居中检查器",
+      "Pin window": "钉住窗口",
+      "Unpin window": "取消钉住窗口",
       "Confirm": "确认",
       "Collapse": "折叠",
+      "Collapse document header": "收起文档上栏",
       "Collapse frame": "折叠框架",
       "Collapse left sidebar": "折叠左侧栏",
       "Collapse right sidebar": "折叠右侧栏",
@@ -3020,6 +3140,10 @@ function installNarrativeCanvasApp() {
       "Delete node": "删除节点",
       "Delete turn": "删除轮次",
       "Delete {label}?": "删除 {label}？",
+      "Delete {label} column?": "删除“{label}”列？",
+      "the \"{label}\" frame type": "“{label}”框架类型",
+      "the Events Sheet schema": "事件表结构",
+      "Hide only hides the column and keeps data. Delete removes \"{label}\" from {scope} and clears that value from its frame nodes. Other frame types keep the column.": "隐藏只会隐藏该列并保留数据。删除会从{scope}中移除“{label}”，并清除该类型框架节点中的对应值；其他框架类型仍保留该列。",
       "Cannot delete {label}": "无法删除 {label}",
       "\"{label}\" is still used by {count} canvas nodes, so it cannot be deleted. Hide it from the Node Library instead, or change those nodes to another type first.": "“{label}” 仍被 {count} 个画布节点使用，无法删除。可将其从节点库隐藏，或将这些节点改为其他类型后再删除。",
       "Default node type \"{label}\" cannot be deleted. Hide it from the Node Library if you do not need it right now.": "默认节点类型 “{label}” 不能删除。如暂不需要，可将其从节点库隐藏。",
@@ -3038,10 +3162,10 @@ function installNarrativeCanvasApp() {
       "Condition expression": "条件表达式",
       "Content": "内容",
       "Choices": "选项",
+      "Custom fields": "自定义字段",
       "Choice prompt": "选择提示",
       "Choice text": "选项文本",
       "Choices, one per line": "选项，每行一个",
-      "Convert to property": "转换为属性",
       "Copy turn": "复制轮次",
       "Disabled": "停用",
       "Duplicate": "复制",
@@ -3139,6 +3263,7 @@ function installNarrativeCanvasApp() {
       "Export report is unavailable.": "导出报告不可用。",
       "Enter immersive fullscreen": "进入沉浸式全屏",
       "Expand": "展开",
+      "Expand document header": "展开文档上栏",
       "Expand frame": "展开框架",
       "Expand left sidebar": "展开左侧栏",
       "Expand right sidebar": "展开右侧栏",
@@ -3185,7 +3310,6 @@ function installNarrativeCanvasApp() {
       "Location": "地点",
       "Location State": "地点状态",
       "Lock choice": "锁定选项",
-      "Legacy node type": "旧版节点类型",
       "Markdown": "Markdown",
       "manual": "手动",
       "Manual": "手动",
@@ -3210,6 +3334,12 @@ function installNarrativeCanvasApp() {
       "Open sample file": "打开示例文件",
       "Open the sample file and discard unsaved changes?": "打开示例文件并放弃未保存的更改？",
       "Name the new project": "命名新项目",
+      "Create a blank project?": "创建空白项目？",
+      "Discard the current canvas and create a blank one?": "放弃当前画布并创建空白项目？",
+      "A new .ncanvas file will be created from the plugin save settings.": "将根据插件保存设置创建新的 .ncanvas 文件。",
+      "The new project will use browser storage until you save or export it.": "新项目会暂存于浏览器，直到你保存或导出项目。",
+      "New file: {target}": "新文件：{target}",
+      "Could not preview the new project file name.": "无法预览新项目文件名。",
       "No .ncanvas selected": "未选择 .ncanvas",
       "No characters yet.": "还没有角色。",
       "No characters yet": "还没有角色",
@@ -3233,6 +3363,8 @@ function installNarrativeCanvasApp() {
       "Node": "节点",
       "Node assignment": "节点赋值",
       "Node behavior": "节点行为",
+      "Node template": "节点模板",
+      "Template": "模板",
       "Node choose": "节点选择时",
       "Node color": "节点颜色",
       "Node Library": "节点库",
@@ -3275,6 +3407,7 @@ function installNarrativeCanvasApp() {
       "Quest Entry": "任务条目",
       "Reload": "重新加载",
       "Rename": "重命名",
+      "Column name": "列名",
       "Remove": "移除",
       "Remove cast link": "移除演员关联",
       "Re-sort by graph": "按图排序",
@@ -3456,7 +3589,6 @@ function installNarrativeCanvasApp() {
       "{count} entered": "{count} 个加入",
       "{count} left": "{count} 个移出",
       "Choice branch": "选项分支",
-      "Condition branch": "条件分支",
       "Continue": "继续",
       "Continue by link": "沿连线继续",
       "Debug": "调试",
@@ -3467,6 +3599,23 @@ function installNarrativeCanvasApp() {
       "Delete node fields directly. Use Node Library for schema changes.": "直接增删节点字段。字段结构应在节点库中维护。",
       "Discard": "放弃",
       "Discard unsaved changes?": "放弃未保存改动？",
+      "Open another project and discard unsaved changes?": "打开其他项目并放弃未保存改动？",
+      "Reload the current project and discard unsaved changes?": "重新加载当前项目并放弃未保存改动？",
+      "References": "引用",
+      "Delete {count} nodes with references?": "删除这 {count} 个仍被引用的节点？",
+      "Delete \"{title}\"?": "删除“{title}”？",
+      "Update references to \"{title}\"?": "将引用更新为“{title}”？",
+      "{references} point to these nodes. Delete and clear those references, or keep the references as orphan warnings.": "{references}指向这些节点。可以删除节点并清除引用，也可以保留引用并将其标记为孤立引用警告。",
+      "{references} point to this node. Delete and clear those references, or keep the references as orphan warnings.": "{references}指向该节点。可以删除节点并清除引用，也可以保留引用并将其标记为孤立引用警告。",
+      "{references} currently target \"{previousTitle}\". Update them to \"{nextTitle}\"? Cancel keeps the old target text.": "{references}当前指向“{previousTitle}”。是否更新为“{nextTitle}”？取消会保留原目标文本。",
+      "Delete and clear references": "删除并清除引用",
+      "Keep orphan references": "保留孤立引用",
+      "Update references": "更新引用",
+      "{count} Script Builder actions": "{count} 个脚本构建动作",
+      "{count} node routing targets": "{count} 个节点路线目标",
+      "1 Play Rule start node": "1 个演示规则起始节点",
+      "{count} references": "{count} 个引用",
+      "{count} references ({parts})": "{count} 个引用（{parts}）",
       "Edit value": "编辑值",
       "End Condition": "结束条件",
       "End route": "结束路线",
@@ -3516,7 +3665,6 @@ function installNarrativeCanvasApp() {
       "Clue variables": "变量分组",
       "Choice panel": "Choice 面板",
       "Choice requirement": "选项条件",
-      "Condition node": "Condition 节点",
       "Conditions are not actions.": "条件不是动作。",
       "Delete a state write with the row's x button, or remove the matching effect in the node inspector.": "删除状态写入：点击行尾 x，或在节点检查器中删除对应 effect。",
       "Each page covers one Playbook feature.": "每页说明一项演示设置功能。",
@@ -3618,6 +3766,9 @@ function installNarrativeCanvasApp() {
       "Delete variable": "删除变量",
       "Delete node type": "删除节点类型",
       "Edit node type": "编辑节点类型",
+      "Existing fields not in this type": "现有节点中未登记的字段",
+      "Add {label} to type": "将 {label} 加入类型定义",
+      "Added": "已加入",
       "Edit icon for {type}": "编辑 {type} 图标",
       "Hide node type": "隐藏节点类型",
       "No visible node types.": "没有可显示的节点类型。",
@@ -3643,7 +3794,6 @@ function installNarrativeCanvasApp() {
       "Show variables and gate checks in Play": "显示变量和条件检查",
       "Start Node": "起始节点",
       "State Logic": "状态逻辑",
-      "Set / Condition are now node properties. The State Logic section below records this node's effects and gate.": "Set / Condition 现在作为节点属性维护；下方状态逻辑区域记录节点效果和条件。",
       "Store project variables for text such as {protagonist}.": "声明项目变量，例如文本中的 {protagonist}。",
       "Use flat underscore variables such as inventory_coins when conditions, effects, and text templates need the same value.": "条件、效果和文本模板需要读取同一个值时，使用 inventory_coins 这类扁平下划线变量。",
       "Stop the demo route when a condition becomes true.": "条件成立时停止演示路线。",
@@ -3690,10 +3840,15 @@ function installNarrativeCanvasApp() {
       "{visible} of {total} rows": "{visible}/{total} 行",
       "{count} more not rendered yet.": "还有 {count} 个未渲染。",
       "Show {count} more": "再显示 {count} 个",
+      "Appearance": "外观",
       "Behavior": "行为",
       "Character mentions": "角色提及",
       "Click an output port, then an input port to connect nodes.": "先点击输出端口，再点击输入端口以连接节点。",
       "Color": "颜色",
+      "Icon": "图标",
+      "Icon text or emoji": "图标文字或表情",
+      "Card opacity": "卡片透明度",
+      "Visibility": "可见性",
       "Custom icon": "自定义图标",
       "Custom icon text or emoji": "自定义图标文本或表情",
       "Delete column?": "删除列？",
@@ -3767,9 +3922,7 @@ function installNarrativeCanvasApp() {
       "Turn moved.": "轮次已移动。",
       "Turn deleted.": "轮次已删除。",
       "This node is not a legacy type.": "该节点不是旧版类型。",
-      "Condition has no expression to convert.": "条件没有可转换的表达式。",
       "This node cannot auto-convert: it needs exactly 1 incoming and the expected outgoing shape.": "该节点无法自动转换：需要正好 1 条进入连线，并符合预期的外出连线结构。",
-      "Set and Condition Play rules added.": "Set 和 Condition 演示规则已添加。",
       "Variable key already exists.": "变量键已存在。",
       "Node type name is required.": "节点类型名称不能为空。",
       "Playbook JSON updated.": "演示设置 JSON 已更新。",
@@ -3828,8 +3981,6 @@ function installNarrativeCanvasApp() {
       "{label} hidden from Node Library. Data kept.": "{label} 已从节点库隐藏，数据已保留。",
       "{label} restored to Node Library.": "{label} 已恢复到节点库。",
       "Updated {count} references.": "已更新 {count} 个引用。",
-      "Converted Set \"{source}\" into onVisit effect on \"{target}\".": "已将 Set “{source}” 转为 “{target}” 上的 onVisit 效果。",
-      "Converted Condition \"{source}\" into two gated links.": "已将 Condition “{source}” 转为两条条件连线。",
       "{rule} rule added from selected node.": "已基于选中节点添加 {rule} 规则。",
       "{label} deleted.": "{label} 已删除。",
       "{rule} is a system rule.": "{rule} 是系统规则。",
@@ -3860,7 +4011,8 @@ function installNarrativeCanvasApp() {
       "Document body markers are incomplete.": "文档中的正文边界标记不完整。",
       "Add or delete choices in the node inspector; Document edits existing choices.": "请在节点检查器中新增或删除选项；文档仅编辑现有选项。",
       "Add or delete routes on the canvas; Document edits existing routes.": "请在画布中新增或删除路线；文档仅编辑现有路线。",
-      "Document changes synced to project.": "文档修改已同步到项目。"
+      "Document changes synced to project.": "文档修改已同步到项目。",
+      "Fix the Document source error before exporting.": "请先修正文档源错误，再执行导出。"
     }
   };
 
@@ -3941,7 +4093,6 @@ function installNarrativeCanvasApp() {
     contextNodeId: null,
     contextLinkId: null,
     contextGroup: false,
-    iconDialogType: null,
     typeDialogType: null,
     eventColumnDeleteKey: null,
     eventColumnDeleteType: null,
@@ -3988,6 +4139,7 @@ function installNarrativeCanvasApp() {
     documentSearchMatches: [],
     documentSearchIndex: 0,
     documentTocOpen: false,
+    documentChromeCollapsed: false,
     documentHighlightFrame: null,
     autoSaveTimer: null,
     characterBacklinkExpandedIds: new Set(),
@@ -4021,11 +4173,14 @@ function installNarrativeCanvasApp() {
     immersiveFullscreen: false,
     nodePanelPointerDown: false,
     floatingInspectorPanel: "",
-    floatingWindowGeometry: { play: null, inspector: null },
+    floatingWindowGeometry: { play: null, inspector: null, ai: null },
+    floatingWindowPinned: { play: false, inspector: false, ai: false },
     floatingWindowInteraction: null,
+    floatingWindowClickGuard: null,
     graphHover: null,
     dialogColumnResize: null,
     aiMessages: [],
+    aiPromptDraft: "",
     aiPendingPatch: null,
     aiBusy: false,
     aiAbortController: null,
@@ -4059,7 +4214,9 @@ function installNarrativeCanvasApp() {
       rightWidth: SIDEBAR_CONFIG.right.defaultWidth,
       leftCollapsed: false,
       rightCollapsed: false,
-      resizing: null
+      resizing: null,
+      compactMode: false,
+      preCompactCollapsed: null
     }
     };
   }
@@ -4075,6 +4232,8 @@ function installNarrativeCanvasApp() {
     destroy: destroyNarrativeCanvas,
     save: saveCurrentState,
     getSavedState: buildSavedState,
+    canExecuteCommand: canExecuteCanvasCommand,
+    executeCommand: executeCanvasCommand,
     configureAutoSave,
     setLanguage,
     getLanguage: () => state.language,
@@ -4085,6 +4244,80 @@ function installNarrativeCanvasApp() {
     importStoryLayoutText,
     importStateSchemaText
   };
+
+  function canExecuteCanvasCommand(commandId) {
+    if (!initialized) return false;
+    if (commandId === "undo") return Boolean(state.history?.undo?.length);
+    if (commandId === "redo") return Boolean(state.history?.redo?.length);
+    if (commandId === "duplicate-selected-node" || commandId === "focus-selected-node") return Boolean(state.selectedNodeId && getNode(state.selectedNodeId));
+    if (commandId === "delete-selection") return Boolean(state.selectedNodeId || state.selectedNodeIds.length || state.selectedLinkId);
+    if (["zoom-in", "zoom-out", "fit-canvas-to-view"].includes(commandId)) return isCanvasFileActive();
+    if (commandId === "start-play-preview") return Boolean(state.project?.nodes?.length);
+    return new Set([
+      "new-project",
+      "add-content-node",
+      "add-dialog-node",
+      "add-choice-node",
+      "add-frame",
+      "focus-workspace-search",
+      "open-characters",
+      "open-events",
+      "open-playbook",
+      "open-document",
+      "toggle-immersive-fullscreen"
+    ]).has(commandId);
+  }
+
+  function executeCanvasCommand(commandId) {
+    if (!canExecuteCanvasCommand(commandId)) return false;
+    const actionTarget = (action, data = {}) => ({
+      dataset: { action, ...data },
+      closest: () => null
+    });
+    if (commandId === "new-project") handleAction(actionTarget("new-project"));
+    else if (commandId === "undo") undoHistory();
+    else if (commandId === "redo") redoHistory();
+    else if (commandId === "add-content-node") handleAction(actionTarget("add-node", { type: "Content" }));
+    else if (commandId === "add-dialog-node") handleAction(actionTarget("add-node", { type: "Dialog" }));
+    else if (commandId === "add-choice-node") handleAction(actionTarget("add-node", { type: "Choice" }));
+    else if (commandId === "add-frame") handleAction(actionTarget("add-node", { type: "Event" }));
+    else if (commandId === "duplicate-selected-node") handleAction(actionTarget("duplicate-node"));
+    else if (commandId === "delete-selection") {
+      if (state.selectedNodeIds.length > 1) handleAction(actionTarget("delete-selected-nodes"));
+      else if (state.selectedNodeId) handleAction(actionTarget("delete-node"));
+      else if (state.selectedLinkId) {
+        const historyBefore = getHistorySnapshot();
+        deleteSelectedLink();
+        commitHistoryFromSnapshot(historyBefore);
+      }
+    } else if (commandId === "zoom-in") setZoom(state.view.scale + 0.1);
+    else if (commandId === "zoom-out") setZoom(state.view.scale - 0.1);
+    else if (commandId === "fit-canvas-to-view") centerView();
+    else if (commandId === "focus-selected-node") focusSelectedNode();
+    else if (commandId === "focus-workspace-search") focusActiveWorkspaceSearch();
+    else if (commandId === "open-characters") selectFile("characters");
+    else if (commandId === "open-events") selectFile("events");
+    else if (commandId === "open-playbook") selectFile("variables");
+    else if (commandId === "open-document") selectFile("document");
+    else if (commandId === "start-play-preview") openPreview();
+    else if (commandId === "toggle-immersive-fullscreen") void toggleImmersiveFullscreen();
+    return true;
+  }
+
+  function focusActiveWorkspaceSearch() {
+    const inputByFile = {
+      adventure: dom.queryInput,
+      characters: dom.characterSearchInput,
+      events: dom.eventSearchInput,
+      variables: dom.playbookSearchInput,
+      document: dom.documentSearchInput
+    };
+    const input = inputByFile[state.activeFileId];
+    if (!input || input.hidden || input.closest?.("[hidden]")) return false;
+    input.focus({ preventScroll: true });
+    input.select?.();
+    return true;
+  }
 
   let eventController = null;
 
@@ -4196,15 +4429,19 @@ function installNarrativeCanvasApp() {
     dom.nodeContextMenu = dom.scope.querySelector("#nodeContextMenu");
     dom.canvasRadialMenu = dom.scope.querySelector("#canvasRadialMenu");
     dom.mentionPopover = dom.scope.querySelector("#mentionPopover");
-    dom.nodeIconDialog = dom.scope.querySelector("#nodeIconDialog");
-    dom.nodeIconInput = dom.scope.querySelector("#nodeIconInput");
-    dom.nodeIconDialogTitle = dom.scope.querySelector("#nodeIconDialogTitle");
     dom.nodeTypeDialog = dom.scope.querySelector("#nodeTypeDialog");
     dom.nodeTypeDialogTitle = dom.scope.querySelector("#nodeTypeDialogTitle");
     dom.nodeTypeNameInput = dom.scope.querySelector("#nodeTypeNameInput");
     dom.nodeTypeKindInput = dom.scope.querySelector("#nodeTypeKindInput");
     dom.nodeTypeFieldsInput = dom.scope.querySelector("#nodeTypeFieldsInput");
+    dom.nodeTypeBuiltinFields = dom.scope.querySelector("#nodeTypeBuiltinFields");
+    dom.nodeTypeExistingFieldsSection = dom.scope.querySelector("#nodeTypeExistingFieldsSection");
+    dom.nodeTypeExistingFields = dom.scope.querySelector("#nodeTypeExistingFields");
+    dom.nodeTypeIconInput = dom.scope.querySelector("#nodeTypeIconInput");
     dom.nodeTypeColorInput = dom.scope.querySelector("#nodeTypeColorInput");
+    dom.nodeTypeOpacityInput = dom.scope.querySelector("#nodeTypeOpacityInput");
+    dom.nodeTypeOpacityValue = dom.scope.querySelector("[data-node-type-opacity-value]");
+    dom.nodeTypeOpacityField = dom.scope.querySelector("#nodeTypeOpacityField");
     dom.nodeTypeHiddenInput = dom.scope.querySelector("#nodeTypeHiddenInput");
     dom.nodeTypeEventHiddenInput = dom.scope.querySelector("#nodeTypeEventHiddenInput");
     dom.playDialog = dom.scope.querySelector("#playDialog");
@@ -4305,6 +4542,7 @@ function installNarrativeCanvasApp() {
     document.addEventListener("click", handleGlobalAppPointerContext, { capture: true, signal });
     document.addEventListener("focusin", handleGlobalAppFocusContext, { capture: true, signal });
     document.addEventListener("keydown", handleGlobalHistoryKeyDown, { capture: true, signal });
+    document.addEventListener("click", handleFloatingWindowOutsideClick, { capture: true, signal });
     document.addEventListener("click", handleDocumentClickCapture, { capture: true, signal });
     document.addEventListener("pointerdown", handleGlobalMenuDismiss, { capture: true, signal });
     document.addEventListener("mousedown", handleGlobalMenuDismiss, { capture: true, signal });
@@ -4333,9 +4571,6 @@ function installNarrativeCanvasApp() {
     window.addEventListener("pointerup", () => { state.nodePanelPointerDown = false; }, { capture: true, signal });
     window.addEventListener("pointercancel", () => { state.nodePanelPointerDown = false; }, { capture: true, signal });
     dom.canvasRadialMenu?.addEventListener("click", handleCanvasRadialMenuClick, { signal });
-    dom.inspectorFloatOverlay?.addEventListener("click", (event) => {
-      if (event.target === dom.inspectorFloatOverlay) closeFloatingInspector();
-    }, { signal });
     dom.viewport.addEventListener("scroll", handleViewportScroll, { signal });
     dom.viewport.addEventListener("pointerdown", handleViewportPointerDown, { signal });
     dom.viewport.addEventListener("pointermove", handleViewportPointerMove, { signal });
@@ -4406,17 +4641,6 @@ function installNarrativeCanvasApp() {
     dom.playRuleDialog.addEventListener("click", (event) => {
       if (event.target === dom.playRuleDialog) dom.playRuleDialog.close();
     }, { signal });
-    dom.nodeIconDialog.addEventListener("close", () => {
-      if (dom.nodeIconDialog.returnValue === "confirm") {
-        const historyBefore = getHistorySnapshot();
-        applyNodeTypeBadgeDialog();
-        commitHistoryFromSnapshot(historyBefore);
-      }
-      state.iconDialogType = null;
-    }, { signal });
-    dom.nodeIconDialog.addEventListener("click", (event) => {
-      if (event.target === dom.nodeIconDialog) dom.nodeIconDialog.close("cancel");
-    }, { signal });
     dom.nodeTypeDialog.addEventListener("close", () => {
       if (dom.nodeTypeDialog.returnValue === "confirm") {
         const historyBefore = getHistorySnapshot();
@@ -4428,6 +4652,11 @@ function installNarrativeCanvasApp() {
     dom.nodeTypeDialog.addEventListener("click", (event) => {
       if (event.target === dom.nodeTypeDialog) dom.nodeTypeDialog.close("cancel");
     }, { signal });
+    dom.nodeTypeFieldsInput?.addEventListener("input", () => {
+      const typeDef = getNodeTypeDef(state.typeDialogType);
+      if (typeDef) renderNodeTypeFieldSections(typeDef);
+    }, { signal });
+    dom.nodeTypeOpacityInput?.addEventListener("input", updateNodeTypeOpacityReadout, { signal });
     dom.nodeRequiredDialog.addEventListener("click", (event) => {
       if (event.target === dom.nodeRequiredDialog) dom.nodeRequiredDialog.close();
     }, { signal });
@@ -4508,26 +4737,132 @@ function installNarrativeCanvasApp() {
 
   function handleWindowResize() {
     hideNodeContextMenu();
+    renderSidebarState();
     constrainFloatingWindow("play");
     constrainFloatingWindow("inspector");
+    constrainFloatingWindow("ai");
     scheduleCanvasViewportRender();
   }
 
   function getFloatingWindowElement(kind) {
     if (kind === "play") return dom.playDialog;
     if (kind === "inspector") return dom.inspectorFloatOverlay?.querySelector(".inspector-float-window") || null;
+    if (kind === "ai") return dom.aiFloatingWindow;
     return null;
   }
 
   function isFloatingWindowActive(kind) {
     if (kind === "play") return Boolean(state.playFloating && dom.root?.hasAttribute("data-play-panel"));
-    return kind === "inspector" && Boolean(state.floatingInspectorPanel && !dom.inspectorFloatOverlay?.hidden);
+    if (kind === "inspector") return Boolean(state.floatingInspectorPanel && !dom.inspectorFloatOverlay?.hidden);
+    return kind === "ai" && Boolean(state.aiOpen && !dom.aiFloatingWindow?.hidden);
+  }
+
+  function isFloatingWindowPinned(kind) {
+    return Boolean(state.floatingWindowPinned?.[kind]);
+  }
+
+  function renderFloatingWindowPinState(kind) {
+    const pinned = isFloatingWindowPinned(kind);
+    const label = t(pinned ? "Unpin window" : "Pin window");
+    const button = dom.scope?.querySelector?.(`[data-floating-window-pin="${kind}"]`);
+    const surface = kind === "inspector" ? dom.inspectorFloatOverlay : getFloatingWindowElement(kind);
+    if (surface) surface.dataset.pinned = String(pinned);
+    if (!button) return;
+    button.setAttribute("aria-pressed", String(pinned));
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+  }
+
+  function renderFloatingWindowPinStates() {
+    ["inspector", "play", "ai"].forEach(renderFloatingWindowPinState);
+  }
+
+  function setFloatingWindowPinned(kind, pinned) {
+    if (!["inspector", "play", "ai"].includes(kind)) return;
+    if (!state.floatingWindowPinned || typeof state.floatingWindowPinned !== "object") {
+      state.floatingWindowPinned = { play: false, inspector: false, ai: false };
+    }
+    state.floatingWindowPinned[kind] = Boolean(pinned);
+    renderFloatingWindowPinState(kind);
+  }
+
+  function toggleFloatingWindowPin(kind) {
+    if (kind === "play" && !state.playFloating) {
+      // Docked preview: float and pin in one action.
+      if (!dom.root?.hasAttribute("data-play-panel")) return;
+      state.playFloating = true;
+      setFloatingWindowPinned("play", true);
+      applyPlayFloatState();
+      return;
+    }
+    if (!isFloatingWindowActive(kind)) return;
+    setFloatingWindowPinned(kind, !isFloatingWindowPinned(kind));
+  }
+
+  function dockFloatingWindow(kind) {
+    if (kind === "inspector") {
+      closeFloatingInspector({ restoreFocus: false });
+      return;
+    }
+    if (kind === "play") {
+      state.playFloating = false;
+      setFloatingWindowPinned("play", false);
+      applyPlayFloatState();
+      return;
+    }
+    if (kind === "ai") toggleAiWindow(false);
+  }
+
+  function handleFloatingWindowOutsideClick(event) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const clickGuard = state.floatingWindowClickGuard;
+    if (clickGuard && Date.now() <= clickGuard.until && event.detail > 0) {
+      const distance = Math.hypot(event.clientX - clickGuard.x, event.clientY - clickGuard.y);
+      if (distance <= 4) {
+        state.floatingWindowClickGuard = null;
+        return;
+      }
+    }
+    state.floatingWindowClickGuard = null;
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const eventIsInside = (element) => Boolean(element && (
+      path.includes(element)
+      || element.contains(target)
+    ));
+    const inside = {
+      inspector: eventIsInside(getFloatingWindowElement("inspector")),
+      play: eventIsInside(getFloatingWindowElement("play")),
+      ai: eventIsInside(getFloatingWindowElement("ai"))
+    };
+    const inspectorLauncher = target.closest("[data-action='float-inspector-panel']");
+    const aiLauncher = target.closest("#aiFloatingButton");
+    ["inspector", "play", "ai"].forEach((kind) => {
+      if (!isFloatingWindowActive(kind) || isFloatingWindowPinned(kind) || inside[kind]) return;
+      if (kind === "inspector" && inspectorLauncher) return;
+      if (kind === "ai" && aiLauncher) return;
+      dockFloatingWindow(kind);
+    });
   }
 
   function getFloatingWindowBounds(kind) {
     if (kind === "inspector") {
       const rect = dom.inspectorFloatOverlay?.getBoundingClientRect();
       if (rect) return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+    if (kind === "ai") {
+      // The AI surface belongs to .app-shell so it can cross the canvas, sidebars,
+      // and document panels while remaining inside the NarrativeCanvas view.
+      const containingBlock = dom.root;
+      if (containingBlock?.getBoundingClientRect) {
+        const rect = containingBlock.getBoundingClientRect();
+        return {
+          left: rect.left + containingBlock.clientLeft,
+          top: rect.top + containingBlock.clientTop,
+          width: containingBlock.clientWidth,
+          height: containingBlock.clientHeight
+        };
+      }
     }
     return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
   }
@@ -4601,8 +4936,11 @@ function installNarrativeCanvasApp() {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      start: { ...state.floatingWindowGeometry[kind] }
+      start: { ...state.floatingWindowGeometry[kind] },
+      moved: false,
+      captureTarget: event.target
     };
+    try { event.target?.setPointerCapture?.(event.pointerId); } catch (_error) { /* Pointer capture is optional in embedded hosts. */ }
     getFloatingWindowElement(kind)?.classList.add("is-moving");
     event.preventDefault();
     event.stopPropagation();
@@ -4613,6 +4951,7 @@ function installNarrativeCanvasApp() {
     if (!interaction || interaction.pointerId !== event.pointerId) return;
     const dx = event.clientX - interaction.startX;
     const dy = event.clientY - interaction.startY;
+    if (Math.hypot(dx, dy) >= 3) interaction.moved = true;
     const next = { ...interaction.start };
     const direction = interaction.direction;
     if (direction === "move") {
@@ -4639,6 +4978,14 @@ function installNarrativeCanvasApp() {
     const interaction = state.floatingWindowInteraction;
     if (!interaction || interaction.pointerId !== event.pointerId) return;
     getFloatingWindowElement(interaction.kind)?.classList.remove("is-moving");
+    try { interaction.captureTarget?.releasePointerCapture?.(event.pointerId); } catch (_error) { /* The browser may already have released capture. */ }
+    if (interaction.moved && interaction.kind === "ai") {
+      state.floatingWindowClickGuard = {
+        x: event.clientX,
+        y: event.clientY,
+        until: Date.now() + 500
+      };
+    }
     state.floatingWindowInteraction = null;
   }
 
@@ -4652,14 +4999,14 @@ function installNarrativeCanvasApp() {
     const handle = event.target?.closest?.("[data-dialog-column-resize][data-dialog-node-id]");
     if (!handle) return;
     const node = getNode(handle.dataset.dialogNodeId);
-    const preview = handle.closest(".node-dialog-preview");
-    if (!node || node.type !== "Dialog" || !preview) return;
+    const surface = handle.closest(".node-dialog-preview, .dialog-turns-editor");
+    if (!node || !isDialogNode(node) || !surface) return;
     state.dialogColumnResize = {
       nodeId: node.id,
       pointerId: event.pointerId,
       startX: event.clientX,
       startRatio: normalizeDialogSpeakerRatio(node.dialogSpeakerRatio),
-      previewWidth: Math.max(1, preview.getBoundingClientRect().width),
+      previewWidth: Math.max(1, surface.getBoundingClientRect().width),
       historyBefore: getHistorySnapshot(),
       active: false
     };
@@ -4681,6 +5028,7 @@ function installNarrativeCanvasApp() {
     node.dialogSpeakerRatio = ratio;
     const element = getNodeElementById(node.id);
     element?.querySelector(".node-dialog-preview")?.style.setProperty("--dialog-speaker-ratio", `${ratio}%`);
+    dom.nodePanel?.querySelector(".dialog-turns-editor")?.style.setProperty("--dialog-speaker-ratio", `${ratio}%`);
     event.preventDefault();
   }
 
@@ -4867,6 +5215,7 @@ function installNarrativeCanvasApp() {
 
   function renderSidebarState() {
     if (!dom.root) return;
+    updateCompactSidebarMode();
     const normalized = normalizeSidebarState(state.sidebar);
     state.sidebar.leftWidth = normalized.leftWidth;
     state.sidebar.rightWidth = normalized.rightWidth;
@@ -4888,6 +5237,25 @@ function installNarrativeCanvasApp() {
       button.setAttribute("aria-label", label);
       button.setAttribute("aria-expanded", String(!collapsed));
     });
+  }
+
+  function updateCompactSidebarMode() {
+    const compact = (dom.root?.clientWidth || window.innerWidth || 0) <= 640;
+    if (compact === Boolean(state.sidebar.compactMode)) return;
+    if (compact) {
+      state.sidebar.preCompactCollapsed = {
+        left: Boolean(state.sidebar.leftCollapsed),
+        right: Boolean(state.sidebar.rightCollapsed)
+      };
+      state.sidebar.leftCollapsed = true;
+      state.sidebar.rightCollapsed = true;
+    } else if (state.sidebar.preCompactCollapsed) {
+      state.sidebar.leftCollapsed = Boolean(state.sidebar.preCompactCollapsed.left);
+      state.sidebar.rightCollapsed = Boolean(state.sidebar.preCompactCollapsed.right);
+      state.sidebar.preCompactCollapsed = null;
+    }
+    state.sidebar.compactMode = compact;
+    dom.root?.toggleAttribute("data-compact-layout", compact);
   }
 
   function normalizeSidebarState(sidebar) {
@@ -4945,11 +5313,14 @@ function installNarrativeCanvasApp() {
 
   function getSavedSidebarState() {
     const sidebar = normalizeSidebarState(state.sidebar);
+    const compactRestore = state.sidebar.compactMode && state.sidebar.preCompactCollapsed
+      ? state.sidebar.preCompactCollapsed
+      : null;
     return {
       leftWidth: sidebar.leftWidth,
       rightWidth: sidebar.rightWidth,
-      leftCollapsed: sidebar.leftCollapsed,
-      rightCollapsed: sidebar.rightCollapsed
+      leftCollapsed: compactRestore ? Boolean(compactRestore.left) : sidebar.leftCollapsed,
+      rightCollapsed: compactRestore ? Boolean(compactRestore.right) : sidebar.rightCollapsed
     };
   }
 
@@ -4967,6 +5338,10 @@ function installNarrativeCanvasApp() {
     if (!validSide) return;
     const collapsedKey = `${validSide}Collapsed`;
     state.sidebar[collapsedKey] = !state.sidebar[collapsedKey];
+    if (state.sidebar.compactMode && !state.sidebar[collapsedKey]) {
+      const oppositeSide = validSide === "left" ? "right" : "left";
+      state.sidebar[`${oppositeSide}Collapsed`] = true;
+    }
     renderSidebarState();
     handleWindowResize();
     setStatus(`${titleCase(validSide)} sidebar ${state.sidebar[collapsedKey] ? "collapsed" : "expanded"}.`);
@@ -5303,8 +5678,6 @@ function installNarrativeCanvasApp() {
       "add-node-effect",
       "add-node-condition-clause",
       "delete-node-condition-clause",
-      "add-direct-node-condition",
-      "delete-direct-node-condition",
       "add-choice-option-condition",
       "delete-choice-option-condition",
       "add-gate-condition",
@@ -5416,6 +5789,7 @@ function installNarrativeCanvasApp() {
     dom.themeHost?.setAttribute("data-theme", state.theme);
     dom.themeHost?.setAttribute("lang", state.language === "zh" ? "zh-CN" : "en");
     localizeStaticShell();
+    renderFloatingWindowPinStates();
     renderImmersiveFullscreenState();
     renderSidebarState();
     if (dom.themeToggle) {
@@ -5611,6 +5985,7 @@ function installNarrativeCanvasApp() {
       ["#aiFloatingWindow", "aria-label", "AI assistant"],
       ["[data-action='close-ai-window']", "title", "Close AI assistant"],
       ["[data-action='close-ai-window']", "aria-label", "Close AI assistant"],
+      ["[data-ai-beta]", "title", "Experimental feature"],
       ["#themeToggle", "title", "Switch theme"]
     ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
 
@@ -5631,8 +6006,8 @@ function installNarrativeCanvasApp() {
       ["#customNodeFields", "Fields, one per line"]
     ].forEach(([selector, key]) => localizeAttr(selector, "placeholder", key));
     localizeAttr("#customNodeColor", "title", "Node color");
-    localizeAttr("#customNodeKind", "title", "Node behavior");
-    localizeSelectOptions("#customNodeKind", { node: "Node", frame: "Frame" });
+    localizeAttr("#customNodeKind", "title", "Node template");
+    localizeSelectOptions("#customNodeKind", { node: "Basic Node", dialog: "Dialog", choice: "Choice", frame: "Frame" });
     localizeStaticDialogs();
   }
 
@@ -5668,15 +6043,17 @@ function installNarrativeCanvasApp() {
       ["#genericTextButton", "Apply"],
       ["#exportReportKicker", "Export report"],
       ["#exportReportDialog [value='confirm']", "Confirm OK"],
-      ["#nodeIconDialog .pane-kicker", "Node Icon"],
-      ["#nodeIconDialog label span", "Custom icon"],
-      ["#nodeIconDialog [data-action='reset-node-icon']", "Use type initial"],
-      ["#nodeIconDialog [value='confirm']", "Apply"],
       ["#nodeTypeDialog .pane-kicker", "Node Type"],
       ["#nodeTypeDialog label:nth-of-type(1) span", "Name"],
-      ["#nodeTypeDialog label:nth-of-type(2) span", "Behavior"],
-      ["#nodeTypeDialog label:nth-of-type(3) span", "Fields"],
-      ["#nodeTypeDialog .type-dialog-row .field span", "Color"],
+      ["#nodeTypeDialog label:nth-of-type(2) span", "Template"],
+      ["#nodeTypeBuiltinFieldsLabel", "Built-in fields"],
+      ["#nodeTypeCustomFieldsLabel", "Custom fields"],
+      ["#nodeTypeExistingFieldsLabel", "Existing fields not in this type"],
+      ["#nodeTypeAppearanceLabel", "Appearance"],
+      ["#nodeTypeDialog .type-dialog-icon-field .type-dialog-setting-label", "Icon"],
+      ["#nodeTypeDialog .type-dialog-color-field .type-dialog-setting-label", "Color"],
+      ["#nodeTypeDialog .type-dialog-opacity-field .type-dialog-setting-label", "Card opacity"],
+      ["#nodeTypeVisibilityLabel", "Visibility"],
       ["#nodeTypeHiddenInput + span", "Hide from library"],
       ["#nodeTypeEventHiddenInput + span", "Hide frame rows from Events Sheet"],
       ["#nodeTypeDialog [value='confirm']", "Save"],
@@ -5684,19 +6061,19 @@ function installNarrativeCanvasApp() {
       ["#nodeRequiredDialog p", "Select a node first to open the Node inspector."]
     ].forEach(([selector, key]) => localizeText(selector, key));
 
-    if (!dom.nodeIconDialog?.open) localizeText("#nodeIconDialogTitle", "Edit node type icon");
     if (!dom.nodeTypeDialog?.open) localizeText("#nodeTypeDialogTitle", "Edit node type");
 
     [
       ["#exportReportDialog", "aria-label", "Export report"],
       ["#playbookHelpDialog", "aria-label", "Playbook help"],
-      ["#nodeIconDialog", "aria-label", "Edit node type icon"],
-      ["#nodeIconInput", "aria-label", "Custom icon text or emoji"],
       ["#nodeTypeDialog", "aria-label", "Edit node type"],
+      ["#nodeTypeIconInput", "aria-label", "Icon text or emoji"],
+      ["#nodeTypeDialog [data-action='reset-node-type-icon']", "title", "Use type initial"],
+      ["#nodeTypeDialog [data-action='reset-node-type-icon']", "aria-label", "Use type initial"],
       ["#nodeRequiredDialog", "aria-label", "Node selection required"]
     ].forEach(([selector, attr, key]) => localizeAttr(selector, attr, key));
     localizeAttr("#nodeTypeFieldsInput", "placeholder", "Fields, one per line");
-    localizeSelectOptions("#nodeTypeKindInput", { node: "Node", frame: "Frame" });
+    localizeSelectOptions("#nodeTypeKindInput", { node: "Basic Node", dialog: "Dialog", choice: "Choice", frame: "Frame" });
     localizePlaybookHelpDialog();
     localizePlayRuleDialog();
   }
@@ -6383,9 +6760,26 @@ function installNarrativeCanvasApp() {
     return null;
   }
 
+  function getProjectDocumentFormatDetails(value = state.documentFormat) {
+    const format = normalizeDocumentFormat(value);
+    return {
+      plain: { filename: "Document.md", label: "Plain text", exportLabel: "Export MD" },
+      ink: { filename: "Document.ink", label: "Ink", exportLabel: "Export Ink" },
+      yarn: { filename: "Document.yarn", label: "Yarn", exportLabel: "Export Yarn" },
+      twee: { filename: "Document.twee", label: "Twee", exportLabel: "Export Twee" }
+    }[format];
+  }
+
+  function renderDocumentChromeChevron() {
+    return `<svg class="document-chrome-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 15.5 12 8.5l7 7"></path></svg>`;
+  }
+
   function renderProjectDocumentPage() {
     if (!dom.documentPanel) return;
     const format = normalizeDocumentFormat(state.documentFormat);
+    const formatDetails = getProjectDocumentFormatDetails(format);
+    const chromeCollapsed = Boolean(state.documentChromeCollapsed);
+    const chromeToggleLabel = t(chromeCollapsed ? "Expand document header" : "Collapse document header");
     if (state.documentDraftFormat !== format || state.documentApplyStatus === "synced") {
       state.documentDraft = buildProjectDocumentSource(format);
       state.documentDraftFormat = format;
@@ -6400,13 +6794,28 @@ function installNarrativeCanvasApp() {
     `).join("");
     const editorHint = t("Edit narrative content here. Recognized nodes, choices, conditions, effects, routes, and variables sync to the project; canvas layout and unsupported metadata stay unchanged.");
     dom.documentPanel.innerHTML = `
-      <div class="document-source-shell" data-document-toc="${state.documentTocOpen ? "open" : "closed"}">
-        <div class="document-editor-toolbar">
-          <div class="document-editor-identity">
-            <span class="document-editor-filename" title="${escapeAttr(editorHint)}">${escapeHtml(fileViews.document)}</span>
-            <div class="document-format-switch" role="group" aria-label="${escapeAttr(t("Document format"))}">${formatButtons}</div>
+      <div class="document-source-shell" data-document-toc="${state.documentTocOpen ? "open" : "closed"}" data-document-chrome="${chromeCollapsed ? "collapsed" : "expanded"}">
+        <div class="document-source-chrome">
+          <header class="document-header document-project-header">
+            <div>
+              <span class="pane-kicker">${escapeHtml(t("Document"))}</span>
+              <h2>${escapeHtml(formatDetails.filename)}</h2>
+              <div class="document-meta">${escapeHtml(`${t("{nodes} nodes, {links} links", { nodes: state.project.nodes.length, links: state.project.links.length })} · ${t(formatDetails.label)}`)}</div>
+            </div>
+            <div class="document-actions">
+              <button class="small-button" type="button" data-action="export-current-document">${escapeHtml(t(formatDetails.exportLabel))}</button>
+            </div>
+          </header>
+          <div class="document-editor-toolbar">
+            <div class="document-editor-identity">
+              <span class="document-editor-filename" title="${escapeAttr(editorHint)}">${escapeHtml(formatDetails.filename)}</span>
+              <div class="document-format-switch" role="group" aria-label="${escapeAttr(t("Document format"))}">${formatButtons}</div>
+            </div>
+            <div class="document-editor-status">
+              <span class="document-sync-status" data-document-sync-status data-status="${escapeAttr(state.documentApplyStatus)}">${escapeHtml(getDocumentSyncStatusLabel())}</span>
+              <button class="icon-button document-chrome-toggle" type="button" data-action="toggle-document-chrome" aria-expanded="${!chromeCollapsed}" aria-label="${escapeAttr(chromeToggleLabel)}" title="${escapeAttr(chromeToggleLabel)}">${renderDocumentChromeChevron()}</button>
+            </div>
           </div>
-          <span class="document-sync-status" data-document-sync-status data-status="${escapeAttr(state.documentApplyStatus)}">${escapeHtml(getDocumentSyncStatusLabel())}</span>
         </div>
         <div class="document-editor-main">
           <div class="document-editor-surface">
@@ -6692,6 +7101,27 @@ function installNarrativeCanvasApp() {
     if (editor) window.requestAnimationFrame(() => {
       syncDocumentEditorGutter(editor);
       syncDocumentOverlayScroll(editor);
+    });
+  }
+
+  function toggleDocumentChrome() {
+    if (state.activeFileId !== "document") return;
+    state.documentChromeCollapsed = !state.documentChromeCollapsed;
+    const shell = dom.documentPanel?.querySelector(".document-source-shell");
+    const button = shell?.querySelector("[data-action='toggle-document-chrome']");
+    const expanded = !state.documentChromeCollapsed;
+    const label = t(expanded ? "Collapse document header" : "Expand document header");
+    if (shell) shell.dataset.documentChrome = expanded ? "expanded" : "collapsed";
+    if (button) {
+      button.setAttribute("aria-expanded", String(expanded));
+      button.setAttribute("aria-label", label);
+      button.setAttribute("title", label);
+    }
+    const editor = dom.documentPanel?.querySelector("[data-document-source]");
+    if (editor) window.requestAnimationFrame(() => {
+      syncDocumentEditorGutter(editor);
+      syncDocumentOverlayScroll(editor);
+      editor.focus({ preventScroll: true });
     });
   }
 
@@ -7393,18 +7823,6 @@ function installNarrativeCanvasApp() {
   function getPlaybookGateRows() {
     const rows = [];
     getScriptBuilderNodes().forEach((node) => {
-      if (hasNodeCondition(node)) {
-        rows.push({
-          id: `condition:${node.id}`,
-          kind: "conditionNode",
-          typeLabel: "Condition node",
-          targetLabel: `${node.title || getNodeDisplayId(node)} (${getNodeTypeLabel(node.type)} ${getNodeDisplayId(node)})`,
-          condition: node.condition || (node.type === "Condition" ? node.body || "" : ""),
-          conditionMode: normalizeStoredConditionGroupMode(node.conditionMode),
-          nodeId: node.id,
-          legacyActionId: ""
-        });
-      }
       getGateChoiceOptions(node).forEach((option) => {
         rows.push({
           id: `choice:${node.id}:${option.id}`,
@@ -8143,23 +8561,11 @@ function installNarrativeCanvasApp() {
         addRead(getPlaybookActionStateKey(gateAction), { label: `${nodeLabel} gate`, nodeId: node.id, jsonToken: gateAction.id });
         scanTemplateReferences(gateAction.value, node, { label: `${nodeLabel} gate value`, nodeId: node.id, jsonToken: gateAction.id }, addInterpolation, addStatus);
       }
-      if (script?.condition) {
-        const fieldValue = getNodeFieldValue(node, script.condition);
-        scanExpression(fieldValue !== "" ? fieldValue : script.condition, node, { label: `${nodeLabel} condition`, nodeId: node.id });
-      } else if (hasNodeCondition(node)) {
-        scanExpression(node.condition || node.body, node, { label: `${nodeLabel} condition`, nodeId: node.id });
-      }
-
-      const assignment = getRuntimeAssignment(node, script);
-      if (assignment.key) {
-        addWrite(assignment.key, { label: `${nodeLabel} assignment`, nodeId: node.id });
-        scanTemplateReferences(assignment.value, node, { label: `${nodeLabel} assignment value`, nodeId: node.id }, addInterpolation, addStatus);
-      }
       logic.effects.forEach((effect, index) => scanStateEffect(effect, node, { label: `${nodeLabel} effect ${index + 1}`, nodeId: node.id }));
 
       scanTemplateReferences(script.title || node.title, node, { label: `${nodeLabel} title`, nodeId: node.id }, addInterpolation, addStatus);
       scanTemplateReferences(script.body || displayBody(node), node, { label: `${nodeLabel} body`, nodeId: node.id }, addInterpolation, addStatus);
-      if (node.type === "Dialog" && Array.isArray(node.turns)) {
+      if (isDialogNode(node) && Array.isArray(node.turns)) {
         node.turns.forEach((turn, index) => {
           scanTemplateReferences(turn.speaker, node, { label: `${nodeLabel} speaker ${index + 1}`, nodeId: node.id }, addInterpolation, addStatus);
           scanTemplateReferences(turn.line, node, { label: `${nodeLabel} line ${index + 1}`, nodeId: node.id }, addInterpolation, addStatus);
@@ -9107,8 +9513,6 @@ function installNarrativeCanvasApp() {
     });
     state.project.nodes.forEach((node) => {
       if (node.title) keys.add(node.title);
-      if (node.variable) keys.add(node.variable);
-      if (node.type === "Set" && node.value) keys.add(String(node.value));
     });
     return [...keys].filter(Boolean).sort((a, b) => a.localeCompare(b));
   }
@@ -9241,7 +9645,7 @@ function installNarrativeCanvasApp() {
       endCondition: `
         <label class="field">
           <span>${t("End Condition")}</span>
-          <input data-runner-rule-field="endCondition" value="${escapeAttr(rule.value || "")}" placeholder="${escapeAttr(t("Condition expression"))}" spellcheck="false"${disabledAttr}>
+          <textarea class="playbook-end-condition-editor" data-runner-rule-field="endCondition" rows="3" placeholder="${escapeAttr(t("Condition expression"))}" spellcheck="false"${disabledAttr}>${escapeHtml(rule.value || "")}</textarea>
           <small class="play-rule-status play-rule-status-${getEndConditionStatus(rule.value).status}" data-end-condition-status>${escapeHtml(formatEndConditionStatusLabel(getEndConditionStatus(rule.value)))}</small>
         </label>
       `,
@@ -9895,7 +10299,7 @@ function installNarrativeCanvasApp() {
     if (!column) return;
     showGenericTextInput({
       kicker: "Events Sheet",
-      title: `Rename ${column.label}`,
+      title: t("Rename {label}", { label: column.label }),
       label: "Column name",
       value: column.label,
       maxLength: 60,
@@ -10170,9 +10574,14 @@ function installNarrativeCanvasApp() {
     const typeLabel = eventType
       ? (getProjectNodeTypes().find((item) => item.type === eventType)?.label || eventType)
       : "";
-    const scope = typeLabel ? `the "${typeLabel}" frame type` : "the Events Sheet schema";
-    const message = `Hide only hides the column and keeps data. Delete removes "${column.label}" from ${scope} and clears that value from its frame nodes. Other frame types keep the column.`;
-    const title = `Delete ${column.label} column?`;
+    const scope = typeLabel
+      ? t('the "{label}" frame type', { label: typeLabel })
+      : t("the Events Sheet schema");
+    const message = t('Hide only hides the column and keeps data. Delete removes "{label}" from {scope} and clears that value from its frame nodes. Other frame types keep the column.', {
+      label: column.label,
+      scope
+    });
+    const title = t("Delete {label} column?", { label: column.label });
 
     if (dom.eventColumnDeleteDialog?.showModal) {
       dom.eventColumnDeleteDialog.returnValue = "";
@@ -10247,7 +10656,7 @@ function installNarrativeCanvasApp() {
   }
 
   function showResetEventColumnsConfirm() {
-    const message = "Reset restores the default Events Sheet columns. It removes column renames, hidden-column settings, column order changes, and custom sheet-only columns. Frame nodes are not deleted, and stored field values are not actively cleared; values from removed columns may stop showing until that field or column is added again.";
+    const message = "This restores the default Events Sheet columns. It removes column renames, hidden-column settings, column order changes, and custom sheet-only columns. Frame nodes are not deleted, and stored field values are not actively cleared; values from removed columns may stop showing until that field or column is added again.";
     if (dom.eventColumnsResetDialog?.showModal) {
       dom.eventColumnsResetDialog.returnValue = "";
       dom.eventColumnsResetDialog.showModal();
@@ -10334,11 +10743,10 @@ function installNarrativeCanvasApp() {
           : `<button class="icon-button danger-button palette-delete-button" aria-label="${escapeAttr(t("Delete node type"))}" title="${escapeAttr(t("Delete node type"))}" data-action="delete-custom-node-type" data-custom-node-type="${escapeAttr(type)}">x</button>`;
         return `
           <div class="palette-row">
-            <button class="palette-badge" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(type)}" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}" title="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(type) }))}" aria-label="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(type) }))}">${escapeHtml(meta.badge)}</button>
+            <button class="palette-badge" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(type)}" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}" title="${escapeAttr(t("Edit node type"))}" aria-label="${escapeAttr(t("Edit node type"))}">${escapeHtml(meta.badge)}</button>
             <button class="palette-item" data-action="add-node" data-type="${escapeAttr(type)}">
               <span class="palette-label">${escapeHtml(getNodeTypeLabel(type))}</span>
             </button>
-            <button class="icon-button palette-settings-button" aria-label="${escapeAttr(t("Edit node type"))}" title="${escapeAttr(t("Edit node type"))}" data-action="edit-node-type" data-node-type="${escapeAttr(type)}">...</button>
             <button class="icon-button palette-hide-button" aria-label="${escapeAttr(t("Hide node type"))}" title="${escapeAttr(t("Hide node type"))}" data-action="hide-node-type" data-node-type="${escapeAttr(type)}">-</button>
             ${deleteControl}
           </div>
@@ -10365,9 +10773,8 @@ function installNarrativeCanvasApp() {
         <div class="hidden-node-list">
           ${hiddenEntries.length ? hiddenEntries.map(([type, meta]) => `
             <div class="hidden-node-row">
-              <span class="palette-badge hidden-node-badge" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}">${escapeHtml(meta.badge)}</span>
+              <button class="palette-badge hidden-node-badge" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(type)}" data-icon-size="${getNodeIconSize(meta.badge)}" style="--node-color:${escapeAttr(meta.color)}" title="${escapeAttr(t("Edit node type"))}" aria-label="${escapeAttr(t("Edit node type"))}">${escapeHtml(meta.badge)}</button>
               <span class="palette-label">${escapeHtml(getNodeTypeLabel(type))}</span>
-              <button class="icon-button palette-settings-button" title="${escapeAttr(t("Edit node type"))}" aria-label="${escapeAttr(t("Edit node type"))}" data-action="edit-node-type" data-node-type="${escapeAttr(type)}">...</button>
               <button class="small-button restore-node-type-button" title="${escapeAttr(t("Restore node type"))}" data-action="restore-node-type" data-node-type="${escapeAttr(type)}">${t("Show")}</button>
             </div>
           `).join("") : `<div class="custom-node-empty">${t("No hidden node types.")}</div>`}
@@ -10496,6 +10903,7 @@ function installNarrativeCanvasApp() {
     const outputPoint = getOutputPoint(node);
     const inputPortStyle = `left:${inputPoint.x - node.x}px; top:${inputPoint.y - node.y}px; --node-color:${meta.color};`;
     const outputPortStyle = `left:${outputPoint.x - node.x}px; top:${outputPoint.y - node.y}px; --node-color:${meta.color};`;
+    const frameBgOpacity = isFrame ? normalizeNodeTypeOpacity(meta.cardOpacity) : null;
     const nodeClasses = [
       "node",
       isFrame ? `frame ${frameClass}` : "",
@@ -10506,9 +10914,9 @@ function installNarrativeCanvasApp() {
     ].filter(Boolean).join(" ");
     return `
       <div class="node-stack" data-node-stack-id="${escapeAttr(node.id)}" style="left:${node.x}px; top:${node.y}px; width:${width}px; height:${height}px; --node-layer-order:${Number(layerOrder) || 0};">
-        <article class="${nodeClasses}" data-node-id="${escapeAttr(node.id)}" style="left:0; top:0; width:${width}px; height:${height}px; --node-color:${meta.color}; ${match ? "outline:1px solid var(--accent-orange);" : ""}">
+        <article class="${nodeClasses}" data-node-id="${escapeAttr(node.id)}" style="left:0; top:0; width:${width}px; height:${height}px; --node-color:${meta.color};${frameBgOpacity != null ? ` --node-bg-opacity:${frameBgOpacity}%;` : " "}${match ? " outline:1px solid var(--accent-orange);" : ""}">
           <div class="node-header" data-drag-handle="true" data-node-id="${escapeAttr(node.id)}">
-            <button class="node-icon" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(node.type)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" data-icon-size="${getNodeIconSize(icon)}" title="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(node.type) }))}" aria-label="${escapeAttr(t("Edit icon for {type}", { type: getNodeTypeLabel(node.type) }))}">${escapeHtml(icon)}</button>
+            <button class="node-icon" type="button" data-action="edit-node-type-badge" data-node-type="${escapeAttr(node.type)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" data-icon-size="${getNodeIconSize(icon)}" title="${escapeAttr(t("Edit node type"))}" aria-label="${escapeAttr(t("Edit node type"))}">${escapeHtml(icon)}</button>
             <span class="node-type">${escapeHtml(getNodeTypeLabel(node.type))}</span>
               <span class="node-id">${escapeHtml(node.id || getNodeDisplayId(node))}</span>
             ${isFrame ? `<button class="frame-canvas-button" type="button" data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" title="${escapeAttr(t("Open frame canvas"))}" aria-label="${escapeAttr(t("Open frame canvas"))}">▣</button>` : ""}
@@ -10531,13 +10939,21 @@ function installNarrativeCanvasApp() {
   }
 
   function renderChoiceFollowupLabels(node) {
-    const labels = getChoiceFollowupLabels(node);
-    if (!labels.length) return "";
-    const renderedLabels = labels.map((label) => t("Choice: {label}", { label }));
-    return `<div class="node-choice-followup" aria-label="${escapeAttr(renderedLabels.join(" / "))}">${renderedLabels.map((label) => `<span title="${escapeAttr(label)}">${escapeHtml(label)}</span>`).join("")}</div>`;
+    const entries = getChoiceFollowupEntries(node);
+    if (!entries.length) return "";
+    const renderedEntries = entries.map((entry) => ({
+      ...entry,
+      text: t("Choice: {label}", { label: entry.label }),
+      focusLabel: t("Focus source Choice node: {label}", { label: entry.label })
+    }));
+    return `<div class="node-choice-followup" aria-label="${escapeAttr(renderedEntries.map((entry) => entry.text).join(" / "))}">${renderedEntries.map((entry) => `<button class="node-choice-followup-button" type="button" data-action="focus-choice-source" data-choice-source-node-id="${escapeAttr(entry.sourceNodeId)}" data-no-drag="true" aria-label="${escapeAttr(entry.focusLabel)}">${escapeHtml(entry.text)}</button>`).join("")}</div>`;
   }
 
   function getChoiceFollowupLabels(node) {
+    return getChoiceFollowupEntries(node).map((entry) => entry.label);
+  }
+
+  function getChoiceFollowupEntries(node) {
     if (!node?.id) return [];
     return getChoiceFollowupLabelMap().get(node.id) || [];
   }
@@ -10549,7 +10965,7 @@ function installNarrativeCanvasApp() {
     const nodeMap = new Map((state.project?.nodes || []).map((node) => [node.id, node]));
     (state.project?.links || []).forEach((link) => {
       const source = nodeMap.get(link.from);
-      if (!source || source.type !== "Choice" || !link.to) return;
+      if (!source || !isChoiceNode(source) || !link.to) return;
       const options = Array.isArray(source.choiceOptions) ? source.choiceOptions : [];
       const choiceIndex = normalizeChoiceIndex(link.choiceIndex);
       const option = (link.choiceOptionId ? options.find((entry) => entry?.id === link.choiceOptionId) : null)
@@ -10557,9 +10973,11 @@ function installNarrativeCanvasApp() {
       const legacyChoice = choiceIndex != null && Array.isArray(source.choices) ? source.choices[choiceIndex] : "";
       const label = stripChoiceDisplayOrdinal(normalizeOptionalString(option?.label || link.label || legacyChoice).trim());
       if (!label) return;
-      const labels = map.get(link.to) || [];
-      if (!labels.includes(label)) labels.push(label);
-      map.set(link.to, labels);
+      const entries = map.get(link.to) || [];
+      if (!entries.some((entry) => entry.label === label && entry.sourceNodeId === source.id)) {
+        entries.push({ label, sourceNodeId: source.id });
+      }
+      map.set(link.to, entries);
     });
     state.derived.choiceFollowupLabels = { dirtyVersion: state.dirtyVersion, structureVersion: state.structureVersion, map };
     return map;
@@ -10581,8 +10999,8 @@ function installNarrativeCanvasApp() {
 
   function renderNodeCardContent(node, inlineEditField) {
     if (inlineEditField) return renderNodeText(node, inlineEditField);
-    if (node?.type === "Choice") return renderChoiceNodeCardContent(node);
-    if (node?.type === "Dialog" && Array.isArray(node.turns) && node.turns.length) return renderDialogNodeCardContent(node);
+    if (isChoiceNode(node)) return renderChoiceNodeCardContent(node);
+    if (isDialogNode(node) && Array.isArray(node.turns) && node.turns.length) return renderDialogNodeCardContent(node);
     return `${renderNodeText(node, inlineEditField)}${hasNodeChoices(node) ? `<div class="node-meta">${t("{count} choices", { count: node.choices.length })}</div>` : ""}`;
   }
 
@@ -10621,9 +11039,6 @@ function installNarrativeCanvasApp() {
   }
 
   function getInlineEditableField(node) {
-    if (!node) return "body";
-    if (node.type === "Condition" || hasNodeCondition(node)) return "condition";
-    if (node.type === "Set" || getNodeVariableKey(node)) return "value";
     return "body";
   }
 
@@ -10738,11 +11153,20 @@ function installNarrativeCanvasApp() {
     if (!isCanvasFileActive() || state.canvasViewportRenderFrame) return;
     state.canvasViewportRenderFrame = window.requestAnimationFrame(() => {
       state.canvasViewportRenderFrame = null;
-      const canvasRenderContext = getCanvasRenderContext();
-      renderNodes(canvasRenderContext);
-      renderLinks(canvasRenderContext);
-      markCanvasSurfaceRendered();
+      renderCanvasViewportNow();
     });
+  }
+
+  function renderCanvasViewportNow() {
+    if (!isCanvasFileActive()) return;
+    if (state.canvasViewportRenderFrame) {
+      window.cancelAnimationFrame(state.canvasViewportRenderFrame);
+      state.canvasViewportRenderFrame = null;
+    }
+    const canvasRenderContext = getCanvasRenderContext();
+    renderNodes(canvasRenderContext);
+    renderLinks(canvasRenderContext);
+    markCanvasSurfaceRendered();
   }
 
   function getCanvasViewportBounds(padding = CANVAS_RENDER_PADDING) {
@@ -10881,11 +11305,12 @@ function installNarrativeCanvasApp() {
         label: typeDef.label,
         custom: Boolean(typeDef.custom),
         kind: typeDef.kind,
+        template: getNodeTypeTemplate(typeDef),
         fields: typeDef.fields || [],
         hidden: Boolean(typeDef.hidden),
         eventSheetHidden: Boolean(typeDef.eventSheetHidden),
+        cardOpacity: normalizeNodeTypeOpacity(typeDef.cardOpacity),
         system: Boolean(typeDef.system),
-        legacy: Boolean(typeDef.legacy)
       };
     });
     state.derived.nodeTypeMap = { source: types, value: map };
@@ -10899,14 +11324,15 @@ function installNarrativeCanvasApp() {
         ...builtIn,
         label: getDefaultNodeTypeLabel(type),
         kind: type === "Event" ? "frame" : "node",
+        template: getBuiltInNodeTypeTemplate(type, type === "Event" ? "frame" : "node"),
         fields: [],
-        hidden: Boolean(builtIn.legacy),
+        hidden: false,
         eventSheetHidden: false,
+        cardOpacity: 20,
         system: Boolean(builtIn.system),
-        legacy: Boolean(builtIn.legacy)
       };
     }
-    return { ...FALLBACK_NODE_META, label: type || FALLBACK_NODE_META.label, kind: "node", fields: [], hidden: false, eventSheetHidden: false, system: false, legacy: false };
+    return { ...FALLBACK_NODE_META, label: type || FALLBACK_NODE_META.label, kind: "node", fields: [], hidden: false, eventSheetHidden: false, cardOpacity: 100, system: false };
   }
 
   function defaultNodeTypeList() {
@@ -10918,11 +11344,12 @@ function installNarrativeCanvasApp() {
       width: meta.width,
       custom: false,
       kind: type === "Event" ? "frame" : "node",
+      template: getBuiltInNodeTypeTemplate(type, type === "Event" ? "frame" : "node"),
       fields: [],
-      hidden: Boolean(meta.legacy),
+      hidden: false,
       eventSheetHidden: false,
+      cardOpacity: 20,
       system: Boolean(meta.system),
-      legacy: Boolean(meta.legacy)
     }));
     const advanced = defaultAdvancedNodeTypes.map((typeDef) => ({
       type: typeDef.type,
@@ -10933,11 +11360,12 @@ function installNarrativeCanvasApp() {
       custom: false,
       badgeCustom: Boolean(typeDef.badgeCustom),
       kind: isFrameKind(typeDef.kind) ? "frame" : "node",
+      template: isFrameKind(typeDef.kind) ? "frame" : "node",
       fields: normalizeNodeTypeFields(typeDef.fields),
       hidden: Boolean(typeDef.hidden),
       eventSheetHidden: isFrameKind(typeDef.kind) ? Boolean(typeDef.eventSheetHidden) : false,
+      cardOpacity: 20,
       system: true,
-      legacy: false
     }));
     const builtInTypes = new Map([...builtIns, ...advanced].map((typeDef) => [typeDef.type, typeDef]));
     SPECIAL_EDITOR_NODE_TYPES.forEach((type) => {
@@ -10952,11 +11380,11 @@ function installNarrativeCanvasApp() {
         width: meta.width,
         custom: false,
         kind: type === "Event" ? "frame" : "node",
+        template: getBuiltInNodeTypeTemplate(type, type === "Event" ? "frame" : "node"),
         fields: [],
-        hidden: Boolean(meta.legacy),
+        hidden: false,
         eventSheetHidden: false,
         system: Boolean(meta.system),
-        legacy: Boolean(meta.legacy)
       });
     });
     return [...builtInTypes.values()];
@@ -10980,6 +11408,7 @@ function installNarrativeCanvasApp() {
         label: typeDef.label,
         custom: Boolean(typeDef.custom),
         kind: typeDef.kind,
+        template: getNodeTypeTemplate(typeDef),
         fields: typeDef.fields || [],
         hidden: Boolean(typeDef.hidden)
       }]);
@@ -10999,6 +11428,7 @@ function installNarrativeCanvasApp() {
         label: typeDef.label,
         custom: Boolean(typeDef.custom),
         kind: typeDef.kind,
+        template: getNodeTypeTemplate(typeDef),
         fields: typeDef.fields || [],
         hidden: true
       }]);
@@ -11166,7 +11596,10 @@ function installNarrativeCanvasApp() {
       button.classList.toggle("active", button.dataset.panel === state.panel);
     });
     dom.scope.querySelectorAll(".inspector-panel").forEach((panel) => {
-      panel.classList.toggle("active", panel.id === `${state.panel}Panel`);
+      const panelName = panel.id.replace(/Panel$/, "");
+      const activeInSidebar = panelName === state.panel;
+      const activeInFloatingWindow = panelName === state.floatingInspectorPanel;
+      panel.classList.toggle("active", activeInSidebar || activeInFloatingWindow);
     });
   }
 
@@ -11178,16 +11611,133 @@ function installNarrativeCanvasApp() {
     return;
   }
 
+  function renderAiMarkdownInline(value) {
+    const tokens = [];
+    const hold = (html) => `\u0000${tokens.push(html) - 1}\u0000`;
+    let source = String(value || "");
+    source = source.replace(/`([^`\n]+)`/g, (_match, code) => hold(`<code>${escapeHtml(code)}</code>`));
+    source = source.replace(/\[([^\]\n]+)\]\(([^\s)]+)(?:\s+["']([^"']*)["'])?\)/g, (_match, label, href, title) => {
+      let url = "";
+      try {
+        const parsed = new URL(href, window.location?.href || "https://localhost/");
+        if (["http:", "https:", "mailto:"].includes(parsed.protocol)) url = href;
+      } catch (_error) { /* Render invalid links as plain text. */ }
+      if (!url) return escapeHtml(label);
+      const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+      return hold(`<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${escapeHtml(label)}</a>`);
+    });
+    source = escapeHtml(source)
+      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
+      .replace(/~~([^~\n]+)~~/g, "<del>$1</del>")
+      .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
+    return source.replace(/\u0000(\d+)\u0000/g, (_match, index) => tokens[Number(index)] || "");
+  }
+
+  function renderAiMarkdown(value) {
+    const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
+    const html = [];
+    let paragraph = [];
+    let listType = "";
+    let inFence = false;
+    let fenceLanguage = "";
+    let fenceLines = [];
+    const flushParagraph = () => {
+      if (!paragraph.length) return;
+      html.push(`<p>${paragraph.map(renderAiMarkdownInline).join("<br>")}</p>`);
+      paragraph = [];
+    };
+    const closeList = () => {
+      if (!listType) return;
+      html.push(`</${listType}>`);
+      listType = "";
+    };
+    lines.forEach((line) => {
+      const fence = line.match(/^\s*```\s*([^\s`]*)\s*$/);
+      if (fence) {
+        flushParagraph(); closeList();
+        if (inFence) {
+          const languageClass = fenceLanguage ? ` class="language-${escapeAttr(fenceLanguage)}"` : "";
+          html.push(`<pre><code${languageClass}>${escapeHtml(fenceLines.join("\n"))}</code></pre>`);
+          inFence = false; fenceLanguage = ""; fenceLines = [];
+        } else {
+          inFence = true; fenceLanguage = fence[1] || "";
+        }
+        return;
+      }
+      if (inFence) { fenceLines.push(line); return; }
+      if (!line.trim()) { flushParagraph(); closeList(); return; }
+      const heading = line.match(/^\s*(#{1,4})\s+(.+)$/);
+      if (heading) { flushParagraph(); closeList(); const level = heading[1].length; html.push(`<h${level}>${renderAiMarkdownInline(heading[2])}</h${level}>`); return; }
+      if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { flushParagraph(); closeList(); html.push("<hr>"); return; }
+      const quote = line.match(/^\s*>\s?(.*)$/);
+      if (quote) { flushParagraph(); closeList(); html.push(`<blockquote>${renderAiMarkdownInline(quote[1])}</blockquote>`); return; }
+      const list = line.match(/^\s*([-+*]|\d+[.)])\s+(.+)$/);
+      if (list) {
+        flushParagraph();
+        const nextType = /^\d/.test(list[1]) ? "ol" : "ul";
+        if (listType !== nextType) { closeList(); listType = nextType; html.push(`<${listType}>`); }
+        html.push(`<li>${renderAiMarkdownInline(list[2])}</li>`);
+        return;
+      }
+      closeList();
+      paragraph.push(line);
+    });
+    if (inFence) html.push(`<pre><code${fenceLanguage ? ` class="language-${escapeAttr(fenceLanguage)}"` : ""}>${escapeHtml(fenceLines.join("\n"))}</code></pre>`);
+    flushParagraph(); closeList();
+    return html.join("");
+  }
+
+  function aiCopyIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`;
+  }
+
+  async function writeTextToClipboard(value) {
+    const text = String(value || "");
+    if (!text) return false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_error) { /* Use the selection fallback below. */ }
+    const field = document.createElement("textarea");
+    field.value = text;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.append(field);
+    field.select();
+    let copied = false;
+    try { copied = Boolean(document.execCommand?.("copy")); } catch (_error) { copied = false; }
+    field.remove();
+    return copied;
+  }
+
+  async function copyAiMessage(index) {
+    const message = state.aiMessages[Number(index)];
+    const copied = await writeTextToClipboard(message?.content || "");
+    setStatus(t(copied ? "Message copied." : "Could not copy the text."));
+  }
+
+  async function copyAiConversation() {
+    const text = state.aiMessages.map((message) => `${message.role === "user" ? t("You") : "AI"}:\n${message.content || ""}`).join("\n\n");
+    const copied = await writeTextToClipboard(text);
+    setStatus(t(copied ? "Conversation copied." : "Could not copy the text."));
+  }
+
   function renderAiPanel() {
     if (!dom.aiPanel) return;
     const config = getWebAiConfig();
     const selected = (state.selectedNodeIds?.length ? state.selectedNodeIds : [state.selectedNodeId]).filter(Boolean);
-    const messages = state.aiMessages.map((message, index) => `<article class="ai-message ai-message-${escapeAttr(message.role)}${state.aiBusy && index === state.aiStreamIndex ? " streaming" : ""}" data-ai-message-index="${index}"><strong>${message.role === "user" ? t("You") : "AI"}</strong><div>${escapeHtml(message.content).replace(/\n/g, "<br>")}</div></article>`).join("");
+    const messages = state.aiMessages.map((message, index) => `<article class="ai-message ai-message-${escapeAttr(message.role)}${state.aiBusy && index === state.aiStreamIndex ? " streaming" : ""}" data-ai-message-index="${index}"><div class="ai-message-header"><strong>${message.role === "user" ? t("You") : "AI"}</strong><button class="ai-copy-button" data-action="ai-copy-message" data-ai-message-index="${index}" type="button" title="${escapeAttr(t("Copy message"))}" aria-label="${escapeAttr(t("Copy message"))}">${aiCopyIcon()}</button></div><div class="ai-markdown">${renderAiMarkdown(message.content)}</div></article>`).join("");
     const patch = state.aiPendingPatch;
     const operations = Array.isArray(patch?.operations) ? patch.operations : [];
     const proposal = patch ? `<section class="ai-proposal"><h3>${escapeHtml(patch.summary || t("Canvas change proposal"))}</h3><ol>${operations.map((op) => `<li><code>${escapeHtml(op.op || "")}</code> ${escapeHtml(op.node?.title || op.id || op.from || "")}</li>`).join("")}</ol><div class="ai-actions"><button data-action="ai-apply-patch" type="button">${t("Apply to canvas")}</button><button data-action="ai-reject-patch" type="button">${t("Reject")}</button></div></section>` : "";
     const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
-    dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span></div><div class="ai-messages" aria-live="polite">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change..."))}" ${state.aiBusy ? "disabled" : ""}></textarea><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Responding...") : t("Send")}</button>${state.aiBusy ? `<button data-action="ai-stop" type="button">${t("Stop")}</button>` : ""}<button data-action="ai-clear" type="button">${t("Clear")}</button></div></div>`;
+    const composerLocked = state.aiBusy;
+    dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span>${state.aiMessages.length ? `<button class="ai-copy-button" data-action="ai-copy-conversation" type="button" title="${escapeAttr(t("Copy conversation"))}" aria-label="${escapeAttr(t("Copy conversation"))}">${aiCopyIcon()}<span>${escapeHtml(t("Copy conversation"))}</span></button>` : ""}</div><div class="ai-messages" aria-live="polite">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<div class="ai-composer"><textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change. Enter to send; Shift+Enter for a new line."))}" ${composerLocked ? "disabled" : ""}>${escapeHtml(state.aiPromptDraft)}</textarea><div class="ai-composer-toolbar"><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Responding...") : t("Send")}</button>${state.aiBusy ? `<button data-action="ai-stop" type="button">${t("Stop")}</button>` : ""}<button data-action="ai-clear" type="button">${t("Clear")}</button></div></div></div></div>`;
     dom.aiPanel.querySelector(".ai-messages")?.scrollTo?.({ top: 999999 });
     renderAiFloatingState();
   }
@@ -11196,9 +11746,9 @@ function installNarrativeCanvasApp() {
     state.aiStreamFrame = 0;
     const index = state.aiStreamIndex;
     const message = state.aiMessages[index];
-    const body = dom.aiPanel?.querySelector(`[data-ai-message-index="${index}"] > div`);
+    const body = dom.aiPanel?.querySelector(`[data-ai-message-index="${index}"] > .ai-markdown`);
     if (!message || !body) return;
-    body.innerHTML = escapeHtml(message.content).replace(/\n/g, "<br>");
+    body.innerHTML = renderAiMarkdown(message.content);
     const list = dom.aiPanel.querySelector(".ai-messages");
     if (list) list.scrollTop = list.scrollHeight;
   }
@@ -11229,16 +11779,26 @@ function installNarrativeCanvasApp() {
       dom.aiFloatingButton.setAttribute("aria-expanded", state.aiOpen ? "true" : "false");
       dom.aiFloatingButton.classList.toggle("active", state.aiOpen);
     }
+    renderFloatingWindowPinState("ai");
   }
 
   function toggleAiWindow(force = null) {
-    state.aiOpen = typeof force === "boolean" ? force : !state.aiOpen;
+    const nextOpen = typeof force === "boolean" ? force : !state.aiOpen;
+    state.aiOpen = nextOpen;
+    if (nextOpen) {
+      state.floatingWindowGeometry.ai = null;
+      clearFloatingWindowStyles("ai");
+    }
+    if (!state.aiOpen) {
+      setFloatingWindowPinned("ai", false);
+    }
     renderAiPanel();
     if (state.aiOpen) window.setTimeout(() => dom.aiPanel?.querySelector("[data-ai-prompt]")?.focus?.(), 0);
   }
 
   function buildAiContext() {
     const selected = new Set((state.selectedNodeIds?.length ? state.selectedNodeIds : [state.selectedNodeId]).filter(Boolean));
+    const contextScope = selected.size ? "focused-neighborhood" : "entire-canvas";
     let nodes = state.project.nodes;
     if (selected.size) {
       const related = new Set(selected);
@@ -11246,7 +11806,11 @@ function installNarrativeCanvasApp() {
       nodes = nodes.filter((node) => related.has(node.id));
     }
     return {
-      project: { title: state.project.title, notes: state.project.notes },
+      contextScope,
+      contextNotice: selected.size
+        ? "This payload contains only the focused node neighborhood. Unlisted project nodes and links may still exist; do not report them as missing without requesting the entire canvas."
+        : "This payload contains the entire canvas.",
+      project: { title: state.project.title, notes: state.project.notes, nodeCount: state.project.nodes.length, linkCount: state.project.links.length },
       focusNodeIds: [...selected], variables: state.project.variables, characters: state.project.characters,
       nodes: nodes.map((node) => ({ id: node.id, type: node.type, title: node.title, body: node.body, frameId: node.frameId || "", turns: node.turns, choiceOptions: node.choiceOptions, stateLogic: node.stateLogic, routing: node.routing })),
       links: state.project.links.filter((link) => !selected.size || nodes.some((node) => node.id === link.from || node.id === link.to))
@@ -11254,7 +11818,7 @@ function installNarrativeCanvasApp() {
   }
 
   function aiSystemPrompt() {
-    return `You are the Narrative Canvas copilot. Discuss narrative design in the user's language. When canvas edits are requested, finish with exactly one JSON object inside a fenced json block: {"summary":"...","operations":[{"op":"addNode","tempId":"new_1","node":{"type":"Dialog","title":"...","body":"","frameId":"","turns":[{"speaker":"...","line":"..."}]},"placement":{"x":500,"y":300}}]}. Every operation MUST include op. Allowed operations: addNode {op,tempId,node,placement}, updateNode {op,id,changes}, addLink {op,from,to,label,choiceOptionId}, deleteLink {op,id}. Never delete nodes. Node types include Content, Dialog, Choice, Marker, Clue, StorySequence and other existing project types. Preserve existing text unless asked. For addNode, include type,title,body,frameId; Dialog turns use {speaker,line}; Choice must include matching choiceOptions and choices. Keep operations <= 12.`;
+    return `You are the Narrative Canvas copilot. Discuss narrative design in the user's language. Respect contextScope: focused-neighborhood is partial, so never claim that an unlisted node or link is missing; ask for Entire canvas context before making whole-project integrity claims. When canvas edits are requested, finish with exactly one JSON object inside a fenced json block: {"summary":"...","operations":[{"op":"addNode","tempId":"new_1","node":{"type":"Dialog","title":"...","body":"","frameId":"","turns":[{"speaker":"...","line":"..."}]},"placement":{"x":500,"y":300}}]}. Every operation MUST include op. Allowed operations: addNode {op,tempId,node,placement}, updateNode {op,id,changes}, addLink {op,from,to,label,choiceOptionId}, deleteLink {op,id}. Never delete nodes. Node types include Content, Dialog, Choice, Marker, Clue, StorySequence and other existing project types. Preserve existing text unless asked. For addNode, include type,title,body,frameId; Dialog turns use {speaker,line}; Choice must include matching choiceOptions and choices. Keep operations <= 12.`;
   }
 
   function extractAiPatch(content) {
@@ -11331,11 +11895,12 @@ function installNarrativeCanvasApp() {
 
   async function sendAiMessage() {
     if (state.aiBusy) return;
-    const prompt = dom.aiPanel?.querySelector("[data-ai-prompt]")?.value?.trim() || "";
+    const prompt = dom.aiPanel?.querySelector("[data-ai-prompt]")?.value?.trim() || state.aiPromptDraft.trim();
     if (!prompt) return;
     saveWebAiConfig();
     state.aiMessages.push({ role: "user", content: prompt });
-    const payloadMessages = state.aiMessages.slice(-12).map(({ role, content }) => ({ role, content }));
+    state.aiPromptDraft = "";
+    const payloadMessages = state.aiMessages.slice(-12).map((message) => ({ role: message.role, content: message.content }));
     state.aiMessages.push({ role: "assistant", content: "" });
     const streamIndex = state.aiMessages.length - 1;
     const requestId = state.aiRequestId + 1;
@@ -11401,7 +11966,7 @@ function installNarrativeCanvasApp() {
       if (!allowed.has(operation.op)) throw new Error("AI patch contains unsupported operations.");
       if (operation.op === "addNode" && operation.node && typeof operation.node === "object") {
         const node = { ...operation.node };
-        if (node.type === "Dialog" && !Array.isArray(node.turns) && (node.speaker || node.line)) {
+        if (isDialogNode(node) && !Array.isArray(node.turns) && (node.speaker || node.line)) {
           node.turns = [{ speaker: String(node.speaker || ""), line: String(node.line || "") }];
           delete node.speaker;
           delete node.line;
@@ -11459,6 +12024,7 @@ function installNarrativeCanvasApp() {
     if (!panelElement) return;
     if (panelElement.parentElement !== dom.inspectorFloatBody) dom.inspectorFloatBody.append(panelElement);
     dom.inspectorFloatOverlay.hidden = false;
+    renderFloatingWindowPinState("inspector");
     applyFloatingWindowGeometry("inspector");
     if (dom.inspectorFloatTitle) {
       const node = panel === "node" ? getNode(state.selectedNodeId) : null;
@@ -11478,6 +12044,7 @@ function installNarrativeCanvasApp() {
   function closeFloatingInspector(options = {}) {
     const previousPanel = state.floatingInspectorPanel;
     state.floatingInspectorPanel = "";
+    setFloatingWindowPinned("inspector", false);
     restoreInspectorPanels();
     if (dom.inspectorFloatOverlay) dom.inspectorFloatOverlay.hidden = true;
     clearFloatingWindowStyles("inspector");
@@ -11579,21 +12146,12 @@ function installNarrativeCanvasApp() {
     const scrollTop = keepScroll && scroller ? scroller.scrollTop : 0;
     dom.nodePanel.dataset.renderedNodeId = node.id;
     const meta = getNodeMeta(node.type);
-    const legacyBanner = meta.legacy ? `
-      <div class="legacy-node-banner" role="note">
-        <div class="legacy-node-banner-body">
-          <strong>${t("Legacy node type")}</strong>
-          <span>${t("Set / Condition are now node properties. The State Logic section below records this node's effects and gate.")}</span>
-        </div>
-        <button class="small-button" type="button" data-action="convert-legacy-node">${t("Convert to property")}</button>
-      </div>` : "";
     dom.nodePanel.innerHTML = `
       <div class="form-stack">
-        ${legacyBanner}
         <label class="field">
           <span>${t("Type")}</span>
           <select data-node-field="type">
-            ${getNodeTypeEntries(node.type).map(([type, m]) => `<option value="${escapeAttr(type)}" ${node.type === type ? "selected" : ""}>${escapeHtml(getNodeTypeLabel(type))}${m.legacy ? " (legacy)" : ""}${m.hidden && !m.legacy ? " (hidden)" : ""}${m.removed ? " (removed)" : ""}</option>`).join("")}
+            ${getNodeTypeEntries(node.type).map(([type, m]) => `<option value="${escapeAttr(type)}" ${node.type === type ? "selected" : ""}>${escapeHtml(getNodeTypeLabel(type))}${m.hidden ? " (hidden)" : ""}${m.removed ? " (removed)" : ""}</option>`).join("")}
           </select>
         </label>
         ${isEventSheetNode(node) ? renderEventFrameFields(node) : `
@@ -11602,7 +12160,7 @@ function installNarrativeCanvasApp() {
             <input data-node-field="title" value="${escapeAttr(node.title || "")}">
           </label>
           ${renderNodeBodyField(node)}
-          ${node.type === "Dialog" ? renderNodeDialogTurnsField(node) : ""}
+          ${isDialogNode(node) ? renderNodeDialogTurnsField(node) : ""}
           ${renderNodeCastFields(node)}
           ${!isFrameNode(node) ? renderNodeStateLogicFields(node) : ""}
           ${renderTypeFields(node)}
@@ -11621,11 +12179,12 @@ function installNarrativeCanvasApp() {
 
   function renderNodeDialogTurnsField(node) {
     const turns = Array.isArray(node.turns) ? node.turns : [];
+    const speakerRatio = normalizeDialogSpeakerRatio(node.dialogSpeakerRatio);
     const headerHint = turns.length
       ? t("{count} turns — Play steps through each line. Cast Speaker chips auto-fill from speakers below.", { count: turns.length })
       : t("Optional: split this Dialog into multiple turns so a single node carries a back-and-forth exchange.");
     return `
-      <section class="dialog-turns-editor">
+      <section class="dialog-turns-editor" style="--dialog-speaker-ratio:${speakerRatio}%">
         <header>
           <span>${t("Turns")}</span>
         </header>
@@ -11634,6 +12193,7 @@ function installNarrativeCanvasApp() {
           ${turns.length === 0 ? `<div class="nc-empty-state">${t("No turns yet.")}</div>` : turns.map((turn, index) => `
             <div class="dialog-turn-row" data-dialog-turn-index="${index}">
               <input data-dialog-turn-index="${index}" data-dialog-turn-field="speaker" list="dialogTurnSpeakerOptions" value="${escapeAttr(turn.speaker || "")}" placeholder="${escapeAttr(t("Speaker"))}" spellcheck="false" data-dialog-turn-focus-target="speaker">
+              <span class="dialog-turn-column-separator" data-dialog-column-resize="true" data-dialog-node-id="${escapeAttr(node.id)}" role="separator" aria-orientation="vertical" aria-label="${escapeAttr(t("Resize speaker column"))}" title="${escapeAttr(t("Resize speaker column"))}"></span>
               <textarea data-dialog-turn-index="${index}" data-dialog-turn-field="line" placeholder="${escapeAttr(t("Line"))}" spellcheck="false">${escapeHtml(turn.line || "")}</textarea>
               <div class="dialog-turn-actions">
                 <button class="icon-button" type="button" title="${escapeAttr(t("Move turn up"))}" data-action="move-dialog-turn-up" data-dialog-turn-index="${index}" ${index === 0 ? "disabled" : ""}>^</button>
@@ -11660,8 +12220,6 @@ function installNarrativeCanvasApp() {
       Content: "Scene title",
       Dialog: "Scene title",
       Choice: "Choice prompt",
-      Condition: "Gate name",
-      Set: "Action name",
       Marker: "Marker label",
       Event: "Event title"
     };
@@ -11681,7 +12239,6 @@ function installNarrativeCanvasApp() {
   }
 
   function renderNodeBodyField(node) {
-    if (node.type === "Set" || node.type === "Condition") return "";
     return `
       <label class="field">
         <span>${escapeHtml(getNodeBodyLabel(node))}</span>
@@ -12281,10 +12838,11 @@ function installNarrativeCanvasApp() {
   function renderNodeCastChips(node) {
     const links = getNodeCharacterLinks(node, { includeEventAggregate: isEventSheetNode(node) });
     if (!links.length) return "";
-    const visible = links.slice(0, 3);
+    const showAll = isFrameNode(node);
+    const visible = showAll ? links : links.slice(0, 3);
     const hiddenCount = links.length - visible.length;
     return `
-      <div class="node-cast-chips">
+      <div class="node-cast-chips${showAll ? " node-cast-chips-all" : ""}">
         ${visible.map((link) => renderCastChip(link)).join("")}
         ${hiddenCount > 0 ? `<span class="node-cast-chip more">+${hiddenCount}</span>` : ""}
       </div>
@@ -12294,7 +12852,8 @@ function installNarrativeCanvasApp() {
   function renderCastChip(link) {
     const characterName = link.character?.name || getCharacterName(link.characterId) || "Character";
     const role = getCastRelationLabel(link.role);
-    return `<span class="node-cast-chip" title="${escapeAttr(characterName)} · ${escapeAttr(role)}">${escapeHtml(characterName)} · ${escapeHtml(role)}</span>`;
+    const searchLabel = t("Search character: {name}", { name: characterName });
+    return `<button class="node-cast-chip node-cast-chip-button" type="button" data-action="open-character-search" data-character-id="${escapeAttr(link.characterId)}" data-no-drag="true" aria-label="${escapeAttr(searchLabel)}">${escapeHtml(characterName)} · ${escapeHtml(role)}</button>`;
   }
 
   // Frame node properties render inline at the same level as every other property,
@@ -12351,46 +12910,10 @@ function installNarrativeCanvasApp() {
   }
 
   function renderTypeFields(node) {
-    if (node.type === "Choice") {
+    if (isChoiceNode(node)) {
       return renderChoiceOptionsField(node);
     }
-    if (node.type === "Set") {
-      return `
-        <div class="field-row">
-          <label class="field"><span>${t("Variable")}</span>${renderStateKeySelect({
-            attributes: `data-node-field="variable"`,
-            selected: node.variable || "",
-            placeholder: "Variable"
-          })}</label>
-          <label class="field"><span>${t("Value")}</span><input data-node-field="value" value="${escapeAttr(node.value || "")}"></label>
-        </div>
-      `;
-    }
-    if (node.type === "Condition") {
-      return `
-        <label class="field">
-          <span>${t("Condition")}</span>
-          ${renderDirectNodeConditionControl(node)}
-        </label>
-      `;
-    }
     return "";
-  }
-
-  function renderDirectNodeConditionControl(node) {
-    return renderConditionBuilderControl({
-      expression: node.condition || "",
-      mode: node.conditionMode,
-      className: "direct-node-condition-builder",
-      keyAttributes: `data-direct-node-condition-field="key"`,
-      opAttributes: `data-direct-node-condition-field="op"`,
-      valueAttributes: `data-direct-node-condition-field="value"`,
-      connectorAttributes: `data-direct-node-condition-field="connector"`,
-      modeAttributes: `data-direct-node-condition-field="mode"`,
-      customAttributes: `data-node-field="condition"`,
-      addAction: "add-direct-node-condition",
-      deleteAction: "delete-direct-node-condition"
-    });
   }
 
   function renderChoiceOptionsField(node) {
@@ -13315,13 +13838,19 @@ function installNarrativeCanvasApp() {
       closeFloatingInspector();
       return;
     }
+    if (action === "toggle-floating-window-pin") {
+      toggleFloatingWindowPin(target.dataset.floatingWindowPin);
+      return;
+    }
     if (action === "toggle-ai-window") { toggleAiWindow(); return; }
     if (action === "close-ai-window") { toggleAiWindow(false); return; }
+    if (action === "ai-copy-message") { void copyAiMessage(target.dataset.aiMessageIndex); return; }
+    if (action === "ai-copy-conversation") { void copyAiConversation(); return; }
     if (action === "ai-send") { void sendAiMessage(); return; }
     if (action === "ai-stop") { stopAiMessage(); return; }
     if (action === "ai-apply-patch") { applyAiPatch(); return; }
     if (action === "ai-reject-patch") { state.aiPendingPatch = null; renderAiPanel(); return; }
-    if (action === "ai-clear") { stopAiMessage({ silent: true }); state.aiMessages = []; state.aiPendingPatch = null; state.aiError = ""; renderAiPanel(); return; }
+    if (action === "ai-clear") { stopAiMessage({ silent: true }); state.aiMessages = []; state.aiPromptDraft = ""; state.aiPendingPatch = null; state.aiError = ""; renderAiPanel(); return; }
     if (action === "ai-save-config") { saveWebAiConfig(); setStatus("AI settings saved locally."); return; }
     if (action === "toggle-play-float") {
       togglePlayFloat();
@@ -13329,6 +13858,10 @@ function installNarrativeCanvasApp() {
     }
     if (action === "toggle-document-toc") {
       toggleDocumentToc();
+      return;
+    }
+    if (action === "toggle-document-chrome") {
+      toggleDocumentChrome();
       return;
     }
     if (action === "jump-document-toc") {
@@ -13347,11 +13880,12 @@ function installNarrativeCanvasApp() {
     if (action === "add-node") addNode(target.dataset.type, readNodeSpawnPoint(target));
     if (action === "add-custom-node-type") addCustomNodeType();
     if (action === "edit-node-type") editNodeType(target.dataset.nodeType);
+    if (action === "add-existing-node-type-field") addExistingNodeTypeField(target.dataset.nodeTypeFieldKey);
     if (action === "restore-node-type") restoreNodeType(target.dataset.nodeType);
     if (action === "hide-node-type") hideNodeType(target.dataset.nodeType);
     if (action === "delete-custom-node-type") deleteCustomNodeType(target.dataset.customNodeType);
-    if (action === "edit-node-type-badge") editNodeTypeBadge(target.dataset.nodeType);
-    if (action === "reset-node-icon") resetNodeTypeBadgeDialog();
+    if (action === "edit-node-type-badge") editNodeType(target.dataset.nodeType);
+    if (action === "reset-node-type-icon") resetNodeTypeIconInput();
     if (action === "save-project") saveCurrentState();
     if (action === "new-project") showNewProjectConfirm();
     if (action === "confirm-new-project") confirmNewProject();
@@ -13366,6 +13900,7 @@ function installNarrativeCanvasApp() {
     if (action === "show-all-characters") showAllCharacters();
     if (action === "delete-character") deleteCharacter(target.dataset.characterId);
     if (action === "focus-character") focusCharacter(target.dataset.characterId);
+    if (action === "open-character-search") openCharacterSearch(target.dataset.characterId);
     if (action === "clear-character-focus") clearCharacterFocus();
     if (action === "clear-character-search") clearCharacterSearch();
     if (action === "toggle-character-backlinks") toggleCharacterBacklinks(target.dataset.characterId);
@@ -13376,8 +13911,6 @@ function installNarrativeCanvasApp() {
     if (action === "commit-node-condition-draft") commitNodeConditionDraft(target);
     if (action === "add-node-condition-clause") addNodeConditionClause();
     if (action === "delete-node-condition-clause") deleteNodeConditionClause(Number(target.dataset.conditionIndex));
-    if (action === "add-direct-node-condition") addDirectNodeCondition();
-    if (action === "delete-direct-node-condition") deleteDirectNodeCondition(Number(target.dataset.conditionIndex));
     if (action === "show-node-effect-draft") showNodeEffectDraft();
     if (action === "commit-node-effect-draft") commitNodeEffectDraft(target);
     if (action === "add-node-effect") addNodeEffect();
@@ -13400,7 +13933,6 @@ function installNarrativeCanvasApp() {
     if (action === "copy-dialog-turn") copyDialogTurn(Number(target.dataset.dialogTurnIndex));
     if (action === "move-dialog-turn-up") moveDialogTurn(Number(target.dataset.dialogTurnIndex), -1);
     if (action === "move-dialog-turn-down") moveDialogTurn(Number(target.dataset.dialogTurnIndex), 1);
-    if (action === "convert-legacy-node") convertLegacyNode(state.selectedNodeId);
     if (action === "add-variable") addVariable();
     if (action === "show-playbook-action-draft") showPlaybookActionDraft();
     if (action === "commit-playbook-action-draft") commitPlaybookActionDraft(target);
@@ -13439,6 +13971,7 @@ function installNarrativeCanvasApp() {
     if (action === "export-all") exportAll();
     if (action === "export-json") exportJson();
     if (action === "export-story-md") exportStoryMarkdown();
+    if (action === "export-current-document") exportCurrentDocument();
     if (action === "import-story-md") importStoryMarkdownFromUi();
     if (action === "export-story-layout") exportStoryLayoutJson();
     if (action === "import-story-layout") importStoryLayoutFromUi();
@@ -13481,6 +14014,7 @@ function installNarrativeCanvasApp() {
     if (action === "assign-choice-link") assignChoiceLink(target.dataset.linkId, target.dataset.choiceIndex);
     if (action === "focus-node") focusSelectedNode();
     if (action === "focus-canvas-node") focusCanvasNode(target.dataset.nodeId);
+    if (action === "focus-choice-source") focusCanvasNode(target.dataset.choiceSourceNodeId);
     if (action === "select-node") selectNode(target.dataset.nodeId);
     if (action === "focus-character-node") focusCharacterNode(target.dataset.nodeId);
     if (action === "focus-story-node") focusStoryNode(target.dataset.nodeId);
@@ -13616,7 +14150,12 @@ function installNarrativeCanvasApp() {
       if (!dom.playbookHelpDialog.open) dom.playbookHelpDialog.showModal();
       return;
     }
-    window.alert?.(t(`${PLAYBOOK_FILE_NAME} stores runtime variable definitions, node logic rows, Variable Actions, and Play preview rules. Variable Definitions define state. Script Builder edits node Requirements, Effects, and Routing. Variable Actions keep manual or imported state writes outside node rows. Preview rules only control the Play dialog: start node, end condition, debug details, and temporary visit tracking. Validation checks keys and export risks before you ship files.`));
+    const message = t(`${PLAYBOOK_FILE_NAME} stores runtime variable definitions, node logic rows, Variable Actions, and Play preview rules. Variable Definitions define state. Script Builder edits node Requirements, Effects, and Routing. Variable Actions keep manual or imported state writes outside node rows. Preview rules only control the Play dialog: start node, end condition, debug details, and temporary visit tracking. Validation checks keys and export risks before you ship files.`);
+    if (window.NarrativeCanvasHost?.showNotice) {
+      window.NarrativeCanvasHost.showNotice(message);
+    } else {
+      window.alert?.(message);
+    }
   }
 
   function setPlaybookHelpPage(page) {
@@ -13726,9 +14265,8 @@ function installNarrativeCanvasApp() {
     const branchLabels = getBranchLabels(source);
     if (!link || !branchLabels.length) return "";
     const currentIndex = normalizeChoiceIndex(link.choiceIndex);
-    const branchKind = getBranchKind(source);
     return `
-      <div class="context-menu-label">${t(branchKind === "condition" ? "Condition branch" : "Choice branch")}</div>
+      <div class="context-menu-label">${t("Choice branch")}</div>
       ${branchLabels.map((choice, index) => `
         <button data-action="assign-choice-link" data-link-id="${escapeAttr(link.id)}" data-choice-index="${index}" aria-current="${currentIndex === index ? "true" : "false"}">
           <span class="context-menu-check">${currentIndex === index ? "*" : ""}</span>
@@ -14007,8 +14545,10 @@ function installNarrativeCanvasApp() {
     if (refs.length) {
       showGenericConfirm({
         kicker: "References",
-        title: `Delete ${ids.length} nodes with references?`,
-        message: `${formatReferenceSummary(refs)} point to these nodes. Delete and clear those references, or keep the references as orphan warnings.`,
+        title: t("Delete {count} nodes with references?", { count: ids.length }),
+        message: t("{references} point to these nodes. Delete and clear those references, or keep the references as orphan warnings.", {
+          references: formatReferenceSummary(refs)
+        }),
         confirmLabel: "Delete and clear references",
         secondaryLabel: "Keep orphan references",
         danger: true,
@@ -14110,7 +14650,7 @@ function installNarrativeCanvasApp() {
     if (!target?.dataset) return "";
     if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
     const parts = [];
-    ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "directNodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+    ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
       if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
     });
     ["nodeId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
@@ -14162,6 +14702,11 @@ function installNarrativeCanvasApp() {
       updateMentionFromTarget(target);
     }
     if (!isMentionTarget && !isNarrativeCanvasTarget(target)) return;
+
+    if (target.hasAttribute?.("data-ai-prompt")) {
+      state.aiPromptDraft = target.value;
+      return;
+    }
 
     if (target.hasAttribute?.("data-document-source")) {
       state.documentDraft = target.value;
@@ -14284,10 +14829,6 @@ function installNarrativeCanvasApp() {
       setNodeConditionPart(target.dataset.nodeConditionField, target.value, Number(target.dataset.conditionIndex), false);
       return;
     }
-    if (target.dataset.directNodeConditionField) {
-      setDirectNodeConditionPart(target.dataset.directNodeConditionField, target.value, Number(target.dataset.conditionIndex), false);
-      return;
-    }
     if (target.dataset.nodeLogicField) {
       setNodeLogicField(target.dataset.nodeLogicField, target.value, false);
       return;
@@ -14397,6 +14938,11 @@ function installNarrativeCanvasApp() {
     }
     if (target === dom.nodeTypeKindInput) {
       syncNodeTypeEventSheetOption();
+      const typeDef = getNodeTypeDef(state.typeDialogType);
+      if (typeDef) {
+        const template = normalizeNodeTypeTemplate(target.value, typeDef.type, typeDef.kind);
+        renderNodeTypeFieldSections({ ...typeDef, template, kind: template === "frame" ? "frame" : "node" });
+      }
       return;
     }
 
@@ -14448,11 +14994,6 @@ function installNarrativeCanvasApp() {
     }
     if (target.dataset.nodeConditionField) {
       setNodeConditionPart(target.dataset.nodeConditionField, target.value, Number(target.dataset.conditionIndex), true);
-      commitFocusedEdit(target);
-      return;
-    }
-    if (target.dataset.directNodeConditionField) {
-      setDirectNodeConditionPart(target.dataset.directNodeConditionField, target.value, Number(target.dataset.conditionIndex), true);
       commitFocusedEdit(target);
       return;
     }
@@ -14566,9 +15107,10 @@ function installNarrativeCanvasApp() {
   }
 
   function syncNodeTypeEventSheetOption() {
-    const label = dom.nodeTypeEventHiddenInput?.closest("label");
-    if (!label) return;
-    label.hidden = !isFrameKind(normalizeNodeTypeKind(dom.nodeTypeKindInput?.value));
+    const isFrame = normalizeNodeTypeTemplate(dom.nodeTypeKindInput?.value) === "frame";
+    const eventHiddenLabel = dom.nodeTypeEventHiddenInput?.closest("label");
+    if (eventHiddenLabel) eventHiddenLabel.hidden = !isFrame;
+    if (dom.nodeTypeOpacityField) dom.nodeTypeOpacityField.hidden = !isFrame;
   }
 
   function handleWorkspaceSearchKeyDown(event) {
@@ -14597,6 +15139,12 @@ function installNarrativeCanvasApp() {
     if (event.defaultPrevented) return;
     if (handleHistoryShortcutEvent(event)) return;
     if (!isNarrativeCanvasTarget(event.target)) return;
+    if (event.target.hasAttribute?.("data-ai-prompt") && event.key === "Enter" && !event.shiftKey) {
+      if (event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      if (!state.aiBusy) void sendAiMessage();
+      return;
+    }
     if (handleMentionKeyDown(event)) return;
     if (handleDocumentSourceKeyDown(event)) return;
     if (event.target.dataset?.canvasChoiceOption) {
@@ -15085,7 +15633,6 @@ function installNarrativeCanvasApp() {
       dom.root?.contains(target)
       || dom.mentionPopover?.contains(target)
       || dom.nodeContextMenu?.contains(target)
-      || dom.nodeIconDialog?.contains(target)
       || dom.nodeTypeDialog?.contains(target)
       || dom.playDialog?.contains(target)
       || dom.exportReportDialog?.contains(target)
@@ -15097,6 +15644,7 @@ function installNarrativeCanvasApp() {
       || dom.playbookHelpDialog?.contains(target)
       || dom.playRuleDialog?.contains(target)
       || dom.nodeRequiredDialog?.contains(target)
+      || dom.aiFloatingWindow?.contains(target)
     );
   }
 
@@ -15107,7 +15655,7 @@ function installNarrativeCanvasApp() {
   }
 
   function getCanvasCoveredFrameTarget(event) {
-    if (!event || event.target !== dom.linkLayer || typeof document.elementsFromPoint !== "function") return null;
+    if (!event || !dom.linkLayer?.contains(event.target) || typeof document.elementsFromPoint !== "function") return null;
     const stack = document.elementsFromPoint(event.clientX, event.clientY);
     return stack.find((element) => {
       if (!dom.frameLayer?.contains(element)) return false;
@@ -15116,7 +15664,7 @@ function installNarrativeCanvasApp() {
   }
 
   function getCanvasCoveredHeaderTarget(event) {
-    if (!event || event.target !== dom.linkLayer || typeof document.elementsFromPoint !== "function") return null;
+    if (!event || !dom.linkLayer?.contains(event.target) || typeof document.elementsFromPoint !== "function") return null;
     const stack = document.elementsFromPoint(event.clientX, event.clientY);
     const stackedHeader = stack.find((element) => {
       if (!dom.frameLayer?.contains(element) && !dom.nodeLayer?.contains(element)) return false;
@@ -15260,6 +15808,12 @@ function installNarrativeCanvasApp() {
       beginGeometryHistoryCapture(withFrameCanvasHistoryFrames(dragNodes));
       if (isFrameNode(node) || !selected.includes(node.id)) {
         selectNode(node.id, false);
+        // selectNode(…, false) skips rendering so a drag-start doesn't pay for a full canvas render,
+        // but a plain click must still focus the Node tab. A frame's body is click-through, so its
+        // header (this drag handle) is the only way to pick it, and the later click gets swallowed by
+        // ignoreNextCanvasClick — refresh just the inspector here so the Node tab activates on the
+        // press, deterministically, regardless of whether this becomes a drag or a click.
+        if (state.selectedNodeId === node.id && state.panel === "node") renderInspector();
       }
       state.draggingNode = {
         id: node.id,
@@ -15906,7 +16460,7 @@ function installNarrativeCanvasApp() {
       // update only the affected minimap marker/geometry fields.
       resyncCanvasAfterInteraction(interactionNodeId);
       if (captureFrameId) {
-        requestAnimationFrame(() => maybePromptFrameCapture(captureFrameId, captureFrameContainmentBefore));
+        maybePromptFrameCapture(captureFrameId, captureFrameContainmentBefore);
       }
     }
   }
@@ -16030,12 +16584,7 @@ function installNarrativeCanvasApp() {
       x: 0,
       y: Math.round(center.y - 70)
     };
-    if (type === "Choice") node.choices = ["Continue", "Turn back"];
-    if (type === "Set") {
-      node.variable = "";
-      node.value = "";
-    }
-    if (type === "Condition") node.condition = "";
+    if (getNodeTypeTemplate(type) === "choice") node.choices = ["Continue", "Turn back"];
     applyNodeTypeDefaults(node);
     node.x = Math.round(center.x - nodeLayoutSize(node).width / 2);
     const activeFrame = getActiveFrameCanvas();
@@ -16068,13 +16617,16 @@ function installNarrativeCanvasApp() {
       setStatus("Enter a custom node type name.");
       return;
     }
-    const kind = dom.customNodeKind.value;
+    const template = normalizeNodeTypeTemplate(dom.customNodeKind.value);
+    const kind = template === "frame" ? "frame" : "node";
     const typeDef = normalizeCustomNodeType({
       type: uniqueCustomNodeTypeId(label),
       label,
-      color: getCustomNodeFormColor(kind),
+      color: getCustomNodeFormColor(template),
       kind,
-      fields: parseCustomNodeFields(dom.customNodeFields.value)
+      template,
+      fields: parseCustomNodeFields(dom.customNodeFields.value),
+      cardOpacity: isFrameKind(kind) ? 20 : undefined
     });
     state.project.nodeTypes = [...getProjectNodeTypes(), typeDef];
     markProjectStructureChanged({ nodeTypes: true });
@@ -16087,9 +16639,9 @@ function installNarrativeCanvasApp() {
     setStatus(`${typeDef.label} node type added.`);
   }
 
-  function getCustomNodeFormColor(kind) {
+  function getCustomNodeFormColor(template) {
     const color = dom.customNodeColor.value || DEFAULT_CUSTOM_NODE_COLOR;
-    if (color === DEFAULT_CUSTOM_NODE_COLOR && kind !== "node") return getDefaultNodeTypeColor(kind);
+    if (color === DEFAULT_CUSTOM_NODE_COLOR && template === "frame") return getDefaultNodeTypeColor("frame");
     return color;
   }
 
@@ -16220,12 +16772,13 @@ function installNarrativeCanvasApp() {
       Content: "Write narration here.",
       Dialog: "Character line.",
       Choice: "Offer player choices.",
-      Condition: "Check a variable before branching.",
-      Set: "Set a variable.",
       Marker: "Planning marker.",
       Event: "Group related beats into one frame row."
     };
     if (defaults[type]) return defaults[type];
+    const template = getNodeTypeTemplate(type);
+    if (template === "dialog") return "Character line.";
+    if (template === "choice") return "Offer player choices.";
     const kind = getNodeMeta(type).kind;
     if (isFrameKind(kind)) return "Group related nodes into one frame row.";
     return isFrameKind(kind) ? "Group related nodes." : "Write custom node content here.";
@@ -16353,7 +16906,7 @@ function installNarrativeCanvasApp() {
       }
       character.name = nextName;
       state.project.nodes.forEach((node) => {
-        if (node.type === "Dialog" && node.title === previousName) {
+        if (isDialogNode(node) && node.title === previousName) {
           node.title = nextName;
         }
       });
@@ -16382,6 +16935,22 @@ function installNarrativeCanvasApp() {
     state.panel = "story";
     renderAll();
     setStatus(`${character.name} focus enabled.`);
+  }
+
+  function openCharacterSearch(id) {
+    const character = getCharacters().find((item) => item.id === id);
+    if (!character) return;
+    state.characterFocusId = null;
+    state.characterSearch = character.name;
+    state.characterSearchIndex = -1;
+    resetDocumentRenderLimit("characters");
+    state.activeFileId = "characters";
+    renderDocumentFileSwitch();
+    requestAnimationFrame(() => {
+      dom.characterSearchInput?.focus?.({ preventScroll: true });
+      dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(character.id)}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    });
+    setStatus(t("Search character: {name}", { name: character.name }));
   }
 
   function clearCharacterFocus() {
@@ -16508,15 +17077,19 @@ function installNarrativeCanvasApp() {
     if (!refs.length) return;
     showGenericConfirm({
       kicker: "References",
-      title: `Update references to "${nextTitle}"?`,
-      message: `${formatReferenceSummary(refs)} currently target "${previousTitle}". Update them to "${nextTitle}"? Cancel keeps the old target text.`,
+      title: t('Update references to "{title}"?', { title: nextTitle }),
+      message: t('{references} currently target "{previousTitle}". Update them to "{nextTitle}"? Cancel keeps the old target text.', {
+        references: formatReferenceSummary(refs),
+        previousTitle,
+        nextTitle
+      }),
       confirmLabel: "Update references",
       danger: false,
       recordHistory: true,
       onConfirm: () => {
         updateNodeTargetReferences({ titles: [previousTitle], replacement: nextTitle });
         renderAll();
-        setStatus(`Updated ${refs.length} reference${refs.length === 1 ? "" : "s"}.`);
+        setStatus(t("Updated {count} references.", { count: refs.length }));
       }
     });
   }
@@ -16607,11 +17180,15 @@ function installNarrativeCanvasApp() {
       return map;
     }, {});
     const parts = [
-      byKind.playbookAction ? `${byKind.playbookAction} Script Builder action${byKind.playbookAction === 1 ? "" : "s"}` : "",
-      byKind.nodeRouting ? `${byKind.nodeRouting} node routing target${byKind.nodeRouting === 1 ? "" : "s"}` : "",
-      byKind.runnerStart ? "1 Play Rule start node" : ""
+      byKind.playbookAction ? t("{count} Script Builder actions", { count: byKind.playbookAction }) : "",
+      byKind.nodeRouting ? t("{count} node routing targets", { count: byKind.nodeRouting }) : "",
+      byKind.runnerStart ? t("1 Play Rule start node") : ""
     ].filter(Boolean);
-    return `${total} reference${total === 1 ? "" : "s"}${parts.length ? ` (${parts.join(", ")})` : ""}`;
+    if (!parts.length) return t("{count} references", { count: total });
+    return t("{count} references ({parts})", {
+      count: total,
+      parts: parts.join(state.language === "zh" ? "，" : ", ")
+    });
   }
 
   function getEditableNodeStateLogic(node = getNode(state.selectedNodeId)) {
@@ -16681,65 +17258,6 @@ function installNarrativeCanvasApp() {
     setProjectDirty(true);
     renderNodePanel(node);
     renderPlaybookSurfaces();
-    updateStatus();
-    setStatus(t("Condition deleted."));
-  }
-
-  function setDirectNodeConditionPart(field, value, conditionIndex, rerender) {
-    const node = getNode(state.selectedNodeId);
-    if (!node || isFrameNode(node)) return;
-    const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
-    if (field === "mode") {
-      node.conditionMode = normalizeStoredConditionGroupMode(value);
-      node.condition = setConditionExpressionGroupMode(node.condition || "", node.conditionMode);
-    } else {
-      node.condition = updateConditionExpressionPart(node.condition || "", field, value, conditionIndex);
-      node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
-    }
-    if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
-    setProjectDirty(true);
-    renderNodes();
-    renderLinks();
-    renderPlaybookSurfaces();
-    scheduleStoryPanelRender();
-    updateStatus();
-    if (rerender) renderNodePanel(node);
-  }
-
-  function addDirectNodeCondition() {
-    const node = getNode(state.selectedNodeId);
-    if (!node || isFrameNode(node)) return;
-    if (!getDefaultConditionKey()) {
-      setStatus(t("State key is required."));
-      return;
-    }
-    const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
-    node.conditionMode = normalizeStoredConditionGroupMode(node.conditionMode);
-    node.condition = addConditionExpressionClause(node.condition || "", node.conditionMode);
-    if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
-    setProjectDirty(true);
-    renderNodePanel(node);
-    renderNodes();
-    renderLinks();
-    renderPlaybookSurfaces();
-    scheduleStoryPanelRender();
-    updateStatus();
-    setStatus(t("Condition added."));
-  }
-
-  function deleteDirectNodeCondition(conditionIndex) {
-    const node = getNode(state.selectedNodeId);
-    if (!node || isFrameNode(node)) return;
-    const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
-    node.condition = deleteConditionExpressionClause(node.condition || "", conditionIndex);
-    node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
-    if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
-    setProjectDirty(true);
-    renderNodePanel(node);
-    renderNodes();
-    renderLinks();
-    renderPlaybookSurfaces();
-    scheduleStoryPanelRender();
     updateStatus();
     setStatus(t("Condition deleted."));
   }
@@ -16978,7 +17496,7 @@ function installNarrativeCanvasApp() {
 
   function getSelectedChoiceNode() {
     const node = getNode(state.selectedNodeId);
-    return node && node.type === "Choice" ? node : null;
+    return node && isChoiceNode(node) ? node : null;
   }
 
   function ensureChoiceOptionsArray(node) {
@@ -17043,7 +17561,7 @@ function installNarrativeCanvasApp() {
 
   function setCanvasChoiceOptionLabel(nodeId, optionId, optionIndex, value, rerender) {
     const node = getNode(nodeId);
-    if (!node || node.type !== "Choice") return;
+    if (!node || !isChoiceNode(node)) return;
     const options = ensureChoiceOptionsArray(node);
     const option = (optionId ? options.find((entry) => entry.id === optionId) : null)
       || (Number.isInteger(optionIndex) ? options[optionIndex] : null);
@@ -17062,7 +17580,7 @@ function installNarrativeCanvasApp() {
 
   function setCanvasDialogTurnField(nodeId, index, field, value, rerender) {
     const node = getNode(nodeId);
-    if (!node || node.type !== "Dialog" || !Number.isInteger(index)) return;
+    if (!node || !isDialogNode(node) || !Number.isInteger(index)) return;
     const turns = ensureDialogTurns(node);
     const turn = turns[index];
     if (!turn) return;
@@ -17333,7 +17851,7 @@ function installNarrativeCanvasApp() {
 
   function getSelectedDialogNode() {
     const node = getNode(state.selectedNodeId);
-    return node && node.type === "Dialog" ? node : null;
+    return node && isDialogNode(node) ? node : null;
   }
 
   function ensureDialogTurns(node) {
@@ -17479,72 +17997,6 @@ function installNarrativeCanvasApp() {
     doRender();
   }
 
-  // --- Legacy convert hook (Phase 3 stub; Phase 5 will offer bulk migration) ----------------------
-
-  function convertLegacyNode(nodeId) {
-    const node = getNode(nodeId);
-    if (!node) return;
-    const meta = getNodeMeta(node.type);
-    if (!meta.legacy) {
-      setStatus("This node is not a legacy type.");
-      return;
-    }
-    // Per-node conversion:
-    //  - Set node: 1 in / 1 out -> push onVisit effect onto next node; remove Set and bridge edges.
-    //  - Condition node: 1 in / 2 out -> replace with two requirement-gated links.
-    const outgoing = (state.project.links || []).filter((l) => l.from === node.id);
-    const incoming = (state.project.links || []).filter((l) => l.to === node.id);
-    if (node.type === "Set" && outgoing.length === 1 && incoming.length === 1) {
-      const nextNode = getNode(outgoing[0].to);
-      if (nextNode) {
-        const logic = normalizeNodeStateLogic(nextNode.stateLogic);
-        logic.effects.push({
-          trigger: "onVisit",
-          op: "set",
-          key: normalizeOptionalString(node.variable).trim() || "var",
-          value: normalizeOptionalString(node.value)
-        });
-        nextNode.stateLogic = logic;
-        // Bridge the single incoming link to the next node.
-        incoming[0].to = nextNode.id;
-        // Remove the Set node and its outgoing link.
-        state.project.nodes = state.project.nodes.filter((n) => n.id !== node.id);
-        state.project.links = state.project.links.filter((l) => l.id !== outgoing[0].id);
-        setProjectDirty(true);
-        renderAll();
-        setStatus(`Converted Set "${node.title || node.id}" into onVisit effect on "${nextNode.title || nextNode.id}".`);
-        return;
-      }
-    }
-    if (node.type === "Condition" && outgoing.length === 2 && incoming.length === 1) {
-      const condition = normalizeOptionalString(node.condition || node.body).trim();
-      if (!condition) {
-        setStatus("Condition has no expression to convert.");
-        return;
-      }
-      const ordered = getChoiceOrderedLinks(outgoing);
-      const trueLink = ordered[0];
-      const falseLink = ordered[1];
-      trueLink.from = incoming[0].from;
-      trueLink.label = "true";
-      trueLink.requirements = condition;
-      delete trueLink.choiceIndex;
-      delete trueLink.choiceOptionId;
-      falseLink.from = incoming[0].from;
-      falseLink.label = "false";
-      falseLink.requirements = `!(${condition})`;
-      delete falseLink.choiceIndex;
-      delete falseLink.choiceOptionId;
-      state.project.nodes = state.project.nodes.filter((n) => n.id !== node.id);
-      state.project.links = state.project.links.filter((l) => l.id !== incoming[0].id);
-      setProjectDirty(true);
-      renderAll();
-      setStatus(`Converted Condition "${node.title || node.id}" into two gated links.`);
-      return;
-    }
-    setStatus("This node cannot auto-convert: it needs exactly 1 incoming and the expected outgoing shape.");
-  }
-
   function focusInspectorTarget(selector) {
     if (typeof document === "undefined") return;
     requestAnimationFrame(() => {
@@ -17649,14 +18101,6 @@ function installNarrativeCanvasApp() {
       node.stateLogic.requirements = condition;
       node.stateLogic.requirementsMode = getStoredConditionModeForExpression(condition, node.stateLogic.requirementsMode);
       cleanupNodeStateLogic(node);
-    } else if (kind === "condition") {
-      if (field !== "condition") return;
-      const node = getNode(parts[1]);
-      if (!node || isFrameNode(node)) return;
-      const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
-      node.condition = condition;
-      node.conditionMode = getStoredConditionModeForExpression(condition, node.conditionMode);
-      if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = condition;
     } else if (kind === "choice") {
       const node = getNode(parts[1]);
       const optionId = parts.slice(2).join(":");
@@ -17695,10 +18139,6 @@ function installNarrativeCanvasApp() {
       const node = getNode(parts[1]);
       return normalizeNodeStateLogic(node?.stateLogic).requirements || "";
     }
-    if (kind === "condition") {
-      const node = getNode(parts[1]);
-      return node?.condition || (node?.type === "Condition" ? node.body || "" : "");
-    }
     if (kind === "choice") {
       return getChoiceOptionTargetFromGateId(id)?.option?.requires || "";
     }
@@ -17712,11 +18152,6 @@ function installNarrativeCanvasApp() {
       const node = getNode(parts[1]);
       const logic = normalizeNodeStateLogic(node?.stateLogic);
       return getConditionGroupModeForExpression(logic.requirements, logic.requirementsMode);
-    }
-    if (kind === "condition") {
-      const node = getNode(parts[1]);
-      const condition = node?.condition || (node?.type === "Condition" ? node.body || "" : "");
-      return getConditionGroupModeForExpression(condition, node?.conditionMode);
     }
     if (kind === "choice") {
       const option = getChoiceOptionTargetFromGateId(id)?.option;
@@ -17748,13 +18183,6 @@ function installNarrativeCanvasApp() {
       node.stateLogic.requirementsMode = mode;
       node.stateLogic.requirements = next;
       cleanupNodeStateLogic(node);
-    } else if (kind === "condition") {
-      const node = getNode(parts[1]);
-      if (!node || isFrameNode(node)) return;
-      const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
-      node.conditionMode = mode;
-      node.condition = next;
-      if (node.type === "Condition" && (!node.body || node.body === previousCondition || node.body === current)) node.body = next;
     } else if (kind === "choice") {
       const resolved = getChoiceOptionTargetFromGateId(id);
       if (!resolved) return;
@@ -17895,12 +18323,6 @@ function installNarrativeCanvasApp() {
       return;
     }
     targets.forEach((node) => {
-      if (hasNodeCondition(node)) {
-        const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
-        node.condition = condition;
-        if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = condition;
-        return;
-      }
       node.stateLogic = normalizeNodeStateLogic(node.stateLogic);
       node.stateLogic.requirements = condition;
       cleanupNodeStateLogic(node);
@@ -18142,26 +18564,6 @@ function installNarrativeCanvasApp() {
     setStatus(`${getRunnerRuleTitle(ruleKind)} enabled.`);
   }
 
-  function addPlaybookStateRulesPair() {
-    const scripts = getScriptNodeTypes();
-    scripts.Set = {
-      ...(scripts.Set || {}),
-      body: scripts.Set?.body || "Set {variable} = {value}.",
-      set: scripts.Set?.set || { key: "variable", value: "value" }
-    };
-    scripts.Condition = {
-      ...(scripts.Condition || {}),
-      body: scripts.Condition?.body || "{condition}",
-      condition: scripts.Condition?.condition || "condition"
-    };
-    state.project.script = normalizeScriptConfig({ ...state.project.script, nodeTypes: scripts });
-    state.activeFileId = "variables";
-    state.playbookTab = "rules";
-    renderPlaybookSurfaces();
-    updateStatus();
-    setStatus("Set and Condition Play rules added.");
-  }
-
   function addSelectedNodePlaybookRule() {
     const node = getNode(state.selectedNodeId);
     if (!node) {
@@ -18197,17 +18599,13 @@ function installNarrativeCanvasApp() {
   function getPlaybookRuleKindLabel(kind) {
     const labels = {
       text: "text rule",
-      choices: "choice behavior",
-      set: "variable write",
-      condition: "condition gate"
+      choices: "choice behavior"
     };
     return labels[kind] || "rule";
   }
 
   function getDefaultPlaybookRuleTargetForKind(kind, scripts) {
     if (kind === "choices") return "Choice";
-    if (kind === "set") return "Set";
-    if (kind === "condition") return "Condition";
     return getDefaultPlaybookRuleTarget(scripts);
   }
 
@@ -18222,21 +18620,11 @@ function installNarrativeCanvasApp() {
       script.body = script.body || "{body}";
       script.choices = script.choices || "choices";
     }
-    if (kind === "set") {
-      script.body = script.body || "Set {variable} = {value}.";
-      script.set = script.set || { key: "variable", value: "value" };
-    }
-    if (kind === "condition") {
-      script.body = script.body || "{condition}";
-      script.condition = script.condition || "condition";
-    }
     return script;
   }
 
   function inferPlaybookRuleKindFromNode(node) {
     if (hasNodeChoices(node)) return "choices";
-    if (getNodeVariableKey(node)) return "set";
-    if (hasNodeCondition(node)) return "condition";
     return "text";
   }
 
@@ -18790,10 +19178,8 @@ function installNarrativeCanvasApp() {
     state.characterFocusId = null;
     state.panel = "node";
     renderAll();
-    requestAnimationFrame(() => {
-      centerCanvasOnNode(node, NODE_FOCUS_ZOOM);
-      setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
-    });
+    centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
+    setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
   }
 
   function focusCanvasNodeForInlineEdit(id) {
@@ -18808,7 +19194,7 @@ function installNarrativeCanvasApp() {
     state.inlineEditNodeId = id;
     state.inlineEditField = getInlineEditableField(node);
     renderAll();
-    centerCanvasOnNode(node, NODE_FOCUS_ZOOM);
+    centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
     focusInlineNodeEditor(id);
     setStatus(`${node.title || getNodeDisplayId(node)} focused for editing.`);
     requestAnimationFrame(() => {
@@ -18825,8 +19211,8 @@ function installNarrativeCanvasApp() {
     state.selectedLinkId = null;
     state.panel = "story";
     renderAll();
+    centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
     requestAnimationFrame(() => {
-      centerCanvasOnNode(node, NODE_FOCUS_ZOOM);
       scrollStoryNodeIntoView(id);
       setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
     });
@@ -18854,9 +19240,21 @@ function installNarrativeCanvasApp() {
       dom.nodeTypeDialog.returnValue = "";
       dom.nodeTypeDialogTitle.textContent = t("Edit {label}", { label: typeDef.label });
       dom.nodeTypeNameInput.value = typeDef.label || typeDef.type;
-      dom.nodeTypeKindInput.value = typeDef.kind || "node";
+      dom.nodeTypeKindInput.value = getNodeTypeTemplate(typeDef);
       dom.nodeTypeFieldsInput.value = formatNodeTypeFields(typeDef.fields);
+      renderNodeTypeFieldSections(typeDef);
+      if (dom.nodeTypeIconInput) {
+        dom.nodeTypeIconInput.value = typeDef.badgeCustom ? (typeDef.badge || "") : "";
+        dom.nodeTypeIconInput.placeholder = getDefaultNodeTypeBadge(typeDef.label);
+      }
       dom.nodeTypeColorInput.value = normalizeCustomColor(typeDef.color);
+      if (dom.nodeTypeOpacityInput) {
+        dom.nodeTypeOpacityInput.value = String(normalizeNodeTypeOpacity(typeDef.cardOpacity) ?? 20);
+        updateNodeTypeOpacityReadout();
+      }
+      if (dom.nodeTypeOpacityField) {
+        dom.nodeTypeOpacityField.hidden = !isFrameKind(typeDef.kind);
+      }
       dom.nodeTypeHiddenInput.checked = Boolean(typeDef.hidden);
       if (dom.nodeTypeEventHiddenInput) {
         dom.nodeTypeEventHiddenInput.checked = Boolean(typeDef.eventSheetHidden);
@@ -18882,6 +19280,7 @@ function installNarrativeCanvasApp() {
         applyNodeTypeValues(typeDef.type, {
           label: nextName,
           kind: typeDef.kind,
+          template: getNodeTypeTemplate(typeDef),
           fields: typeDef.fields,
           color: typeDef.color,
           hidden: typeDef.hidden,
@@ -18893,14 +19292,29 @@ function installNarrativeCanvasApp() {
   }
 
   function applyNodeTypeDialog() {
+    const typeDef = getNodeTypeDef(state.typeDialogType);
+    const knownFields = [...(typeDef?.fields || []), ...getUndeclaredNodeTypeFields(typeDef)];
     applyNodeTypeValues(state.typeDialogType, {
       label: dom.nodeTypeNameInput.value,
-      kind: dom.nodeTypeKindInput.value,
-      fields: parseCustomNodeFields(dom.nodeTypeFieldsInput.value, getNodeTypeDef(state.typeDialogType)?.fields || []),
+      template: dom.nodeTypeKindInput.value,
+      fields: parseCustomNodeFields(dom.nodeTypeFieldsInput.value, knownFields),
+      badge: dom.nodeTypeIconInput ? dom.nodeTypeIconInput.value : undefined,
       color: dom.nodeTypeColorInput.value,
+      cardOpacity: Number(dom.nodeTypeOpacityInput?.value ?? 100),
       hidden: dom.nodeTypeHiddenInput.checked,
       eventSheetHidden: Boolean(dom.nodeTypeEventHiddenInput?.checked)
     });
+  }
+
+  function updateNodeTypeOpacityReadout() {
+    if (!dom.nodeTypeOpacityValue || !dom.nodeTypeOpacityInput) return;
+    dom.nodeTypeOpacityValue.textContent = `${Number(dom.nodeTypeOpacityInput.value) || 0}%`;
+  }
+
+  function resetNodeTypeIconInput() {
+    if (!dom.nodeTypeIconInput) return;
+    dom.nodeTypeIconInput.value = "";
+    dom.nodeTypeIconInput.focus();
   }
 
   function applyNodeTypeValues(type, values) {
@@ -18919,9 +19333,16 @@ function installNarrativeCanvasApp() {
       .filter((key) => key && !nextFieldKeys.has(key));
 
     typeDef.label = label;
-    typeDef.kind = normalizeNodeTypeKind(values.kind);
+    if (values.badge !== undefined) {
+      const nextIcon = normalizeNodeTypeBadge(values.badge);
+      typeDef.badge = nextIcon || getDefaultNodeTypeBadge(label);
+      typeDef.badgeCustom = Boolean(nextIcon);
+    }
+    typeDef.template = normalizeNodeTypeTemplate(values.template, typeDef.type, values.kind);
+    typeDef.kind = typeDef.template === "frame" ? "frame" : "node";
     typeDef.fields = nextFields;
     typeDef.color = normalizeNodeTypeColor(typeDef.type, typeDef.kind, values.color);
+    typeDef.cardOpacity = isFrameKind(typeDef.kind) ? normalizeNodeTypeOpacity(values.cardOpacity ?? typeDef.cardOpacity ?? 20) : 100;
     typeDef.hidden = Boolean(values.hidden);
     typeDef.eventSheetHidden = isFrameKind(typeDef.kind) ? Boolean(values.eventSheetHidden) : false;
     typeDef.width = clamp(typeDef.width || (isFrameKind(typeDef.kind) ? 420 : 230), 160, isFrameKind(typeDef.kind) ? 860 : 420);
@@ -18949,80 +19370,103 @@ function installNarrativeCanvasApp() {
     return (fields || []).map((field) => field.label || field.key || "").filter(Boolean).join("\n");
   }
 
-  function editNodeTypeBadge(type) {
-    const typeDef = getNodeTypeDef(type);
+  function renderNodeTypeFieldSections(typeDef) {
     if (!typeDef) return;
-    state.activeFileId = "adventure";
-    state.selectedLinkId = null;
-    state.iconDialogType = typeDef.type;
-
-    const currentIcon = typeDef.badge || getDefaultNodeTypeBadge(typeDef.label);
-
-    renderPalette();
-    renderNodes();
-    renderInspector();
-    renderWorkspaceFile();
-    updateStatus();
-
-    if (dom.nodeIconDialog?.showModal) {
-      dom.nodeIconDialog.returnValue = "";
-      dom.nodeIconDialogTitle.textContent = t("Edit icon for {label}", { label: typeDef.label });
-      dom.nodeIconInput.value = currentIcon;
-      dom.nodeIconDialog.showModal();
-      requestAnimationFrame(() => {
-        dom.nodeIconInput.focus();
-        dom.nodeIconInput.select();
-      });
-      return;
+    const builtInFields = getNodeTypeBuiltInFields(typeDef);
+    if (dom.nodeTypeBuiltinFields) {
+      dom.nodeTypeBuiltinFields.innerHTML = builtInFields
+        .map((field) => `<span class="node-type-field-chip" data-node-type-built-in-field="${escapeAttr(field.key)}">${escapeHtml(field.label)}</span>`)
+        .join("");
     }
-
-    showGenericTextInput({
-      kicker: "Node Icon",
-      title: t("Edit icon for {label}", { label: typeDef.label }),
-      label: "Custom icon",
-      value: currentIcon,
-      maxLength: 8,
-      message: "Leave blank to use the type initial.",
-      confirmLabel: "Apply",
-      recordHistory: true,
-      onConfirm: (nextValue) => {
-        applyNodeTypeBadgeValue(typeDef.type, nextValue);
-        return true;
-      }
-    });
+    const currentLabels = new Set(String(dom.nodeTypeFieldsInput?.value || "")
+      .split(/\r?\n/)
+      .map((label) => label.trim().toLowerCase())
+      .filter(Boolean));
+    const candidates = getUndeclaredNodeTypeFields(typeDef);
+    if (dom.nodeTypeExistingFieldsSection) dom.nodeTypeExistingFieldsSection.hidden = !candidates.length;
+    if (dom.nodeTypeExistingFields) {
+      dom.nodeTypeExistingFields.innerHTML = candidates.map((field) => {
+        const added = currentLabels.has(field.label.toLowerCase());
+        const actionLabel = added ? t("Added") : t("Add {label} to type", { label: field.label });
+        return `<button class="node-type-existing-field${added ? " added" : ""}" type="button" data-action="add-existing-node-type-field" data-node-type-field-key="${escapeAttr(field.key)}" ${added ? "disabled" : ""} aria-label="${escapeAttr(actionLabel)}"><span>${escapeHtml(field.label)}</span><small>${escapeHtml(field.key)}</small><strong>${added ? t("Added") : "+"}</strong></button>`;
+      }).join("");
+    }
   }
 
-  function applyNodeTypeBadgeDialog() {
-    applyNodeTypeBadgeValue(state.iconDialogType, dom.nodeIconInput.value);
+  function getNodeTypeBuiltInFields(typeDef) {
+    const fields = [
+      { key: "title", label: t("Title") },
+      { key: "body", label: t("Body") }
+    ];
+    const template = getNodeTypeTemplate(typeDef);
+    if (template === "frame") {
+      const removed = new Set(getTypeRemovedColumns(typeDef));
+      const projectColumns = new Map(getProjectEventSheetColumns().map((column) => [column.key, column]));
+      CORE_EVENT_COLUMN_KEYS.forEach((key) => {
+        if (removed.has(key)) return;
+        const column = projectColumns.get(key) || eventSheetColumns.find((entry) => entry.key === key);
+        if (column) fields.push({ key, label: column.label || key });
+      });
+    } else if (template === "choice") {
+      fields.push({ key: "choices", label: t("Choices") });
+    } else if (template === "dialog") {
+      fields.push({ key: "turns", label: t("Dialog") });
+    }
+    return fields;
   }
 
-  function resetNodeTypeBadgeDialog() {
-    const typeDef = getNodeTypeDef(state.iconDialogType);
+  function getUndeclaredNodeTypeFields(typeDef) {
+    if (!typeDef?.type) return [];
+    const declared = new Set((typeDef.fields || []).map((field) => field.key));
+    const builtIn = new Set(getNodeTypeBuiltInFields(typeDef).map((field) => field.key));
+    const labels = new Map(getProjectEventSheetColumns().map((column) => [column.key, column.label || column.key]));
+    const candidates = new Map();
+    state.project.nodes
+      .filter((node) => node.type === typeDef.type)
+      .forEach((node) => {
+        if (node.customFields && typeof node.customFields === "object" && !Array.isArray(node.customFields)) {
+          Object.keys(node.customFields).forEach((key) => {
+            if (!key || declared.has(key) || builtIn.has(key)) return;
+            candidates.set(key, { key, label: labels.get(key) || formatNodeFieldKeyLabel(key) });
+          });
+        }
+        DIRECT_NODE_FIELD_KEYS.forEach((key) => {
+          const value = node[key];
+          const hasValue = Array.isArray(value) ? value.length > 0 : value != null && value !== "";
+          if (!hasValue || declared.has(key) || builtIn.has(key)) return;
+          candidates.set(key, { key, label: labels.get(key) || formatNodeFieldKeyLabel(key) });
+        });
+      });
+    return [...candidates.values()];
+  }
+
+  function formatNodeFieldKeyLabel(key) {
+    const source = String(key || "").trim();
+    const directLabels = {
+      choices: t("Choices"),
+      condition: t("Condition"),
+      value: t("Value"),
+      variable: t("Variable"),
+      variables: t("Variables")
+    };
+    if (directLabels[source]) return directLabels[source];
+    return source
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .replace(/^\w/, (character) => character.toUpperCase());
+  }
+
+  function addExistingNodeTypeField(fieldKey) {
+    const typeDef = getNodeTypeDef(state.typeDialogType);
     if (!typeDef) return;
-    typeDef.badge = getDefaultNodeTypeBadge(typeDef.label);
-    typeDef.badgeCustom = false;
-    markProjectStructureChanged({ nodeTypes: true });
-    if (dom.nodeIconDialog?.open) dom.nodeIconDialog.close("reset");
-    finishNodeTypeBadgeEdit("Node type icon now uses type initial.");
-  }
-
-  function applyNodeTypeBadgeValue(type, value) {
-    const typeDef = getNodeTypeDef(type);
-    if (!typeDef) return;
-    const nextIcon = normalizeNodeTypeBadge(value);
-    typeDef.badge = nextIcon || getDefaultNodeTypeBadge(typeDef.label);
-    typeDef.badgeCustom = Boolean(nextIcon);
-    markProjectStructureChanged({ nodeTypes: true });
-    finishNodeTypeBadgeEdit(nextIcon ? "Node type icon updated." : "Node type icon now uses type initial.");
-  }
-
-  function finishNodeTypeBadgeEdit(message) {
-    renderPalette();
-    renderNodes();
-    renderInspector();
-    renderWorkspaceFile();
-    updateStatus();
-    setStatus(message);
+    const field = getUndeclaredNodeTypeFields(typeDef).find((entry) => entry.key === fieldKey);
+    if (!field) return;
+    const labels = String(dom.nodeTypeFieldsInput.value || "").split(/\r?\n/).map((label) => label.trim()).filter(Boolean);
+    if (!labels.some((label) => label.toLowerCase() === field.label.toLowerCase())) {
+      labels.push(field.label);
+      dom.nodeTypeFieldsInput.value = labels.join("\n");
+    }
+    renderNodeTypeFieldSections(typeDef);
   }
 
   function setProjectField(field, value) {
@@ -19064,7 +19508,6 @@ function installNarrativeCanvasApp() {
     const node = getNode(state.selectedNodeId);
     if (!node) return;
     invalidateCharacterRenderContext();
-    const previousCondition = field === "condition" ? node.condition || (node.type === "Condition" ? node.body || "" : "") : "";
     if (field === "x" || field === "y") {
       node[field] = Number(value) || 0;
     } else if (field === "choices") {
@@ -19075,12 +19518,8 @@ function installNarrativeCanvasApp() {
     } else {
       node[field] = value;
     }
-    if (field === "condition") {
-      node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
-      if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
-    }
     if (field === "type") markProjectStructureChanged({ nodeTypes: true });
-    const choiceLinksChanged = field === "choices" || field === "condition" || field === "type"
+    const choiceLinksChanged = field === "choices" || field === "type"
       ? syncChoiceBranchLinksForNode(node.id, { markDirty: false })
       : false;
     setProjectDirty(true);
@@ -19180,8 +19619,10 @@ function installNarrativeCanvasApp() {
     if (refs.length) {
       showGenericConfirm({
         kicker: "References",
-        title: `Delete "${node.title || getNodeDisplayId(node)}"?`,
-        message: `${formatReferenceSummary(refs)} point to this node. Delete and clear those references, or keep the references as orphan warnings.`,
+        title: t('Delete "{title}"?', { title: node.title || getNodeDisplayId(node) }),
+        message: t("{references} point to this node. Delete and clear those references, or keep the references as orphan warnings.", {
+          references: formatReferenceSummary(refs)
+        }),
         confirmLabel: "Delete and clear references",
         secondaryLabel: "Keep orphan references",
         danger: true,
@@ -19317,16 +19758,16 @@ function installNarrativeCanvasApp() {
     state.activeFileId = "adventure";
     state.panel = "node";
     renderAll();
-    centerCanvasOnNode(node, NODE_FOCUS_ZOOM);
+    centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
     setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
   }
 
-  function centerCanvasOnNode(node, scale = state.view.scale) {
+  function centerCanvasOnNode(node, scale = state.view.scale, options = {}) {
     const size = nodeSize(node);
-    centerCanvasOnBoardPoint(node.x + size.width / 2, node.y + size.height / 2, scale);
+    centerCanvasOnBoardPoint(node.x + size.width / 2, node.y + size.height / 2, scale, options);
   }
 
-  function centerCanvasOnBoardPoint(boardX, boardY, scale = state.view.scale) {
+  function centerCanvasOnBoardPoint(boardX, boardY, scale = state.view.scale, options = {}) {
     resetCanvasScroll();
     const rect = dom.viewport.getBoundingClientRect();
     state.view.scale = clamp(scale, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
@@ -19334,7 +19775,8 @@ function installNarrativeCanvasApp() {
     state.view.y = rect.height / 2 - boardY * state.view.scale;
     renderTransform();
     updateGridPosition();
-    scheduleCanvasViewportRender();
+    if (options.immediate) renderCanvasViewportNow();
+    else scheduleCanvasViewportRender();
   }
 
   function handleMinimapPointerDown(event) {
@@ -19729,8 +20171,8 @@ function installNarrativeCanvasApp() {
     const project = createBlankProject(projectTitle);
     if (!host?.previewNewProjectFile) {
       dom.newProjectPathPreview.textContent = host
-        ? "A new .ncanvas file will be created from the plugin save settings."
-        : "The new project will use browser storage until you save or export it.";
+        ? t("A new .ncanvas file will be created from the plugin save settings.")
+        : t("The new project will use browser storage until you save or export it.");
       return;
     }
     try {
@@ -19738,11 +20180,11 @@ function installNarrativeCanvasApp() {
         filenameProjectTitle: projectTitle
       });
       dom.newProjectPathPreview.textContent = target
-        ? `New file: ${target}`
-        : "A new .ncanvas file will be created from the plugin save settings.";
+        ? t("New file: {target}", { target })
+        : t("A new .ncanvas file will be created from the plugin save settings.");
     } catch (error) {
       console.error(error);
-      dom.newProjectPathPreview.textContent = "Could not preview the new project file name.";
+      dom.newProjectPathPreview.textContent = t("Could not preview the new project file name.");
     }
   }
 
@@ -20121,6 +20563,20 @@ function installNarrativeCanvasApp() {
     downloadBlob(new Blob([buildStoryMarkdown(document)], { type: "text/markdown;charset=utf-8" }), `${slug}-story.md`);
     showExportReport(document, "Story MD");
     setStatus("Story Markdown exported.");
+  }
+
+  function exportCurrentDocument() {
+    if (!flushDocumentSourceApply()) {
+      setStatus("Fix the Document source error before exporting.");
+      return;
+    }
+    const exporters = {
+      plain: exportStoryMarkdown,
+      ink: exportInk,
+      yarn: exportYarn,
+      twee: exportTwee
+    };
+    exporters[normalizeDocumentFormat(state.documentFormat)]();
   }
 
   function exportStoryLayoutJson() {
@@ -20549,7 +21005,6 @@ function installNarrativeCanvasApp() {
     const script = getNodeRuntimeScript(node);
     const outgoing = getChoiceOrderedLinks(getOutgoing(node.id));
     const requirementsSource = getExportNodeRequirementsSource(node, script, model);
-    const branchConditionSource = getExportBranchConditionSource(node, script, model);
     const choices = getExportChoiceEntries(node, script, model, warnings, outgoing);
     const routing = normalizeNodeRouting(node.routing);
     return {
@@ -20560,11 +21015,9 @@ function installNarrativeCanvasApp() {
       typeLabel: getNodeTypeLabel(node.type),
       body: getExportNodeBody(node, script, model),
       requirements: transformExportExpression(requirementsSource, model, warnings, { nodeId: node.id }),
-      condition: transformExportExpression(branchConditionSource, model, warnings, { nodeId: node.id }),
       effects: getRuntimeExportNodeEffects(node, model, warnings),
       choices,
-      conditionBranches: choices.length ? [] : getExportConditionBranches(branchConditionSource, outgoing, model, warnings, node.id),
-      next: choices.length || branchConditionSource ? [] : getExportNextTransitions(node, outgoing, routing, model, warnings),
+      next: choices.length ? [] : getExportNextTransitions(node, outgoing, routing, model, warnings),
       routing: {
         mode: routing.mode,
         target: routing.target,
@@ -20581,7 +21034,7 @@ function installNarrativeCanvasApp() {
   }
 
   function getExportNodeBody(node, script, model) {
-    if (node?.type === "Dialog" && Array.isArray(node.turns) && node.turns.length) {
+    if (isDialogNode(node) && Array.isArray(node.turns) && node.turns.length) {
       return node.turns
         .map((turn) => {
           const speaker = renderExportTemplate(turn.speaker, node, turn.speaker, model, "runtime").trim();
@@ -20626,14 +21079,6 @@ function installNarrativeCanvasApp() {
       return `${getPlaybookActionStateKey(gateAction)} ${value}`.trim();
     }
     return "";
-  }
-
-  function getExportBranchConditionSource(node, script, model) {
-    if (script?.condition) {
-      const fieldValue = getNodeFieldValue(node, script.condition);
-      return fieldValue !== "" ? renderExportTemplate(fieldValue, node, fieldValue, model, "runtime") : script.condition;
-    }
-    return hasNodeCondition(node) ? renderExportTemplate(node.condition || node.body, node, node.condition || node.body, model, "runtime") : "";
   }
 
   function getExportChoiceEntries(node, script, model, warnings, outgoing) {
@@ -20735,21 +21180,6 @@ function installNarrativeCanvasApp() {
     }
     const byIndex = links.find((link) => normalizeChoiceIndex(link.choiceIndex) === index);
     return byIndex || links[index] || null;
-  }
-
-  function getExportConditionBranches(conditionSource, outgoing, model, warnings, nodeId) {
-    if (!conditionSource) return [];
-    const links = getChoiceOrderedLinks(outgoing || []);
-    return links.slice(0, 2).map((link, index) => ({
-      branch: index === 0 ? "true" : "false",
-      targetId: link.to,
-      target: model.nodeNameMap[link.to] || "",
-      linkId: link.id || "",
-      condition: combineRuntimeConditions([
-        getExportLinkCondition(link, model, warnings, { nodeId, linkId: link.id }),
-        getExportTargetRequirementCondition(link, model, warnings, { nodeId, linkId: link.id })
-      ], "&&")
-    }));
   }
 
   function getExportNextTransitions(node, outgoing, routing, model, warnings) {
@@ -21568,16 +21998,6 @@ function installNarrativeCanvasApp() {
       });
       return;
     }
-    if (node.condition && node.conditionBranches.length) {
-      lines.push(`<<if ${formatRuntimeExpressionForFormat(node.condition, "yarn", context)}>>`);
-      appendYarnJump(lines, node.conditionBranches[0]?.targetId, nodeMap, "    ");
-      if (node.conditionBranches[1]?.targetId) {
-        lines.push("<<else>>");
-        appendYarnJump(lines, node.conditionBranches[1].targetId, nodeMap, "    ");
-      }
-      lines.push("<<endif>>");
-      return;
-    }
     appendYarnTransitions(lines, node.next, nodeMap, context);
   }
 
@@ -21609,16 +22029,6 @@ function installNarrativeCanvasApp() {
       });
       return;
     }
-    if (node.condition && node.conditionBranches.length) {
-      lines.push(`{ ${formatRuntimeExpressionForFormat(node.condition, "ink", context)}:`);
-      appendInkDivert(lines, node.conditionBranches[0]?.targetId, nodeMap, "    ");
-      if (node.conditionBranches[1]?.targetId) {
-        lines.push("- else:");
-        appendInkDivert(lines, node.conditionBranches[1].targetId, nodeMap, "    ");
-      }
-      lines.push("}");
-      return;
-    }
     if (node.next.length) {
       node.next.forEach((transition) => {
         if (transition.condition) {
@@ -21640,9 +22050,7 @@ function installNarrativeCanvasApp() {
   }
 
   function getInkNodeBody(node) {
-    const body = String(node?.body || "");
-    if (node?.type === "Condition" && node.condition && body.trim() === String(node.condition).trim()) return "";
-    return body;
+    return String(node?.body || "");
   }
 
   function getPortableNodeEffects(effects) {
@@ -21679,16 +22087,6 @@ function installNarrativeCanvasApp() {
       });
       return;
     }
-    if (node.condition && node.conditionBranches.length) {
-      lines.push(`<<if ${formatRuntimeExpressionForFormat(node.condition, "twee", context)}>>`);
-      appendTweeGoto(lines, node.conditionBranches[0]?.targetId, nodeMap, "  ");
-      if (node.conditionBranches[1]?.targetId) {
-        lines.push("<<else>>");
-        appendTweeGoto(lines, node.conditionBranches[1].targetId, nodeMap, "  ");
-      }
-      lines.push("<</if>>");
-      return;
-    }
     appendTweeTransitions(lines, node.next, nodeMap, context);
   }
 
@@ -21715,11 +22113,6 @@ function installNarrativeCanvasApp() {
     lines.push(`${indent}<<link ${formatSugarCubeString(text)} ${formatSugarCubeString(target.slug)}>>`);
     (Array.isArray(effects) ? effects : []).forEach((effect) => lines.push(`${indent}  ${formatTweeEffect(effect)}`));
     lines.push(`${indent}<</link>>`);
-  }
-
-  function appendTweeGoto(lines, targetId, nodeMap, indent = "") {
-    const target = nodeMap.get(targetId);
-    if (target) lines.push(`${indent}<<goto ${formatSugarCubeString(target.slug)}>>`);
   }
 
   function formatYarnEffect(effect) {
@@ -21836,9 +22229,7 @@ function installNarrativeCanvasApp() {
       collectExpressionPredicates(source).forEach((predicate) => predicates.push(predicate));
     };
     (document?.nodes || []).forEach((node) => {
-      scan(node.condition);
       (node.choices || []).forEach((choice) => scan(choice.condition));
-      (node.conditionBranches || []).forEach((branch) => scan(branch.condition));
       (node.next || []).forEach((transition) => scan(transition.condition));
     });
     return predicates;
@@ -21955,7 +22346,6 @@ function installNarrativeCanvasApp() {
       if (documentSource) lines.push("<!-- narrativeCanvasBody:end -->", "");
       appendStoryMarkdownEffects(lines, node.effects, "effects");
       appendStoryMarkdownChoices(lines, node, nodeMap);
-      appendStoryMarkdownBranches(lines, node, nodeMap);
       appendStoryMarkdownNext(lines, node, nodeMap);
       lines.push("");
     });
@@ -22138,16 +22528,6 @@ function installNarrativeCanvasApp() {
         choice.effects.forEach((effect) => lines.push(`  effect: ${formatStoryMarkdownEffect(effect)}`));
       }
       lines.push(`  goto: ${formatStoryMarkdownTarget(choice.targetId, nodeMap)}`);
-    });
-    lines.push("");
-  }
-
-  function appendStoryMarkdownBranches(lines, node, nodeMap) {
-    if (!node.conditionBranches?.length) return;
-    lines.push("branches:");
-    node.conditionBranches.forEach((branch) => {
-      const prefix = branch.branch === "false" ? "else" : `if ${node.condition || branch.condition || "true"}`;
-      lines.push(`- ${prefix}: ${formatStoryMarkdownTarget(branch.targetId, nodeMap)}`);
     });
     lines.push("");
   }
@@ -22346,20 +22726,6 @@ function installNarrativeCanvasApp() {
     rows.forEach((row) => {
       if (!row || typeof row !== "object" || Array.isArray(row)) return;
       const condition = normalizeOptionalString(row.condition).trim();
-      if (row.kind === "conditionNode") {
-        const node = getNode(row.nodeId);
-        if (!node || isFrameNode(node)) return;
-        const previousCondition = node.condition || (node.type === "Condition" ? node.body || "" : "");
-        node.condition = condition;
-        if (Object.prototype.hasOwnProperty.call(row, "conditionMode")) {
-          node.conditionMode = normalizeStoredConditionGroupMode(row.conditionMode);
-          node.condition = setConditionExpressionGroupMode(node.condition, node.conditionMode);
-        } else {
-          node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
-        }
-        if (node.type === "Condition" && (!node.body || node.body === previousCondition)) node.body = node.condition;
-        return;
-      }
       if (row.kind !== "choiceRequirement") return;
       const node = getNode(row.nodeId);
       if (!node || isFrameNode(node)) return;
@@ -22450,9 +22816,7 @@ function installNarrativeCanvasApp() {
       normalized[String(key)] = {
         title: normalizeOptionalString(script.title),
         body: normalizeOptionalString(script.body),
-        choices: normalizeScriptChoices(script.choices),
-        condition: normalizeOptionalString(script.condition),
-        set: normalizeScriptSet(script.set)
+        choices: normalizeScriptChoices(script.choices)
       };
     });
     return normalized;
@@ -22465,14 +22829,6 @@ function installNarrativeCanvasApp() {
   function normalizeScriptChoices(value) {
     if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
     return normalizeOptionalString(value);
-  }
-
-  function normalizeScriptSet(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    return {
-      key: normalizeOptionalString(value.key || value.variable || value.name),
-      value: normalizeOptionalString(value.value)
-    };
   }
 
   function normalizePlaybookActions(value) {
@@ -23551,7 +23907,7 @@ function installNarrativeCanvasApp() {
 
       if (!documentValuesEqual(sourceNode.body, baselineNode.body)) {
         node.body = restoreDocumentBodyVariables(sourceNode.body || "", parsed.format, sourceVariableByExportName);
-        if (node.type === "Dialog") syncDialogTurnsFromDocumentBody(node);
+        if (isDialogNode(node)) syncDialogTurnsFromDocumentBody(node);
       }
 
       const shouldReplaceEffects = !documentValuesEqual(sourceNode.effects || [], baselineNode.effects || []);
@@ -23569,7 +23925,7 @@ function installNarrativeCanvasApp() {
         else delete node.stateLogic;
       }
 
-      const shouldReplaceChoices = node.type === "Choice" && !documentValuesEqual(sourceNode.choices || [], baselineNode.choices || []);
+      const shouldReplaceChoices = isChoiceNode(node) && !documentValuesEqual(sourceNode.choices || [], baselineNode.choices || []);
       if (shouldReplaceChoices) {
         mergeDocumentChoices(node, sourceNode.choices || [], parsed.format, sourceVariableByExportName, nodeByRef);
         structureChanged = true;
@@ -23813,7 +24169,7 @@ function installNarrativeCanvasApp() {
         changed = true;
       }
       const baselineRoute = baselineRoutes[index] || {};
-      if (!documentValuesEqual(route.condition || "", baselineRoute.condition || "") && sourceNode.next?.length) {
+      if (!documentValuesEqual(route.condition || "", baselineRoute.condition || "")) {
         const condition = restoreDocumentCondition(route.condition || "", format, sourceVariableByExportName);
         if (condition) link.requirements = condition;
         else delete link.requirements;
@@ -23828,15 +24184,6 @@ function installNarrativeCanvasApp() {
       state.project.links = state.project.links.filter((link) => link.from !== node.id || usedLinks.has(link));
       changed = true;
     }
-    if (sourceNode.branches?.length) {
-      const sourceCondition = sourceNode.branches.find((branch) => branch.kind !== "else")?.condition || "";
-      const baselineCondition = baselineNode.branches?.find((branch) => branch.kind !== "else")?.condition || "";
-      if (!documentValuesEqual(sourceCondition, baselineCondition)) {
-        node.condition = restoreDocumentCondition(sourceCondition, format, sourceVariableByExportName);
-        node.conditionMode = getStoredConditionModeForExpression(node.condition, node.conditionMode);
-        changed = true;
-      }
-    }
     return changed;
   }
 
@@ -23847,7 +24194,7 @@ function installNarrativeCanvasApp() {
   }
 
   function buildStoryMarkdownNode(sourceNode, index, usedIds) {
-    const type = sourceNode.type || (index === 0 ? "Entry" : sourceNode.choices.length ? "Choice" : sourceNode.branches.length ? "Condition" : "Content");
+    const type = sourceNode.type || (index === 0 ? "Entry" : sourceNode.choices.length ? "Choice" : "Content");
     const id = makeUniqueStoryMarkdownId(sourceNode.id || `n${index}`, usedIds);
     const node = {
       id,
@@ -23873,10 +24220,6 @@ function installNarrativeCanvasApp() {
         requiresMode: getStoredConditionModeForExpression(choice.requires, "all"),
         effects: choice.effects
       }));
-    }
-    if (sourceNode.branches.length && sourceNode.requires) {
-      node.condition = sourceNode.requires;
-      node.conditionMode = getStoredConditionModeForExpression(sourceNode.requires, "all");
     }
     return normalizeNode(node);
   }
@@ -24067,6 +24410,7 @@ function installNarrativeCanvasApp() {
 
   function normalizeProject(project) {
     const nodeTypesList = normalizeProjectNodeTypes(project.nodeTypes, project.customNodeTypes);
+    const nodeTypeTemplates = new Map(nodeTypesList.map((typeDef) => [typeDef.type, getNodeTypeTemplate(typeDef)]));
     const eventFrameTypes = new Set(nodeTypesList.filter(isEventSheetTypeDef).map((typeDef) => typeDef.type));
     const eventSheet = normalizeEventSheetConfig(project.eventSheet, project.eventSheetHiddenColumns);
     const normalized = {
@@ -24081,21 +24425,89 @@ function installNarrativeCanvasApp() {
       customNodeTypes: [],
       characters: normalizeProjectCharacters(project),
       deletedNodes: Array.isArray(project.deletedNodes) ? project.deletedNodes : [],
-      nodes: Array.isArray(project.nodes) ? project.nodes.map((node) => normalizeNode(node, eventFrameTypes, eventSheet.columns)) : [],
+      nodes: Array.isArray(project.nodes) ? project.nodes.map((node) => normalizeNode(node, eventFrameTypes, eventSheet.columns, nodeTypeTemplates)) : [],
       links: normalizeLinks(project.links)
     };
-    inferLegacyDialogTurns(normalized);
+    migrateRetiredNodeFeatures(normalized, project.script?.nodeTypes);
+    inferLegacyDialogTurns(normalized, nodeTypeTemplates);
     inferLegacyFrameMembership(normalized);
     syncProjectChoiceOptionLinks(normalized);
     syncProjectChoiceBranchLinks(normalized);
     return normalized;
   }
 
-  function inferLegacyDialogTurns(project) {
+  function getRetiredScriptReference(node, reference) {
+    const key = normalizeOptionalString(reference).trim();
+    if (!key) return "";
+    if (Object.prototype.hasOwnProperty.call(node, key)) return normalizeOptionalString(node[key]);
+    if (node.customFields && Object.prototype.hasOwnProperty.call(node.customFields, key)) return normalizeOptionalString(node.customFields[key]);
+    return key;
+  }
+
+  function addMigratedNodeEffect(node, key, value) {
+    const normalizedKey = normalizeOptionalString(key).trim();
+    if (!normalizedKey) return;
+    const logic = normalizeNodeStateLogic(node.stateLogic);
+    const duplicate = logic.effects.some((effect) => effect.trigger === "onVisit" && effect.op === "set" && effect.key === normalizedKey && normalizeOptionalString(effect.value) === normalizeOptionalString(value));
+    if (!duplicate) logic.effects.push({ trigger: "onVisit", op: "set", key: normalizedKey, value: normalizeOptionalString(value) });
+    node.stateLogic = logic;
+  }
+
+  function addMigratedLinkRequirement(link, expression) {
+    const next = normalizeOptionalString(expression).trim();
+    if (!next) return;
+    link.requirements = link.requirements ? appendConditionExpression(link.requirements, next, "all") : next;
+  }
+
+  function migrateRetiredNodeFeatures(project, rawNodeTypeScripts) {
+    if (!project || !Array.isArray(project.nodes) || !Array.isArray(project.links)) return;
+    const scripts = rawNodeTypeScripts && typeof rawNodeTypeScripts === "object" && !Array.isArray(rawNodeTypeScripts) ? rawNodeTypeScripts : {};
+    const outgoingByNode = new Map();
+    project.links.forEach((link) => {
+      if (!outgoingByNode.has(link.from)) outgoingByNode.set(link.from, []);
+      outgoingByNode.get(link.from).push(link);
+    });
+    project.nodes.forEach((node) => {
+      const retiredType = RETIRED_NODE_TYPES.has(node.type);
+      const script = scripts[node.id] || scripts[node.type] || {};
+      const directKey = normalizeOptionalString(node.variable || node.variables).trim();
+      if (directKey && node.value != null) addMigratedNodeEffect(node, directKey, node.value);
+      if (script?.set?.key) {
+        addMigratedNodeEffect(node, getRetiredScriptReference(node, script.set.key), getRetiredScriptReference(node, script.set.value));
+      }
+
+      const directCondition = normalizeOptionalString(node.condition).trim();
+      const scriptedCondition = script?.condition ? getRetiredScriptReference(node, script.condition).trim() : "";
+      const condition = directCondition || scriptedCondition || (node.type === "Condition" ? normalizeOptionalString(node.body).trim() : "");
+      if (condition) {
+        const outgoing = outgoingByNode.get(node.id) || [];
+        if (outgoing.length >= 2) {
+          addMigratedLinkRequirement(outgoing[0], condition);
+          addMigratedLinkRequirement(outgoing[1], `!(${condition})`);
+        } else {
+          const logic = normalizeNodeStateLogic(node.stateLogic);
+          if (!logic.requirements) logic.requirements = condition;
+          logic.requirementsMode = getStoredConditionModeForExpression(logic.requirements, logic.requirementsMode);
+          node.stateLogic = logic;
+        }
+        if (node.type === "Condition" && normalizeOptionalString(node.body).trim() === condition) node.body = "";
+      }
+
+      if (retiredType) node.type = "Content";
+      delete node.variable;
+      delete node.variables;
+      delete node.value;
+      delete node.condition;
+      delete node.conditionMode;
+      if (node.stateLogic) cleanupNodeStateLogic(node);
+    });
+  }
+
+  function inferLegacyDialogTurns(project, templateMap = null) {
     if (!project || !Array.isArray(project.nodes)) return;
     const characterNames = new Set((project.characters || []).map((character) => String(character.name || "").trim()).filter(Boolean));
     project.nodes.forEach((node) => {
-      if (node.type !== "Dialog" || Array.isArray(node.turns)) return;
+      if (!isDialogNode(node, templateMap) || Array.isArray(node.turns)) return;
       const line = normalizeOptionalString(node.body).trim();
       if (!line) return;
       const title = normalizeOptionalString(node.title).trim();
@@ -24375,8 +24787,8 @@ function installNarrativeCanvasApp() {
 
   function normalizeProjectNodeTypes(types, legacyCustomTypes) {
     const hasProjectTypes = Array.isArray(types);
-    const normalized = normalizeNodeTypes(hasProjectTypes ? types : defaultNodeTypeList());
-    const legacyTypes = normalizeNodeTypes(legacyCustomTypes);
+    const normalized = normalizeNodeTypes(hasProjectTypes ? types : defaultNodeTypeList()).filter((typeDef) => !RETIRED_NODE_TYPES.has(typeDef.type));
+    const legacyTypes = normalizeNodeTypes(legacyCustomTypes).filter((typeDef) => !RETIRED_NODE_TYPES.has(typeDef.type));
     if (!legacyTypes.length) return normalized;
     const seen = new Set(normalized.map((typeDef) => typeDef.type));
     return [
@@ -24413,7 +24825,8 @@ function installNarrativeCanvasApp() {
     const label = String(typeDef?.label || typeDef?.type || "").trim().slice(0, 40);
     if (!label) return null;
     const type = String(typeDef?.type || customNodeTypeId(label)).trim() || customNodeTypeId(label);
-    const kind = type === "Event" ? "frame" : normalizeNodeTypeKind(typeDef?.kind || "node");
+    const template = normalizeNodeTypeTemplate(typeDef?.template, type, typeDef?.kind);
+    const kind = template === "frame" ? "frame" : "node";
     const builtIn = nodeTypes[type];
     return {
       type,
@@ -24424,13 +24837,14 @@ function installNarrativeCanvasApp() {
       custom: Boolean(typeDef?.custom),
       badgeCustom: Boolean(typeDef?.badgeCustom),
       kind,
+      template,
       fields: normalizeNodeTypeFields(typeDef?.fields),
       removedColumns: isFrameKind(kind) ? normalizeRemovedColumns(typeDef?.removedColumns) : [],
       eventColumnLabels: isFrameKind(kind) ? normalizeEventColumnLabels(typeDef?.eventColumnLabels) : {},
       hidden: Boolean(typeDef?.hidden),
       eventSheetHidden: isFrameKind(kind) ? Boolean(typeDef?.eventSheetHidden) : false,
-      system: Boolean(typeDef?.system) || Boolean(builtIn?.system),
-      legacy: Boolean(typeDef?.legacy) || Boolean(builtIn?.legacy)
+      cardOpacity: normalizeNodeTypeOpacity(typeDef?.cardOpacity),
+      system: Boolean(typeDef?.system) || Boolean(builtIn?.system)
     };
   }
 
@@ -24447,6 +24861,35 @@ function installNarrativeCanvasApp() {
   function normalizeNodeTypeKind(value) {
     if (value === "eventFrame") return "frame";
     return value === "frame" ? "frame" : "node";
+  }
+
+  function getBuiltInNodeTypeTemplate(type, kind = "node") {
+    if (type === "Dialog") return "dialog";
+    if (type === "Choice") return "choice";
+    return isFrameKind(kind) || type === "Event" ? "frame" : "node";
+  }
+
+  function normalizeNodeTypeTemplate(value, type = "", kind = "node") {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (NODE_TYPE_TEMPLATES.has(normalized)) return normalized;
+    return getBuiltInNodeTypeTemplate(type, normalizeNodeTypeKind(kind));
+  }
+
+  function getNodeTypeTemplate(typeOrDef, templateMap = null) {
+    const requestedType = typeof typeOrDef === "string" ? typeOrDef : String(typeOrDef?.type || "");
+    if (templateMap?.has(requestedType)) return templateMap.get(requestedType);
+    const typeDef = typeof typeOrDef === "string"
+      ? getNodeTypeDef(typeOrDef)
+      : (typeOrDef?.type ? typeOrDef : getNodeTypeDef(typeOrDef?.type));
+    return normalizeNodeTypeTemplate(typeDef?.template, typeDef?.type || requestedType, typeDef?.kind || "node");
+  }
+
+  function isChoiceNode(node, templateMap = null) {
+    return Boolean(node?.type) && getNodeTypeTemplate(node.type, templateMap) === "choice";
+  }
+
+  function isDialogNode(node, templateMap = null) {
+    return Boolean(node?.type) && getNodeTypeTemplate(node.type, templateMap) === "dialog";
   }
 
   function parseCustomNodeFields(value, previousFields = []) {
@@ -24549,7 +24992,14 @@ function installNarrativeCanvasApp() {
     return DEFAULT_CUSTOM_NODE_COLOR;
   }
 
-  function normalizeNode(node, eventFrameTypes = null, eventColumns = null) {
+  function normalizeNodeTypeOpacity(value) {
+    if (value === undefined || value === null || value === "") return null;
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    return Math.max(0, Math.min(100, Math.round(number)));
+  }
+
+  function normalizeNode(node, eventFrameTypes = null, eventColumns = null, templateMap = null) {
     const normalized = { ...node };
     const hasExplicitFrameId = Object.prototype.hasOwnProperty.call(normalized, "frameId");
     delete normalized.icon;
@@ -24596,7 +25046,7 @@ function installNarrativeCanvasApp() {
       delete normalized.collapsed;
       delete normalized.layout;
     }
-    if (normalized.type === "Dialog") {
+    if (isDialogNode(normalized, templateMap)) {
       normalized.turns = normalizeDialogTurns(normalized);
       if (!normalized.turns.length) delete normalized.turns;
       if (normalized.dialogSpeakerRatio != null) normalized.dialogSpeakerRatio = normalizeDialogSpeakerRatio(normalized.dialogSpeakerRatio);
@@ -24604,7 +25054,7 @@ function installNarrativeCanvasApp() {
       delete normalized.turns;
       delete normalized.dialogSpeakerRatio;
     }
-    if (normalized.type === "Choice") {
+    if (isChoiceNode(normalized, templateMap)) {
       normalized.choiceRevealMode = normalizeChoiceRevealMode(normalized.choiceRevealMode || normalized.revealMode);
     } else {
       delete normalized.choiceRevealMode;
@@ -24812,7 +25262,10 @@ function installNarrativeCanvasApp() {
     if (!dom.root) return;
     if (open) dom.root.setAttribute("data-play-panel", "open");
     else dom.root.removeAttribute("data-play-panel");
-    if (!open) state.playFloating = false;
+    if (!open) {
+      state.playFloating = false;
+      setFloatingWindowPinned("play", false);
+    }
     applyPlayFloatState();
     requestAnimationFrame(() => {
       renderTransform();
@@ -24833,11 +25286,15 @@ function installNarrativeCanvasApp() {
       button.title = label;
       button.setAttribute("aria-label", label);
     }
+    const pinButton = dom.playDialog?.querySelector("[data-floating-window-pin='play']");
+    if (pinButton) pinButton.hidden = !floating;
+    renderFloatingWindowPinState("play");
   }
 
   function togglePlayFloat() {
     if (!dom.root?.hasAttribute("data-play-panel")) return;
     state.playFloating = !state.playFloating;
+    if (!state.playFloating) setFloatingWindowPinned("play", false);
     applyPlayFloatState();
   }
 
@@ -24871,11 +25328,11 @@ function installNarrativeCanvasApp() {
       state.panel = "node";
       // Focus the node in the inspector, but honor a right panel the reader deliberately collapsed
       // during playback instead of forcing it open again on every step.
-      if (state.floatingInspectorPanel) closeFloatingInspector({ restoreFocus: false });
+      if (state.floatingInspectorPanel && !isFloatingWindowPinned("inspector")) closeFloatingInspector({ restoreFocus: false });
       renderShellState();
       renderWorkspaceFile();
       renderInspector();
-      centerCanvasOnNode(current, state.view.scale || DEFAULT_CANVAS_ZOOM);
+      centerCanvasOnNode(current, state.view.scale || DEFAULT_CANVAS_ZOOM, { immediate: true });
     });
   }
 
@@ -24903,7 +25360,7 @@ function installNarrativeCanvasApp() {
     state.selectedLinkId = null;
     state.panel = "node";
     state.sidebar.rightCollapsed = false;
-    if (state.floatingInspectorPanel) closeFloatingInspector({ restoreFocus: false });
+    if (state.floatingInspectorPanel && !isFloatingWindowPinned("inspector")) closeFloatingInspector({ restoreFocus: false });
     openPreviewPanel();
     renderShellState();
     renderWorkspaceFile();
@@ -25114,15 +25571,6 @@ function installNarrativeCanvasApp() {
     const runtimeScript = getNodeRuntimeScript(node);
     if (!options.skipVisit) {
       ensurePreviewVisitRecord(node);
-      const assignment = getRuntimeAssignment(node, runtimeScript);
-      if (assignment.key) {
-        getPlayRuntimeVariables()[assignment.key] = coerceValue(assignment.value);
-        recordPreviewOperation(node, formatPreviewStateOperation("Node assignment", {
-          op: "set",
-          key: assignment.key,
-          value: assignment.value
-        }, node));
-      }
       applyNodeEffectsForNode(node, "onVisit", "Node visit");
       applyPlaybookActionsForNode(node, "onVisit", "Node visit");
       applyVisitTrackingRule(node);
@@ -25132,12 +25580,6 @@ function installNarrativeCanvasApp() {
     const outgoing = getOutgoing(node.id);
     let nextLinks = outgoing;
     const requirementsSource = getRuntimeNodeRequirementsSource(node, runtimeScript);
-    const branchConditionSource = getRuntimeBranchConditionSource(node, runtimeScript);
-    if (branchConditionSource) {
-      const result = evaluateCondition(branchConditionSource);
-      const conditionLinks = getChoiceOrderedLinks(outgoing);
-      nextLinks = result ? conditionLinks.slice(0, 1) : conditionLinks.slice(1, 2);
-    }
     nextLinks = filterRuntimeLinksByRequirements(nextLinks, node);
 
     if (!state.playPath.includes(node.id)) {
@@ -25163,7 +25605,7 @@ function installNarrativeCanvasApp() {
       : renderRuntimeTemplate(runtimeScript.body, node, displayBody(node));
     dom.playTitle.textContent = runtimeTitle;
     const customFields = renderPreviewCustomFields(node);
-    const debugDetails = renderPreviewDebugDetails(node, { requirementsSource, branchConditionSource });
+    const debugDetails = renderPreviewDebugDetails(node, { requirementsSource, branchConditionSource: "" });
     dom.playBody.innerHTML = `
       <div class="play-meta">
         <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
@@ -25273,12 +25715,6 @@ function installNarrativeCanvasApp() {
       const outgoing = getOutgoing(node.id);
       if (getRuntimeChoices(node, runtimeScript).length && outgoing.length) break;
       let nextLinks = outgoing;
-      const branchConditionSource = getRuntimeBranchConditionSource(node, runtimeScript);
-      if (branchConditionSource) {
-        const result = evaluateCondition(branchConditionSource);
-        const conditionLinks = getChoiceOrderedLinks(outgoing);
-        nextLinks = result ? conditionLinks.slice(0, 1) : conditionLinks.slice(1, 2);
-      }
       nextLinks = filterRuntimeLinksByRequirements(nextLinks, node);
       nextId = nextLinks[0]?.to || "";
     }
@@ -25453,15 +25889,6 @@ function installNarrativeCanvasApp() {
       const row = formatPreviewAffectedValueRow(label, action, node);
       if (row) rows.push(row);
     };
-    const assignment = getRuntimeAssignment(node, getNodeRuntimeScript(node));
-    if (assignment.key) {
-      push(`${t("Node assignment")} / ${t("On visit")}`, {
-        op: "set",
-        category: "Variable",
-        key: assignment.key,
-        value: assignment.value
-      });
-    }
     normalizeNodeStateLogic(node?.stateLogic).effects.forEach((effect) => {
       push(`${t("Node effect")} / ${t(effect.trigger === "onChoose" ? "On choose" : "On visit")}`, effect);
     });
@@ -25557,13 +25984,6 @@ function installNarrativeCanvasApp() {
     `;
   }
 
-  function getNodeVariableKey(node) {
-    if (!node) return "";
-    const key = node.variable || node.variables;
-    if (!key || node.value == null) return "";
-    return String(key).trim();
-  }
-
   function getNodeRuntimeScript(node) {
     const scripts = getScriptNodeTypes();
     return scripts[node?.id]
@@ -25572,31 +25992,12 @@ function installNarrativeCanvasApp() {
       || {};
   }
 
-  function getRuntimeAssignment(node, script) {
-    const setConfig = script?.set;
-    if (setConfig?.key) {
-      const key = resolveScriptReference(node, setConfig.key);
-      const value = setConfig.value ? resolveScriptReference(node, setConfig.value) : "";
-      return { key: String(key || "").trim(), value };
-    }
-    const fallbackKey = getNodeVariableKey(node);
-    return fallbackKey ? { key: fallbackKey, value: node.value } : { key: "", value: "" };
-  }
-
   function getRuntimeNodeRequirementsSource(node, script) {
     const requirements = normalizeNodeStateLogic(node?.stateLogic).requirements;
     if (requirements) return requirements;
     const gateAction = getPlaybookGateAction(node);
     if (gateAction) return `${getPlaybookActionStateKey(gateAction)} ${renderRuntimeTemplate(gateAction.value, node, gateAction.value)}`.trim();
     return "";
-  }
-
-  function getRuntimeBranchConditionSource(node, script) {
-    if (script?.condition) {
-      const fieldValue = getNodeFieldValue(node, script.condition);
-      return fieldValue !== "" ? fieldValue : script.condition;
-    }
-    return hasNodeCondition(node) ? (node.condition || node.body) : "";
   }
 
   function applyNodeEffectsForNode(node, trigger, contextLabel = "") {
@@ -25628,7 +26029,7 @@ function installNarrativeCanvasApp() {
   }
 
   function getRuntimeDialogTurns(node) {
-    if (!node || node.type !== "Dialog" || !Array.isArray(node.turns)) return [];
+    if (!node || !isDialogNode(node) || !Array.isArray(node.turns)) return [];
     return node.turns
       .map((turn) => ({
         speaker: renderRuntimeTemplate(turn.speaker, node, turn.speaker).trim(),
@@ -25931,10 +26332,6 @@ function installNarrativeCanvasApp() {
     return Array.isArray(node?.choices) && node.choices.length > 0;
   }
 
-  function hasNodeCondition(node) {
-    return Boolean(node?.condition || node?.type === "Condition");
-  }
-
   function parseChoiceLines(value) {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
     return String(value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
@@ -25944,18 +26341,8 @@ function installNarrativeCanvasApp() {
     return parseChoiceLines(node?.choices);
   }
 
-  function getConditionBranchLabels(node) {
-    return hasNodeCondition(node) ? CONDITION_BRANCH_LABELS : [];
-  }
-
   function getBranchLabels(node) {
-    const choices = getChoiceBranchLabels(node);
-    return choices.length ? choices : getConditionBranchLabels(node);
-  }
-
-  function getBranchKind(node) {
-    if (getChoiceBranchLabels(node).length) return "choice";
-    return getConditionBranchLabels(node).length ? "condition" : "";
+    return getChoiceBranchLabels(node);
   }
 
   function normalizeChoiceIndex(value) {
@@ -26051,7 +26438,6 @@ function installNarrativeCanvasApp() {
   }
 
   function getBranchSyncOrder(node, outgoing, preferredLinkId = "") {
-    if (getBranchKind(node) === "condition") return outgoing;
     return preferredLinkId
       ? outgoing.slice().sort((a, b) => (a.id === preferredLinkId ? -1 : b.id === preferredLinkId ? 1 : 0))
       : outgoing;
@@ -26346,7 +26732,7 @@ function installNarrativeCanvasApp() {
 
   function inferCharacters(project) {
     const names = [...new Set((project.nodes || [])
-      .filter((node) => node.type === "Dialog" && node.title)
+      .filter((node) => isDialogNode(node) && node.title)
       .map((node) => node.title))];
     return names.map((name, index) => ({
       id: `c${index}`,
@@ -26434,7 +26820,7 @@ function installNarrativeCanvasApp() {
       });
     }
 
-    const dialogSpeaker = node.type === "Dialog" && node.title
+    const dialogSpeaker = isDialogNode(node) && node.title
       ? getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase())
       : null;
     if (dialogSpeaker) links.push(createCharacterLink(dialogSpeaker, "Speaker", "dialog"));
@@ -26615,7 +27001,7 @@ function installNarrativeCanvasApp() {
         addDirectLink(entry.characterId, entry.role, "", "cast");
       });
 
-      if (node.type === "Dialog" && node.title) {
+      if (isDialogNode(node) && node.title) {
         const speaker = getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase());
         if (speaker) addDirectLink(speaker.id, "Speaker", getCastRelationLabel("Speaker"), "dialog");
       }
@@ -26712,10 +27098,6 @@ function installNarrativeCanvasApp() {
     const tokenPattern = new RegExp(`\\{${escapeRegExp(oldKey)}\\}`, "g");
     state.project.nodes.forEach((node) => {
       if (typeof node.body === "string") node.body = node.body.replace(tokenPattern, `{${newKey}}`);
-      if (node.variable === oldKey) node.variable = newKey;
-      if (typeof node.condition === "string") {
-        node.condition = node.condition.replace(new RegExp(`\\b${escapeRegExp(oldKey)}\\b`, "g"), newKey);
-      }
     });
   }
 
@@ -27360,7 +27742,7 @@ function installNarrativeCanvasApp() {
         ? getEventFrameCharacterSummary(node)
         : getNodeCharacterSummary(node, { includeEventAggregate: false });
       if (summary) return summary;
-      if (node.type === "Dialog") return node.title || "";
+      if (isDialogNode(node)) return node.title || "";
     }
     if (key === "eventType") return "";
     if (key === "beatList") return node.title || "";
@@ -28001,9 +28383,6 @@ function installNarrativeCanvasApp() {
   }
 
   function displayBody(node) {
-    const variableKey = getNodeVariableKey(node);
-    if (variableKey) return `${variableKey} = ${node.value ?? ""}`;
-    if (hasNodeCondition(node) && node.condition) return node.condition;
     return node.body || "";
   }
 
@@ -28073,7 +28452,7 @@ function installNarrativeCanvasApp() {
     if (!node?.id) return "";
     const cache = getNodeSearchTextCache();
     if (cache.has(node.id)) return cache.get(node.id);
-    const text = [node.type, node.title, node.body, node.condition, node.variable, node.value, ...(node.choices || []), ...Object.values(node.customFields || {})]
+    const text = [node.type, node.title, node.body, ...(node.choices || []), ...Object.values(node.customFields || {})]
       .filter(Boolean)
       .map((value) => String(value).toLowerCase())
       .join("\n");
@@ -28345,8 +28724,6 @@ function installNarrativeCanvasApp() {
     { pattern: /^(.+) hidden from Node Library\. Data kept\.$/, key: "{label} hidden from Node Library. Data kept.", names: ["label"], translateValues: true },
     { pattern: /^(.+) restored to Node Library\.$/, key: "{label} restored to Node Library.", names: ["label"], translateValues: true },
     { pattern: /^Updated (\d+) references?\.$/, key: "Updated {count} references.", names: ["count"] },
-    { pattern: /^Converted Set "(.+)" into onVisit effect on "(.+)"\.$/, key: "Converted Set \"{source}\" into onVisit effect on \"{target}\".", names: ["source", "target"], translateValues: true },
-    { pattern: /^Converted Condition "(.+)" into two gated links\.$/, key: "Converted Condition \"{source}\" into two gated links.", names: ["source"], translateValues: true },
     { pattern: /^(.+) rule added from selected node\.$/, key: "{rule} rule added from selected node.", names: ["rule"], translateValues: true },
     { pattern: /^(.+) is a system rule\.$/, key: "{rule} is a system rule.", names: ["rule"], translateValues: true },
     { pattern: /^(.+) disabled\.$/, key: "{rule} disabled.", names: ["rule"], translateValues: true },

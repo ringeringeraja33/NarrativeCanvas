@@ -3,6 +3,7 @@ const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
 const sourcePath = path.join(projectRoot, "canvas.css");
+const pluginSourcePath = path.join(projectRoot, "plugin.css");
 const targetPath = path.join(projectRoot, "styles.css");
 const checkOnly = process.argv.includes("--check");
 const hostSelector = ".narrative-canvas-plugin-host";
@@ -156,12 +157,8 @@ function scopeCss(source) {
 }
 
 const current = fs.readFileSync(targetPath, "utf8").replace(/\r\n/g, "\n");
-const markerIndex = current.indexOf(marker);
-if (markerIndex === -1) {
-  throw new Error(`Could not find marker in ${targetPath}`);
-}
-
-const prelude = current.slice(0, markerIndex + marker.length).trimEnd();
+const pluginSource = fs.readFileSync(pluginSourcePath, "utf8").replace(/\r\n/g, "\n").trim();
+const prelude = `${pluginSource}\n${marker}`;
 const source = fs.readFileSync(sourcePath, "utf8").replace(/\r\n/g, "\n");
 const scoped = scopeCss(source).trim();
 const next = `${prelude}\n${scoped}\n`;

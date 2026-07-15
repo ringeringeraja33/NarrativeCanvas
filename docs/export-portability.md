@@ -71,7 +71,7 @@ Exports should follow the same runtime semantics as Play preview wherever the ta
 ### Routing
 
 - A node with choices routes through choice-linked targets.
-- A condition node or condition source uses the first outgoing branch as true and the second outgoing branch as false.
+- Conditional links export as ordinary `next` transitions with their own condition expressions.
 - Explicit `routing.mode === "goTo"` wins over the next outgoing link for linear nodes.
 - `routing.mode === "end"` exports as no next transition in Runtime JSON and as the target format's end behavior where possible.
 - Multiple plain outgoing links are exported in deterministic canvas/link order.
@@ -165,7 +165,7 @@ Minimum mapping:
 - Choice link = SugarCube `<<link "label" "target">>` so onChoose effects can run before navigation.
 - Conditions = SugarCube `<<if $key ...>>` wrappers.
 - Effects = SugarCube `<<set>>` for `set / add / subtract / toggle`; runtime-only effects remain in the export report.
-- Condition routing = `<<goto "target">>` for true/false branches.
+- Conditional routing = guarded links or `<<goto "target">>` transitions.
 
 Validation target: Tweego/Twine import plus the existing fixture reference parser, which checks `StoryData`, passage targets, macro balance, the bribe branch, and key effects.
 

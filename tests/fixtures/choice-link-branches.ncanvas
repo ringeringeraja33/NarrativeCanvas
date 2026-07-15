@@ -20,7 +20,7 @@
       },
       {
         "id": "n1",
-        "type": "Set",
+        "type": "Content",
         "title": "Offer the watch",
         "body": "Raise trust.",
         "x": 380,

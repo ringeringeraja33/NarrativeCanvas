@@ -1641,9 +1641,7 @@ function createRuntimeSession(document) {
 
   function advance() {
     const node = nodeById.get(currentNodeId);
-    const transitions = Array.isArray(node?.conditionBranches) && node.conditionBranches.length
-      ? node.conditionBranches
-      : (node?.next || []);
+    const transitions = node?.next || [];
     const transition = transitions.find((item) => !item.condition || evaluateCondition(item.condition, state));
     if (!transition?.targetId) return false;
     currentNodeId = transition.targetId;

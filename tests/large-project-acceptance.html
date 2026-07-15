@@ -119,7 +119,7 @@
         const characters = makeCharacters(characterCount);
         const nodes = [];
         const links = [];
-        const types = ["Content", "Dialog", "Choice", "Condition", "Set", "Jump", "Marker"];
+        const types = ["Content", "Dialog", "Choice", "Clue", "InterviewNote", "Jump", "Marker"];
 
         for (let index = 0; index < nodeCount; index += 1) {
           const col = index % columns;
@@ -136,11 +136,6 @@
             cast: [{ characterId: `c${index % characterCount}`, role: index % 5 === 0 ? "POV" : "Present" }]
           };
           if (type === "Choice") node.choices = ["Continue", "Turn back", "Inspect"];
-          if (type === "Set") {
-            node.variable = `flag_${index % 200}`;
-            node.value = "true";
-          }
-          if (type === "Condition") node.condition = `score_${index % 200} >= 10`;
           if (type === "Event") {
             node.width = 760;
             node.height = 360;

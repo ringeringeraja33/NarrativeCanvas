@@ -43,7 +43,7 @@ print(page["body"])
 - Runtime JSON v1 loading
 - initial variables
 - node body and custom field template replacement
-- `next`, `conditionBranches`, choice targets, and explicit routing targets
+- conditional `next` transitions, choice targets, and explicit routing targets
 - `set`, `add`, `subtract`, `toggle`, `append`, `remove`, and `clear` effects
 - bare keys, comparisons, `&&`, `||`, grouped expressions, `not`, `!`, `has(...)`, and `contains(...)`
 - flat-first dotted key lookup, matching the portable export contract

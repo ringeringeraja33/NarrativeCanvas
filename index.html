@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Narrative Canvas</title>
-    <link rel="stylesheet" href="./canvas.css?v=20260714b-1.2.3">
+    <link rel="stylesheet" href="./canvas.css?v=20260716d-1.2.4">
   </head>
   <body>
     <div class="app-shell">
@@ -15,8 +15,6 @@
             <h1 id="vaultProjectTitle">Sample</h1>
           </div>
           <div class="header-actions">
-            <button class="icon-button save-project-button" title="Save project state" data-action="save-project" type="button">Save</button>
-            <button class="icon-button new-project-button" title="New project" data-action="new-project" type="button">New</button>
             <button class="icon-button sidebar-toggle-button" title="Collapse left sidebar" aria-label="Collapse left sidebar" data-sidebar-toggle="left" type="button">
               <span class="sidebar-toggle-icon sidebar-toggle-icon-left" aria-hidden="true"></span>
             </button>
@@ -40,6 +38,8 @@
             <button class="small-button" data-action="reload-project-file" type="button">Reload</button>
             <button class="small-button" data-action="clear-browser-storage" data-web-only type="button">Clear storage</button>
             <button class="small-button project-file-sample-button" data-action="open-sample-project" data-web-only type="button">Open sample file</button>
+            <button class="small-button save-project-button" title="Save project state" data-action="save-project" type="button">Save</button>
+            <button class="small-button new-project-button" title="New project" data-action="new-project" type="button">New</button>
           </div>
         </section>
 
@@ -76,8 +76,10 @@
               <input id="customNodeColor" type="color" value="#7fdbca" title="Node color">
               <button class="small-button" data-action="add-custom-node-type" type="button">Add</button>
             </div>
-            <select id="customNodeKind" title="Node behavior">
-              <option value="node">Node</option>
+            <select id="customNodeKind" title="Node template">
+              <option value="node">Basic Node</option>
+              <option value="dialog">Dialog</option>
+              <option value="choice">Choice</option>
               <option value="frame">Frame</option>
             </select>
             <textarea id="customNodeFields" class="custom-node-fields" rows="3" placeholder="Fields, one per line" spellcheck="false"></textarea>
@@ -92,11 +94,19 @@
             <span class="pane-kicker">File</span>
             <strong id="activeFileTab">Narrative.canvas</strong>
           </div>
-          <span class="project-history" role="group" aria-label="History">
-            <button id="fullscreenButton" class="icon-button history-button immersive-toggle-button" data-action="toggle-immersive-fullscreen" type="button" title="Enter immersive fullscreen" aria-label="Enter immersive fullscreen" aria-pressed="false"><svg class="history-icon immersive-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path></svg></button>
-            <button id="undoButton" class="icon-button history-button" data-action="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
-            <button id="redoButton" class="icon-button history-button" data-action="redo" type="button" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo" disabled>↷</button>
-          </span>
+          <div class="workspace-global-actions">
+            <span class="project-history" role="group" aria-label="History">
+              <button id="languageToggle" class="language-toggle-button" data-web-only data-action="toggle-language" type="button" title="Switch language" aria-label="Switch language">
+                <span class="language-toggle-option" data-lang="en">EN</span>
+                <span class="language-toggle-divider" aria-hidden="true">/</span>
+                <span class="language-toggle-option" data-lang="zh">中</span>
+              </button>
+              <button id="fullscreenButton" class="icon-button history-button immersive-toggle-button" data-action="toggle-immersive-fullscreen" type="button" title="Enter immersive fullscreen" aria-label="Enter immersive fullscreen" aria-pressed="false"><svg class="history-icon immersive-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path></svg></button>
+              <button id="undoButton" class="icon-button history-button" data-action="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+              <button id="redoButton" class="icon-button history-button" data-action="redo" type="button" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo" disabled>↷</button>
+            </span>
+            <button id="themeToggle" class="icon-button theme-toggle-button" title="Switch theme" data-action="toggle-theme" type="button" aria-pressed="true">Dark</button>
+          </div>
         </header>
         <header id="workspaceToolbar" class="canvas-workspace-tabs">
           <div class="toolbar-group">
@@ -175,7 +185,9 @@
         </footer>
         <div class="workspace-floating-controls">
           <button class="workspace-toc-button" type="button" data-action="toggle-document-toc" aria-pressed="false" title="Toggle outline" aria-label="Toggle outline">
-            <span aria-hidden="true">☰</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 7h14M5 12h14M5 17h14"></path>
+            </svg>
           </button>
           <button class="workspace-scroll-top-button playbook-scroll-top-button" type="button" data-action="scroll-workspace-top" title="Back to top" aria-label="Back to top">
             <span aria-hidden="true">↑</span>
@@ -185,14 +197,26 @@
         <button id="aiFloatingButton" class="ai-floating-button" data-action="toggle-ai-window" type="button" title="Open AI assistant" aria-label="Open AI assistant" aria-expanded="false">
           <span aria-hidden="true">AI</span>
         </button>
-        <aside id="aiFloatingWindow" class="ai-floating-window" aria-label="AI assistant" hidden>
-          <header class="ai-floating-header">
-            <div><span class="pane-kicker">Canvas copilot</span><div class="ai-title"><h2>AI</h2><span class="ai-beta-badge" data-ai-beta>Beta</span></div></div>
-            <button class="icon-button" data-action="close-ai-window" type="button" title="Close AI assistant" aria-label="Close AI assistant">×</button>
-          </header>
-          <div id="aiPanel" class="ai-floating-body"></div>
-        </aside>
       </main>
+
+      <aside id="aiFloatingWindow" class="ai-floating-window" aria-label="AI assistant" hidden>
+        <header class="ai-floating-header" data-floating-window-drag="ai">
+          <div><span class="pane-kicker">Canvas copilot</span><div class="ai-title"><h2>AI</h2><span class="project-feature-badge ai-beta-badge" data-ai-beta title="Experimental feature">Beta</span></div></div>
+          <div class="floating-window-header-actions">
+            <button class="icon-button floating-window-pin-button" data-action="toggle-floating-window-pin" data-floating-window-pin="ai" type="button" aria-pressed="false" title="Pin window" aria-label="Pin window"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4 6 0-1 5 3 3v2H7v-2l3-3-1-5ZM12 14v6"></path></svg></button>
+            <button class="icon-button" data-action="close-ai-window" type="button" title="Close AI assistant" aria-label="Close AI assistant">×</button>
+          </div>
+        </header>
+        <div id="aiPanel" class="ai-floating-body"></div>
+        <span class="floating-window-resize-handle n" data-floating-window-resize="n" data-floating-window="ai"></span>
+        <span class="floating-window-resize-handle e" data-floating-window-resize="e" data-floating-window="ai"></span>
+        <span class="floating-window-resize-handle s" data-floating-window-resize="s" data-floating-window="ai"></span>
+        <span class="floating-window-resize-handle w" data-floating-window-resize="w" data-floating-window="ai"></span>
+        <span class="floating-window-resize-handle ne" data-floating-window-resize="ne" data-floating-window="ai"></span>
+        <span class="floating-window-resize-handle se" data-floating-window-resize="se" data-floating-window="ai"></span>
+        <span class="floating-window-resize-handle sw" data-floating-window-resize="sw" data-floating-window="ai"></span>
+        <span class="floating-window-resize-handle nw" data-floating-window-resize="nw" data-floating-window="ai"></span>
+      </aside>
 
       <dialog id="playDialog" class="play-dialog">
         <form method="dialog" class="play-shell">
@@ -203,6 +227,7 @@
             </div>
             <div class="play-header-actions">
               <button class="icon-button play-float-button" type="button" data-action="toggle-play-float" aria-pressed="false" title="Float preview to center" aria-label="Float preview to center"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 17 7 7M7 7v7M7 7h7"></path></svg></button>
+              <button class="icon-button floating-window-pin-button" data-action="toggle-floating-window-pin" data-floating-window-pin="play" type="button" aria-pressed="false" title="Pin window" aria-label="Pin window"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4 6 0-1 5 3 3v2H7v-2l3-3-1-5ZM12 14v6"></path></svg></button>
               <button class="icon-button" value="close" aria-label="Close preview">x</button>
             </div>
           </header>
@@ -224,15 +249,14 @@
       <div class="sidebar-resizer sidebar-resizer-right" data-sidebar-resizer="right" role="separator" aria-orientation="vertical" aria-label="Resize right sidebar"></div>
       <aside class="sidebar sidebar-right" data-sidebar="right">
         <header class="pane-header compact">
-          <div class="pane-title">
-            <span class="pane-kicker">Inspector</span>
-            <h1 id="inspectorTitle">Project</h1>
-          </div>
           <div class="header-actions">
             <button class="icon-button sidebar-toggle-button" title="Collapse right sidebar" aria-label="Collapse right sidebar" data-sidebar-toggle="right" type="button">
               <span class="sidebar-toggle-icon sidebar-toggle-icon-right" aria-hidden="true"></span>
             </button>
-            <button id="themeToggle" class="icon-button theme-toggle-button" title="Switch theme" data-action="toggle-theme" type="button" aria-pressed="true">Dark</button>
+          </div>
+          <div class="pane-title">
+            <span class="pane-kicker">Inspector</span>
+            <h1 id="inspectorTitle">Project</h1>
           </div>
         </header>
 
@@ -259,13 +283,16 @@
       </aside>
 
       <div id="inspectorFloatOverlay" class="inspector-float-overlay" hidden>
-        <section class="inspector-float-window" role="dialog" aria-modal="true" aria-labelledby="inspectorFloatTitle">
+        <section class="inspector-float-window" role="dialog" aria-modal="false" aria-labelledby="inspectorFloatTitle">
           <header class="inspector-float-header" data-floating-window-drag="inspector">
             <div>
               <span class="pane-kicker">Inspector</span>
               <h2 id="inspectorFloatTitle">Project</h2>
             </div>
-            <button class="icon-button" data-action="close-floating-inspector" type="button" title="Close centered inspector" aria-label="Close centered inspector">x</button>
+            <div class="floating-window-header-actions">
+              <button class="icon-button floating-window-pin-button" data-action="toggle-floating-window-pin" data-floating-window-pin="inspector" type="button" aria-pressed="false" title="Pin window" aria-label="Pin window"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4 6 0-1 5 3 3v2H7v-2l3-3-1-5ZM12 14v6"></path></svg></button>
+              <button class="icon-button" data-action="close-floating-inspector" type="button" title="Close centered inspector" aria-label="Close centered inspector">x</button>
+            </div>
           </header>
           <div id="inspectorFloatBody" class="inspector-float-body"></div>
           <span class="floating-window-resize-handle n" data-floating-window-resize="n" data-floating-window="inspector"></span>
@@ -278,12 +305,6 @@
           <span class="floating-window-resize-handle nw" data-floating-window-resize="nw" data-floating-window="inspector"></span>
         </section>
       </div>
-
-      <button id="languageToggle" class="language-toggle-button" data-web-only data-action="toggle-language" type="button" title="Switch language" aria-label="Switch language">
-        <span class="language-toggle-option" data-lang="en">EN</span>
-        <span class="language-toggle-divider" aria-hidden="true">/</span>
-        <span class="language-toggle-option" data-lang="zh">中</span>
-      </button>
 
       <!-- Canvas overlays live inside .app-shell so they render in immersive/native fullscreen,
            which fullscreens .app-shell; a sibling here would be hidden by the browser. -->
@@ -440,24 +461,6 @@
       </form>
     </dialog>
 
-    <dialog id="nodeIconDialog" class="icon-dialog" aria-label="Edit node type icon">
-      <form method="dialog" class="icon-shell">
-        <header>
-          <span class="pane-kicker">Node Icon</span>
-          <h2 id="nodeIconDialogTitle">Edit node type icon</h2>
-        </header>
-        <label class="field">
-          <span>Custom icon</span>
-          <input id="nodeIconInput" maxlength="8" spellcheck="false" autocomplete="off" inputmode="text" aria-label="Custom icon text or emoji">
-        </label>
-        <footer class="confirm-actions">
-          <button class="small-button" data-action="reset-node-icon" type="button">Use type initial</button>
-          <button class="small-button primary" value="confirm">Apply</button>
-          <button class="small-button confirm-cancel" value="cancel">Cancel</button>
-        </footer>
-      </form>
-    </dialog>
-
     <dialog id="nodeTypeDialog" class="type-dialog" aria-label="Edit node type">
       <form method="dialog" class="type-shell">
         <header>
@@ -469,29 +472,59 @@
           <input id="nodeTypeNameInput" maxlength="40" spellcheck="false" autocomplete="off">
         </label>
         <label class="field">
-          <span>Behavior</span>
+          <span>Template</span>
           <select id="nodeTypeKindInput">
-            <option value="node">Node</option>
+            <option value="node">Basic Node</option>
+            <option value="dialog">Dialog</option>
+            <option value="choice">Choice</option>
             <option value="frame">Frame</option>
           </select>
         </label>
+        <section class="node-type-field-section" aria-labelledby="nodeTypeBuiltinFieldsLabel">
+          <span id="nodeTypeBuiltinFieldsLabel" class="node-type-field-heading">Built-in fields</span>
+          <div id="nodeTypeBuiltinFields" class="node-type-field-list"></div>
+        </section>
         <label class="field">
-          <span>Fields</span>
+          <span id="nodeTypeCustomFieldsLabel">Custom fields</span>
           <textarea id="nodeTypeFieldsInput" rows="5" spellcheck="false" placeholder="Fields, one per line"></textarea>
         </label>
-        <div class="type-dialog-row">
-          <label class="field">
-            <span>Color</span>
-            <input id="nodeTypeColorInput" type="color">
-          </label>
-          <label class="nc-checkbox-field">
-            <input id="nodeTypeHiddenInput" type="checkbox">
-            <span>Hide from library</span>
-          </label>
-          <label class="nc-checkbox-field">
-            <input id="nodeTypeEventHiddenInput" type="checkbox">
-            <span>Hide frame rows from Events Sheet</span>
-          </label>
+        <section id="nodeTypeExistingFieldsSection" class="node-type-field-section" aria-labelledby="nodeTypeExistingFieldsLabel" hidden>
+          <span id="nodeTypeExistingFieldsLabel" class="node-type-field-heading">Existing fields not in this type</span>
+          <div id="nodeTypeExistingFields" class="node-type-existing-fields"></div>
+        </section>
+        <div class="type-dialog-settings">
+          <div class="type-dialog-setting-group type-dialog-appearance-group">
+            <span class="type-dialog-setting-label" id="nodeTypeAppearanceLabel">Appearance</span>
+            <div class="type-dialog-appearance">
+              <label class="type-dialog-field-row type-dialog-icon-field">
+                <span class="type-dialog-setting-label">Icon</span>
+                <input id="nodeTypeIconInput" class="type-dialog-icon-input" maxlength="8" spellcheck="false" autocomplete="off" inputmode="text" aria-label="Icon text or emoji">
+                <button class="type-dialog-inline-reset" data-action="reset-node-type-icon" type="button" title="Use type initial" aria-label="Use type initial">↺</button>
+              </label>
+              <label class="type-dialog-field-row type-dialog-color-field">
+                <span class="type-dialog-setting-label">Color</span>
+                <input id="nodeTypeColorInput" type="color">
+              </label>
+              <label id="nodeTypeOpacityField" class="type-dialog-field-row type-dialog-opacity-field" hidden>
+                <span class="type-dialog-setting-label">Card opacity</span>
+                <input id="nodeTypeOpacityInput" type="range" min="0" max="100" step="5">
+                <span class="type-dialog-opacity-value" data-node-type-opacity-value>100%</span>
+              </label>
+            </div>
+          </div>
+          <section class="type-dialog-setting-group type-dialog-visibility-group" aria-labelledby="nodeTypeVisibilityLabel">
+            <span id="nodeTypeVisibilityLabel" class="type-dialog-setting-label">Visibility</span>
+            <div class="type-dialog-visibility">
+              <label class="nc-checkbox-field">
+                <input id="nodeTypeHiddenInput" type="checkbox">
+                <span>Hide from library</span>
+              </label>
+              <label class="nc-checkbox-field">
+                <input id="nodeTypeEventHiddenInput" type="checkbox">
+                <span>Hide frame rows from Events Sheet</span>
+              </label>
+            </div>
+          </section>
         </div>
         <footer class="confirm-actions">
           <button class="small-button primary" value="confirm">Save</button>
@@ -507,6 +540,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260714b-1.2.3"></script>
+    <script src="./app.js?v=20260716d-1.2.4"></script>
   </body>
 </html>

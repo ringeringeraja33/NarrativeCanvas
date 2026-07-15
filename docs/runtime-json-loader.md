@@ -100,7 +100,7 @@ function renderText(text, state) {
 
 The example deliberately omits full expression parsing. A production loader should either implement the supported JavaScript condition subset or generate target-native scripts from the Yarn, ink, or Twee exporters.
 
-## Condition Subset
+## Expression Subset
 
 Runtime JSON condition strings are export-normalized JavaScript expressions:
 

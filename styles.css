@@ -1,4 +1,187 @@
-.narrative-canvas-plugin-host {  display: block;  width: 100%;  height: 100%;  padding: 0;  overflow: hidden;}.workspace-leaf-content[data-type="narrative-canvas-view"] .view-content.narrative-canvas-plugin-host {  padding: 0;  overflow: hidden;}.narrative-canvas-plugin-loading,.narrative-canvas-plugin-error {  padding: 16px;  color: var(--text-normal);}.narrative-canvas-project-suggestion-title {  color: var(--text-normal);  font-weight: 600;}.narrative-canvas-token-list {  margin: 6px 0 8px;  padding-left: 18px;  color: var(--text-muted);  font-size: 13px;  line-height: 1.5;}.narrative-canvas-token-list li {  margin: 2px 0;}.narrative-canvas-token-list code {  padding: 0 4px;  border-radius: 3px;  background: var(--background-modifier-form-field);  color: var(--text-normal);  font-size: 12px;}.narrative-canvas-token-preview {  margin: 4px 0 0;  color: var(--text-muted);  font-size: 13px;}.narrative-canvas-token-preview code {  padding: 0 4px;  border-radius: 3px;  background: var(--background-modifier-form-field);  color: var(--text-normal);  font-size: 12px;}/* Narrative Canvas web app styles (scoped; generated from canvas.css) */
+.narrative-canvas-plugin-host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+.workspace-leaf-content[data-type="narrative-canvas-view"] .view-content.narrative-canvas-plugin-host {
+  padding: 0;
+  overflow: hidden;
+}
+
+.narrative-canvas-plugin-loading,
+.narrative-canvas-plugin-error {
+  padding: 16px;
+  color: var(--text-normal);
+}
+
+.narrative-canvas-project-suggestion-title {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.narrative-canvas-token-list {
+  margin: 6px 0 8px;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.narrative-canvas-token-list li {
+  margin: 2px 0;
+}
+
+.narrative-canvas-token-list code,
+.narrative-canvas-token-preview code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
+.narrative-canvas-token-preview {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Obsidian's light theme adds disabled-state and icon opacity on top of the app styles. */
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] {
+  --text-normal: #17181b;
+  --text-muted: #454850;
+  --text-faint: #62656e;
+  --background-modifier-border: #b9bbc2;
+  --background-modifier-border-hover: #8f929b;
+}
+
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(input, textarea)::placeholder {
+  color: #686b74;
+  -webkit-text-fill-color: #686b74;
+  opacity: 1;
+}
+
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(.icon-button, .toolbar-button, .small-button, .help-button, .inspector-tab, .playbook-tab, .play-action):not(.primary):not(.danger-button):not(:disabled) {
+  color: var(--text-normal);
+}
+
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(.history-button, .inspector-tab, .playbook-tab, .play-action):disabled,
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(.play-action, .system-lock-button)[aria-disabled="true"] {
+  color: #41444c;
+  opacity: 0.72;
+}
+
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(.sidebar-toggle-icon, .language-toggle-button) {
+  opacity: 1;
+}
+
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] .sidebar-toggle-icon::before,
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] .sidebar-toggle-icon::after {
+  opacity: 0.92;
+}
+
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(.ai-message, .ai-message > div) {
+  color: var(--text-normal);
+}
+
+/* Obsidian heading colors must not reduce contrast inside the embedded app. */
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(.ai-title h2, .document-header h2) {
+  color: #17181b;
+  -webkit-text-fill-color: #17181b;
+  opacity: 1;
+}
+
+/* Keep Beta badges consistent; Obsidian's --text-accent can differ by context. */
+.narrative-canvas-plugin-host .project-feature-badge,
+.narrative-canvas-plugin-host .ai-beta-badge {
+  color: #7f6df2 !important;
+  border-color: color-mix(in srgb, #7f6df2 25%, transparent) !important;
+  background: color-mix(in srgb, #7f6df2 18%, transparent) !important;
+}
+
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] .project-feature-badge,
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] .ai-beta-badge {
+  color: #7f6df2 !important;
+  border-color: color-mix(in srgb, #7f6df2 25%, transparent) !important;
+  background: color-mix(in srgb, #7f6df2 18%, transparent) !important;
+}
+
+/* Isolate node-type dialog native controls from Obsidian theming. */
+.narrative-canvas-plugin-host .app-shell .type-dialog-color-field input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 24px;
+  padding: 2px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  background: var(--background-control);
+}
+
+.narrative-canvas-plugin-host .app-shell .type-dialog-color-field input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.narrative-canvas-plugin-host .app-shell .type-dialog-color-field input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  vertical-align: middle;
+  background: transparent;
+}
+
+.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover);
+}
+
+.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: none;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover);
+}
+
+.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.narrative-canvas-plugin-host .app-shell .nc-checkbox-field input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--text-muted);
+  border-radius: 3px;
+  background: var(--background-control);
+}
+/* Narrative Canvas web app styles (scoped; generated from canvas.css) */
 .narrative-canvas-plugin-host {
   --font-interface: system-ui, "Segoe UI", sans-serif;
   --font-text: Georgia, Cambria, "Times New Roman", serif;
@@ -38,6 +221,7 @@
   --text-on-accent: #ffffff;
   --interactive-accent: #7f6df2;
   --interactive-accent-hover: #9586ff;
+  --text-accent: var(--interactive-accent);
   --accent-red: #e06c75;
   --focus-accent: var(--accent-red);
   --accent-orange: #d19a66;
@@ -237,7 +421,7 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding-bottom: 72px;
+  padding-bottom: 16px;
   border-right: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
 }
@@ -298,6 +482,15 @@
   overflow: hidden;
   border-right: 0;
   border-left: 1px solid var(--background-modifier-border);
+  padding-bottom: 0;
+}
+
+.narrative-canvas-plugin-host .sidebar-right .pane-title {
+  flex: 1 1 auto;
+}
+
+.narrative-canvas-plugin-host .sidebar-right .header-actions {
+  margin-left: 0;
 }
 
 .narrative-canvas-plugin-host .pane-header {
@@ -420,12 +613,33 @@
   transform: rotate(45deg);
 }
 
+.narrative-canvas-plugin-host .sidebar-toggle-icon-right::before, .narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] .sidebar-left .sidebar-toggle-icon-left::before {
+  left: 2px;
+}
+
+.narrative-canvas-plugin-host .sidebar-toggle-icon-right::after, .narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] .sidebar-left .sidebar-toggle-icon-left::after {
+  left: 7px;
+}
+
 .narrative-canvas-plugin-host .sidebar-toggle-button:hover .sidebar-toggle-icon {
   opacity: 1;
 }
 
 .narrative-canvas-plugin-host .sidebar-toggle-button:hover .sidebar-toggle-icon::before, .narrative-canvas-plugin-host .sidebar-toggle-button:hover .sidebar-toggle-icon::after {
   opacity: 0.95;
+}
+
+/* Collapsed sidebar chevrons sit on the side closer to the app center. */
+.narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] .sidebar-left .sidebar-toggle-icon::before, .narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] .sidebar-left .sidebar-toggle-icon::after {
+  left: auto;
+}
+
+.narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] .sidebar-left .sidebar-toggle-icon::before {
+  right: 4px;
+}
+
+.narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] .sidebar-left .sidebar-toggle-icon::after {
+  right: 9px;
 }
 
 .narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] .sidebar-left, .narrative-canvas-plugin-host .app-shell[data-sidebar-right="collapsed"] .sidebar-right {
@@ -516,6 +730,11 @@
   font-size: 11px;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+/* The "Narrative Canvas" brand kicker stays on one line. */
+.narrative-canvas-plugin-host .sidebar-left .pane-header .pane-kicker {
+  white-space: nowrap;
 }
 
 .narrative-canvas-plugin-host .pane-header h1, .narrative-canvas-plugin-host .play-header h2 {
@@ -815,7 +1034,7 @@
 
 .narrative-canvas-plugin-host .hidden-node-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 28px 48px;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
 }
@@ -832,7 +1051,7 @@
 
 .narrative-canvas-plugin-host .palette-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 28px 28px 28px;
+  grid-template-columns: 24px minmax(0, 1fr) 28px 28px;
   align-items: center;
   gap: 6px;
 }
@@ -844,7 +1063,7 @@
   white-space: nowrap;
 }
 
-.narrative-canvas-plugin-host .palette-settings-button, .narrative-canvas-plugin-host .palette-hide-button, .narrative-canvas-plugin-host .palette-delete-button {
+.narrative-canvas-plugin-host .palette-hide-button, .narrative-canvas-plugin-host .palette-delete-button {
   width: 28px;
   height: 30px;
 }
@@ -970,6 +1189,13 @@
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.narrative-canvas-plugin-host .workspace-global-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
 }
 
 .narrative-canvas-plugin-host .canvas-workspace-tabs {
@@ -1286,6 +1512,20 @@
   background: var(--background-primary);
 }
 
+.narrative-canvas-plugin-host .document-source-chrome {
+  min-width: 0;
+  background: var(--background-primary);
+}
+
+.narrative-canvas-plugin-host .document-project-header {
+  margin: 0 16px;
+  padding: 14px 0 12px;
+}
+
+.narrative-canvas-plugin-host .document-project-header .document-actions {
+  align-self: center;
+}
+
 .narrative-canvas-plugin-host .document-editor-toolbar {
   display: flex;
   align-items: center;
@@ -1294,6 +1534,45 @@
   padding: 6px 12px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
+}
+
+.narrative-canvas-plugin-host .document-editor-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.narrative-canvas-plugin-host .document-chrome-toggle {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.narrative-canvas-plugin-host .document-chrome-chevron {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 140ms ease;
+}
+
+.narrative-canvas-plugin-host .document-source-shell[data-document-chrome="collapsed"] .document-project-header, .narrative-canvas-plugin-host .document-source-shell[data-document-chrome="collapsed"] .document-format-switch {
+  display: none;
+}
+
+.narrative-canvas-plugin-host .document-source-shell[data-document-chrome="collapsed"] .document-editor-toolbar {
+  min-height: 38px;
+  padding-block: 4px;
+}
+
+.narrative-canvas-plugin-host .document-source-shell[data-document-chrome="collapsed"] .document-chrome-chevron {
+  transform: rotate(180deg);
 }
 
 .narrative-canvas-plugin-host .document-editor-identity {
@@ -1606,8 +1885,11 @@
 
 .narrative-canvas-plugin-host .document-header h2 {
   margin: 2px 0 4px;
+  color: var(--text-normal);
+  -webkit-text-fill-color: var(--text-normal);
   font-size: 20px;
   font-weight: 700;
+  opacity: 1;
 }
 
 .narrative-canvas-plugin-host .project-file-box {
@@ -1633,7 +1915,7 @@
   gap: 6px;
 }
 
-.narrative-canvas-plugin-host .project-file-box-title > span {
+.narrative-canvas-plugin-host .project-file-box-title > span:not(.project-feature-badge) {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -1974,12 +2256,12 @@
 }
 
 .narrative-canvas-plugin-host .node.visual-frame {
-  background: color-mix(in srgb, var(--node-color) 14%, var(--node-surface));
+  background: color-mix(in srgb, var(--node-color) var(--node-bg-opacity, 14%), transparent);
   border-color: color-mix(in srgb, var(--node-color) 48%, var(--node-border));
 }
 
 .narrative-canvas-plugin-host .node.event-frame {
-  background: color-mix(in srgb, var(--node-color) 18%, var(--node-surface));
+  background: color-mix(in srgb, var(--node-color) var(--node-bg-opacity, 20%), transparent);
   border-color: color-mix(in srgb, var(--node-color) 54%, var(--node-border));
 }
 
@@ -2169,12 +2451,11 @@
   flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 4px 6px;
-  max-height: 50px;
   margin: -2px 0 7px;
-  overflow: hidden;
 }
 
-.narrative-canvas-plugin-host .node-choice-followup span {
+.narrative-canvas-plugin-host .node-choice-followup-button {
+  appearance: none;
   max-width: 100%;
   padding: 2px 8px;
   overflow: hidden;
@@ -2183,15 +2464,29 @@
   background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
   box-shadow: 0 0 7px color-mix(in srgb, var(--interactive-accent) 42%, transparent), inset 0 0 8px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
   color: color-mix(in srgb, var(--interactive-accent) 82%, white);
+  cursor: pointer;
+  font-family: inherit;
   font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
+  text-align: left;
   text-overflow: ellipsis;
   text-shadow: 0 0 7px color-mix(in srgb, var(--interactive-accent) 72%, transparent);
   white-space: nowrap;
 }
 
-.narrative-canvas-plugin-host .app-shell[data-theme="light"] .node-choice-followup span {
+.narrative-canvas-plugin-host .node-choice-followup-button:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 82%, white 18%);
+  background: color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--interactive-accent) 60%, transparent), inset 0 0 9px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
+.narrative-canvas-plugin-host .node-choice-followup-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--interactive-accent) 82%, white 18%);
+  outline-offset: 1px;
+}
+
+.narrative-canvas-plugin-host .app-shell[data-theme="light"] .node-choice-followup-button {
   background: color-mix(in srgb, var(--interactive-accent) 10%, white);
   box-shadow: 0 0 6px color-mix(in srgb, var(--interactive-accent) 24%, transparent), inset 0 0 7px color-mix(in srgb, var(--interactive-accent) 8%, transparent);
   color: color-mix(in srgb, var(--interactive-accent) 78%, #24173a);
@@ -2446,6 +2741,11 @@
   min-width: 0;
 }
 
+.narrative-canvas-plugin-host .node-cast-chips-all {
+  max-height: none;
+  overflow: visible;
+}
+
 .narrative-canvas-plugin-host .node-cast-chip {
   display: inline-flex;
   align-items: center;
@@ -2462,6 +2762,25 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.narrative-canvas-plugin-host .node-cast-chip-button {
+  appearance: none;
+  cursor: pointer;
+  font-family: inherit;
+  pointer-events: auto;
+  text-align: left;
+}
+
+.narrative-canvas-plugin-host .node-cast-chip-button:hover {
+  border-color: color-mix(in srgb, var(--node-color) 72%, var(--interactive-accent));
+  background: color-mix(in srgb, var(--node-color) 24%, var(--background-secondary-alt));
+  color: var(--text-normal);
+}
+
+.narrative-canvas-plugin-host .node-cast-chip-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--node-color) 68%, var(--interactive-accent));
+  outline-offset: 1px;
 }
 
 .narrative-canvas-plugin-host .node-cast-chip.more {
@@ -3063,6 +3382,8 @@
 
 .narrative-canvas-plugin-host input[type="checkbox"] {
   appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
   display: inline-grid;
   place-content: center;
   flex: 0 0 auto;
@@ -3075,17 +3396,36 @@
   border: 1px solid var(--background-modifier-border-hover);
   border-radius: 3px;
   background: var(--background-control);
+  background-image: none !important;
+  box-shadow: none;
   cursor: pointer;
 }
 
-.narrative-canvas-plugin-host input[type="checkbox"]::after {
+/* Draw the check with ::before and suppress the host's ::after checkmark. */
+.narrative-canvas-plugin-host input[type="checkbox"]::before {
   content: "";
-  width: 4px;
-  height: 8px;
+  display: block;
+  position: static;
+  inset: auto;
+  box-sizing: border-box;
+  width: 5px;
+  height: 9px;
+  margin: 0;
   border-right: 2px solid var(--text-on-accent);
   border-bottom: 2px solid var(--text-on-accent);
+  background: none;
+  box-shadow: none;
+  clip-path: none;
+  -webkit-mask: none;
+  mask: none;
   opacity: 0;
-  transform: rotate(45deg) translate(-1px, -1px);
+  transform: translateY(-1px) rotate(45deg);
+  transform-origin: center;
+}
+
+.narrative-canvas-plugin-host input[type="checkbox"]::after {
+  content: none !important;
+  display: none !important;
 }
 
 .narrative-canvas-plugin-host input[type="checkbox"]:checked {
@@ -3093,7 +3433,7 @@
   background: var(--interactive-accent);
 }
 
-.narrative-canvas-plugin-host input[type="checkbox"]:checked::after {
+.narrative-canvas-plugin-host input[type="checkbox"]:checked::before {
   opacity: 1;
 }
 
@@ -3230,11 +3570,16 @@
 .narrative-canvas-plugin-host .inspector-float-overlay {
   position: absolute;
   inset: 0;
-  z-index: 260;
+  z-index: 70;
   display: grid;
   place-items: center;
   padding: 28px;
-  background: rgba(0, 0, 0, 0.56);
+  background: transparent;
+  pointer-events: none;
+}
+
+.narrative-canvas-plugin-host .inspector-float-overlay[data-pinned="true"] {
+  z-index: 320;
 }
 
 .narrative-canvas-plugin-host .inspector-float-overlay[hidden] {
@@ -3257,6 +3602,7 @@
   border-radius: var(--radius-m);
   background: var(--background-primary);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
 }
 
 .narrative-canvas-plugin-host .inspector-float-header {
@@ -3270,6 +3616,33 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
+}
+
+.narrative-canvas-plugin-host .floating-window-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.narrative-canvas-plugin-host .floating-window-pin-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.narrative-canvas-plugin-host .floating-window-pin-button[aria-pressed="true"] {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.narrative-canvas-plugin-host .floating-window-pin-button[aria-pressed="true"] svg {
+  stroke: var(--text-on-accent);
+  transform: rotate(-32deg);
 }
 
 .narrative-canvas-plugin-host .inspector-float-window.is-moving .inspector-float-header, .narrative-canvas-plugin-host .play-dialog.is-moving .play-header {
@@ -3893,6 +4266,18 @@
   border-color: var(--interactive-accent);
   color: var(--text-normal);
   opacity: 0.95;
+}
+
+.narrative-canvas-plugin-host .workspace-toc-button > svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .narrative-canvas-plugin-host .playbook-category-strip {
@@ -4886,29 +5271,6 @@
   line-height: 1.4;
 }
 
-.narrative-canvas-plugin-host .legacy-node-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--accent-orange, #d99a3d);
-  border-radius: var(--radius-m);
-  background: color-mix(in srgb, var(--accent-orange, #d99a3d) 12%, var(--background-secondary));
-}
-
-.narrative-canvas-plugin-host .legacy-node-banner-body {
-  display: grid;
-  gap: 2px;
-  flex: 1 1 auto;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.narrative-canvas-plugin-host .legacy-node-banner-body strong {
-  font-size: 12px;
-  color: var(--accent-orange, #d99a3d);
-}
-
 .narrative-canvas-plugin-host .choice-options-editor, .narrative-canvas-plugin-host .dialog-turns-editor {
   display: grid;
   gap: 8px;
@@ -5181,9 +5543,36 @@
 
 .narrative-canvas-plugin-host .dialog-turn-row {
   display: grid;
-  grid-template-columns: minmax(120px, 0.45fr) minmax(0, 1fr) auto;
-  gap: 6px;
+  grid-template-columns: minmax(120px, var(--dialog-speaker-ratio, 34%)) 12px minmax(0, 1fr) auto;
+  gap: 4px;
   align-items: start;
+}
+
+.narrative-canvas-plugin-host .dialog-turn-column-separator {
+  position: relative;
+  align-self: stretch;
+  min-height: 56px;
+  border-radius: 4px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.narrative-canvas-plugin-host .dialog-turn-column-separator::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.narrative-canvas-plugin-host .dialog-turn-column-separator:hover::before {
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 }
 
 .narrative-canvas-plugin-host .dialog-turn-actions {
@@ -5235,6 +5624,17 @@
 
 .narrative-canvas-plugin-host .playbook-rule-card.is-disabled .field, .narrative-canvas-plugin-host .playbook-rule-card.is-disabled .playbook-rule-note {
   opacity: 0.62;
+}
+
+.narrative-canvas-plugin-host .playbook-end-condition-editor {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 72px;
+  max-height: 320px;
+  overflow: auto;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .narrative-canvas-plugin-host .playbook-rule-card header {
@@ -6030,6 +6430,10 @@
   z-index: 60;
 }
 
+.narrative-canvas-plugin-host .play-dialog.floating[data-pinned="true"] {
+  z-index: 320;
+}
+
 .narrative-canvas-plugin-host .play-dialog.floating .play-header {
   cursor: grab;
   touch-action: none;
@@ -6043,7 +6447,7 @@
   touch-action: none;
 }
 
-.narrative-canvas-plugin-host .play-dialog.floating .floating-window-resize-handle, .narrative-canvas-plugin-host .inspector-float-window .floating-window-resize-handle {
+.narrative-canvas-plugin-host .play-dialog.floating .floating-window-resize-handle, .narrative-canvas-plugin-host .inspector-float-window .floating-window-resize-handle, .narrative-canvas-plugin-host .ai-floating-window .floating-window-resize-handle {
   display: block;
 }
 
@@ -6097,7 +6501,12 @@
   transform: rotate(180deg);
 }
 
-.narrative-canvas-plugin-host .confirm-dialog, .narrative-canvas-plugin-host .icon-dialog, .narrative-canvas-plugin-host .type-dialog, .narrative-canvas-plugin-host .nc-notice-dialog {
+/* Floating play preview no longer needs the "dock" button; clicking outside docks it. */
+.narrative-canvas-plugin-host .play-dialog.floating .play-float-button {
+  display: none;
+}
+
+.narrative-canvas-plugin-host .confirm-dialog, .narrative-canvas-plugin-host .type-dialog, .narrative-canvas-plugin-host .nc-notice-dialog {
   width: min(420px, calc(100vw - 32px));
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
@@ -6119,17 +6528,17 @@
   width: min(720px, calc(100vw - 32px));
 }
 
-.narrative-canvas-plugin-host .confirm-dialog::backdrop, .narrative-canvas-plugin-host .icon-dialog::backdrop, .narrative-canvas-plugin-host .type-dialog::backdrop, .narrative-canvas-plugin-host .nc-notice-dialog::backdrop {
+.narrative-canvas-plugin-host .confirm-dialog::backdrop, .narrative-canvas-plugin-host .type-dialog::backdrop, .narrative-canvas-plugin-host .nc-notice-dialog::backdrop {
   background: rgba(0, 0, 0, 0.6);
 }
 
-.narrative-canvas-plugin-host .confirm-shell, .narrative-canvas-plugin-host .icon-shell, .narrative-canvas-plugin-host .type-shell {
+.narrative-canvas-plugin-host .confirm-shell, .narrative-canvas-plugin-host .type-shell {
   display: grid;
   gap: 18px;
   padding: 18px;
 }
 
-.narrative-canvas-plugin-host .confirm-shell h2, .narrative-canvas-plugin-host .icon-shell h2, .narrative-canvas-plugin-host .type-shell h2 {
+.narrative-canvas-plugin-host .confirm-shell h2, .narrative-canvas-plugin-host .type-shell h2 {
   margin: 4px 0 0;
   font-size: 16px;
   line-height: 1.45;
@@ -6142,18 +6551,268 @@
   line-height: 1.45;
 }
 
-.narrative-canvas-plugin-host .icon-shell input {
-  height: 38px;
-  text-align: center;
-  font-size: 20px;
-  font-weight: 800;
+.narrative-canvas-plugin-host .type-dialog-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 14px;
 }
 
-.narrative-canvas-plugin-host .type-dialog-row {
+.narrative-canvas-plugin-host .type-dialog-setting-group {
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
-  align-items: end;
-  gap: 12px;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--background-secondary-alt) 72%, transparent);
+}
+
+.narrative-canvas-plugin-host .type-dialog-setting-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.narrative-canvas-plugin-host .type-dialog {
+  width: min(540px, calc(100vw - 32px));
+}
+
+.narrative-canvas-plugin-host .type-shell {
+  gap: 14px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.narrative-canvas-plugin-host .type-dialog-appearance {
+  display: grid;
+  gap: 8px;
+}
+
+/* Compact inline rows: label + small control (no full-width color bar). */
+.narrative-canvas-plugin-host .type-dialog-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.narrative-canvas-plugin-host .type-dialog-field-row > .type-dialog-setting-label {
+  flex: 0 0 auto;
+  min-width: 62px;
+  font-weight: 600;
+}
+
+.narrative-canvas-plugin-host .type-dialog-icon-input {
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-control);
+  color: var(--text-normal);
+  font-size: 15px;
+  text-align: center;
+}
+
+.narrative-canvas-plugin-host .type-dialog-inline-reset {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.narrative-canvas-plugin-host .type-dialog-inline-reset:hover {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover, var(--interactive-accent));
+}
+
+.narrative-canvas-plugin-host .type-dialog-color-field input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-control);
+  cursor: pointer;
+}
+
+.narrative-canvas-plugin-host .type-dialog-color-field input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.narrative-canvas-plugin-host .type-dialog-color-field input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"] {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+  vertical-align: middle;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-value {
+  flex: 0 0 auto;
+  min-width: 40px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover);
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: none;
+  border-radius: 999px;
+  background: var(--text-muted);
+  cursor: pointer;
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]:hover::-webkit-slider-thumb {
+  background: var(--text-normal);
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]:focus-visible::-webkit-slider-thumb {
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover);
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--text-muted);
+  cursor: pointer;
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]:hover::-moz-range-thumb {
+  background: var(--text-normal);
+}
+
+.narrative-canvas-plugin-host .type-dialog-opacity-field input[type="range"]:focus-visible::-moz-range-thumb {
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+}
+
+.narrative-canvas-plugin-host .type-dialog-visibility {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.narrative-canvas-plugin-host .node-type-field-section {
+  display: grid;
+  gap: 8px;
+}
+
+.narrative-canvas-plugin-host .node-type-field-heading {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.narrative-canvas-plugin-host .node-type-field-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.narrative-canvas-plugin-host .node-type-field-chip {
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary-alt);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.narrative-canvas-plugin-host .node-type-existing-fields {
+  display: grid;
+  gap: 6px;
+}
+
+.narrative-canvas-plugin-host .node-type-existing-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+  text-align: left;
+}
+
+.narrative-canvas-plugin-host .node-type-existing-field:not(:disabled) {
+  cursor: pointer;
+}
+
+.narrative-canvas-plugin-host .node-type-existing-field:not(:disabled):hover {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary-alt));
+}
+
+.narrative-canvas-plugin-host .node-type-existing-field small {
+  color: var(--text-faint);
+  font-family: var(--font-monospace);
+}
+
+.narrative-canvas-plugin-host .node-type-existing-field strong {
+  color: var(--interactive-accent);
+  font-size: 12px;
+}
+
+.narrative-canvas-plugin-host .node-type-existing-field.added {
+  opacity: 0.7;
 }
 
 .narrative-canvas-plugin-host .type-shell textarea {
@@ -6164,14 +6823,38 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  color: var(--text-muted);
+  min-width: 0;
+  min-height: 38px;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-control);
+  color: var(--text-normal);
   font-size: 13px;
+  line-height: 1.35;
 }
 
-.narrative-canvas-plugin-host .nc-checkbox-field input {
-  width: auto;
-  min-height: 0;
+.narrative-canvas-plugin-host .nc-checkbox-field input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid var(--text-muted);
+  border-radius: 3px;
+}
+
+.narrative-canvas-plugin-host .nc-checkbox-field span {
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+.narrative-canvas-plugin-host .type-dialog-settings {
+    grid-template-columns: 1fr;
+  }
 }
 
 .narrative-canvas-plugin-host .notice-shell {
@@ -6805,15 +7488,219 @@
   }
 }
 
+/* Portrait displays keep the complete editor visible without a page-wide
+   horizontal scroll. Sidebars become proportional, dense work areas scroll
+   locally, and the preview uses the available vertical space as an overlay. */
+@media (orientation: portrait) and (max-width: 1200px) {
+.narrative-canvas-plugin-host {
+    overflow: hidden;
+  }
+
+  .narrative-canvas-plugin-host .app-shell {
+    --sidebar-left-track: clamp(150px, 22vw, 220px);
+    --sidebar-right-track: clamp(170px, 24vw, 260px);
+    --sidebar-left-resizer-width: 4px;
+    --sidebar-right-resizer-width: 4px;
+    --workspace-min-width: 0px;
+    --play-panel-track: 0px;
+    width: 100%;
+    min-width: 0;
+    height: 100vh;
+    min-height: 0;
+  }
+
+  .narrative-canvas-plugin-host .app-shell[data-sidebar-left="collapsed"] {
+    --sidebar-left-track: var(--sidebar-collapsed-width);
+    --sidebar-left-resizer-width: 0px;
+  }
+
+  .narrative-canvas-plugin-host .app-shell[data-sidebar-right="collapsed"] {
+    --sidebar-right-track: var(--sidebar-collapsed-width);
+    --sidebar-right-resizer-width: 0px;
+  }
+
+  .narrative-canvas-plugin-host .app-shell[data-play-panel="open"] {
+    --play-panel-track: 0px;
+  }
+
+  .narrative-canvas-plugin-host .canvas-workspace, .narrative-canvas-plugin-host .canvas-panel, .narrative-canvas-plugin-host .document-panel {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .narrative-canvas-plugin-host .canvas-workspace {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .narrative-canvas-plugin-host .workspace-global-bar {
+    gap: 6px;
+    padding-inline: 6px;
+  }
+
+  .narrative-canvas-plugin-host .workspace-file-label {
+    gap: 5px;
+  }
+
+  .narrative-canvas-plugin-host .canvas-workspace-tabs {
+    flex-wrap: nowrap;
+    min-height: 44px;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .narrative-canvas-plugin-host .canvas-workspace-tabs .toolbar-group {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+  }
+
+  .narrative-canvas-plugin-host .canvas-workspace-tabs .toolbar-group-right {
+    margin-left: 0;
+  }
+
+  .narrative-canvas-plugin-host .status-bar {
+    flex-wrap: wrap;
+    min-height: 74px;
+    overflow: visible;
+  }
+
+  .narrative-canvas-plugin-host #statusText {
+    flex-basis: 100%;
+  }
+
+  .narrative-canvas-plugin-host .nc-workspace-search-controls {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .narrative-canvas-plugin-host .workspace-search-box {
+    width: 100%;
+    max-width: none;
+  }
+
+  .narrative-canvas-plugin-host .document-header, .narrative-canvas-plugin-host .document-project-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .narrative-canvas-plugin-host .document-actions {
+    justify-content: flex-start;
+  }
+
+  .narrative-canvas-plugin-host .document-editor-toolbar {
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .narrative-canvas-plugin-host .document-editor-status {
+    flex-wrap: wrap;
+  }
+
+  .narrative-canvas-plugin-host .character-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  }
+
+  .narrative-canvas-plugin-host .variable-row, .narrative-canvas-plugin-host .playbook-action-row, .narrative-canvas-plugin-host .playbook-rule-nested, .narrative-canvas-plugin-host .state-report-card-head, .narrative-canvas-plugin-host .state-report-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .narrative-canvas-plugin-host .playbook-action-heading, .narrative-canvas-plugin-host .variable-heading {
+    display: none;
+  }
+
+  .narrative-canvas-plugin-host .dialog-turn-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .narrative-canvas-plugin-host .dialog-turn-row > :not(.dialog-turn-actions) {
+    grid-column: 1;
+  }
+
+  .narrative-canvas-plugin-host .dialog-turn-column-separator {
+    display: none;
+  }
+
+  .narrative-canvas-plugin-host .dialog-turn-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .narrative-canvas-plugin-host .inspector-float-overlay {
+    padding: 12px;
+  }
+
+  .narrative-canvas-plugin-host .inspector-float-window {
+    width: calc(100% - 16px);
+    height: calc(100% - 24px);
+    min-height: 280px;
+  }
+
+  .narrative-canvas-plugin-host .inspector-float-body .inspector-panel.active {
+    padding: 14px 14px 40px;
+  }
+
+  .narrative-canvas-plugin-host .app-shell[data-play-panel="open"] .play-dialog[open] {
+    position: fixed;
+    inset: auto;
+    top: 50%;
+    left: 50%;
+    grid-column: auto;
+    grid-row: auto;
+    width: min(640px, calc(100vw - 24px));
+    height: min(860px, calc(100vh - 24px));
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-l);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    z-index: 60;
+  }
+
+  .narrative-canvas-plugin-host .confirm-dialog, .narrative-canvas-plugin-host .type-dialog, .narrative-canvas-plugin-host .nc-notice-dialog {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
+
+  .narrative-canvas-plugin-host .playbook-help-body, .narrative-canvas-plugin-host .export-report-body {
+    max-height: calc(100vh - 190px);
+    min-height: 0;
+  }
+
+  .narrative-canvas-plugin-host .playbook-help-grid, .narrative-canvas-plugin-host .playbook-help-footer, .narrative-canvas-plugin-host .playbook-rule-options button, .narrative-canvas-plugin-host .export-report-map div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .narrative-canvas-plugin-host .playbook-help-pagination {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+
+  .narrative-canvas-plugin-host .ai-floating-window {
+    left: 8px;
+    bottom: 86px;
+    width: calc(100% - 16px);
+    height: min(760px, calc(100% - 104px));
+  }
+
+  .narrative-canvas-plugin-host .ai-composer-actions, .narrative-canvas-plugin-host .ai-context {
+    flex-wrap: wrap;
+  }
+
+  .narrative-canvas-plugin-host .workspace-floating-controls {
+    right: 8px;
+  }
+}
+
 .narrative-canvas-plugin-host [hidden] {
   display: none;
 }
 
 .narrative-canvas-plugin-host .language-toggle-button {
-  position: fixed;
-  right: 16px;
-  bottom: 14px;
-  z-index: 60;
+  position: static;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -6865,14 +7752,6 @@
   display: none;
 }
 
-@media (max-width: 760px) {
-.narrative-canvas-plugin-host .language-toggle-button {
-    top: 12px;
-    right: 12px;
-    bottom: auto;
-  }
-}
-
 .narrative-canvas-plugin-host textarea[data-project-field="variables"]::selection {
   background: rgba(255, 196, 96, 0.55);
   color: inherit;
@@ -6919,6 +7798,21 @@
   background: rgba(35, 31, 27, 0.085);
 }
 
+.narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button, .narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button, .narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button[aria-pressed="true"], .narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button[aria-pressed="true"] {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  box-shadow: none;
+}
+
+.narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button:hover, .narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button:hover, .narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button[aria-pressed="true"]:hover, .narrative-canvas-plugin-host .app-shell[data-theme="light"] .theme-toggle-button[aria-pressed="true"]:hover {
+  border-color: var(--interactive-accent-hover);
+  background: var(--interactive-accent-hover);
+  background-color: var(--interactive-accent-hover);
+  color: var(--text-on-accent);
+}
+
 .narrative-canvas-plugin-host .app-shell[data-theme="light"] .help-button, .narrative-canvas-plugin-host .app-shell[data-theme="light"] .help-button {
   border-color: rgba(35, 31, 27, 0.3);
   background: rgba(35, 31, 27, 0.045);
@@ -6931,14 +7825,43 @@
   color: var(--text-normal);
 }
 .narrative-canvas-plugin-host .ai-workbench { display:flex; flex-direction:column; gap:12px; min-height:100%; }
-.narrative-canvas-plugin-host .ai-context { padding:8px 10px; border:1px solid var(--background-modifier-border); border-radius:8px; font-size:12px; color:var(--text-muted); }
+.narrative-canvas-plugin-host .ai-context { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; border:1px solid var(--background-modifier-border); border-radius:8px; font-size:12px; color:var(--text-muted); }
+.narrative-canvas-plugin-host .ai-context .ai-copy-button { gap:5px; flex:0 0 auto; }
 .narrative-canvas-plugin-host .ai-messages { display:flex; flex-direction:column; gap:10px; min-height:180px; max-height:42vh; overflow:auto; }
-.narrative-canvas-plugin-host .ai-message { padding:10px; border:1px solid var(--background-modifier-border); border-radius:10px; line-height:1.45; overflow-wrap:anywhere; }
+.narrative-canvas-plugin-host .ai-message { position:relative; padding:10px; border:1px solid var(--background-modifier-border); border-radius:10px; line-height:1.45; overflow-wrap:anywhere; }
+.narrative-canvas-plugin-host .ai-message-header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:5px; }
+.narrative-canvas-plugin-host .ai-message-header > strong { margin:0; font-size:11px; text-transform:uppercase; color:var(--text-muted); }
+.narrative-canvas-plugin-host .ai-copy-button { display:inline-flex; align-items:center; justify-content:center; min-width:26px; min-height:24px; padding:2px 6px; border:1px solid transparent; border-radius:5px; background:transparent; color:var(--text-muted); cursor:pointer; }
+.narrative-canvas-plugin-host .ai-copy-button:hover, .narrative-canvas-plugin-host .ai-copy-button:focus-visible { border-color:var(--background-modifier-border); background:var(--background-modifier-hover); color:var(--text-normal); }
+.narrative-canvas-plugin-host .ai-copy-button svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .narrative-canvas-plugin-host .ai-message-user { background:color-mix(in srgb, var(--interactive-accent) 12%, transparent); }
-.narrative-canvas-plugin-host .ai-message strong { display:block; margin-bottom:5px; font-size:11px; text-transform:uppercase; color:var(--text-muted); }
-.narrative-canvas-plugin-host .ai-message.streaming > div::after { content:""; display:inline-block; width:7px; height:1em; margin-left:3px; border-radius:2px; vertical-align:-2px; background:var(--interactive-accent); animation:ai-stream-caret .8s steps(1) infinite; }
+.narrative-canvas-plugin-host .ai-message.streaming > .ai-markdown::after { content:""; display:inline-block; width:7px; height:1em; margin-left:3px; border-radius:2px; vertical-align:-2px; background:var(--interactive-accent); animation:ai-stream-caret .8s steps(1) infinite; }
 @keyframes ai-stream-caret { 50% { opacity:.2; } }
-.narrative-canvas-plugin-host .ai-workbench textarea { width:100%; resize:vertical; }
+.narrative-canvas-plugin-host .ai-markdown { color:var(--text-normal); }
+.narrative-canvas-plugin-host .ai-markdown > :first-child { margin-top:0; }
+.narrative-canvas-plugin-host .ai-markdown > :last-child { margin-bottom:0; }
+.narrative-canvas-plugin-host .ai-markdown :is(p, ul, ol, blockquote, pre) { margin:0.55em 0; }
+.narrative-canvas-plugin-host .ai-markdown :is(h1, h2, h3, h4) { margin:0.75em 0 0.35em; line-height:1.25; color:var(--text-normal); }
+.narrative-canvas-plugin-host .ai-markdown h1 { font-size:1.35em; }
+.narrative-canvas-plugin-host .ai-markdown h2 { font-size:1.2em; }
+.narrative-canvas-plugin-host .ai-markdown :is(h3, h4) { font-size:1.05em; }
+.narrative-canvas-plugin-host .ai-markdown :is(ul, ol) { padding-left:1.5em; }
+.narrative-canvas-plugin-host .ai-markdown blockquote { padding:0.15em 0 0.15em 0.8em; border-left:3px solid var(--interactive-accent); color:var(--text-muted); }
+.narrative-canvas-plugin-host .ai-markdown code { padding:0.1em 0.3em; border-radius:4px; background:var(--background-primary-alt, var(--background-secondary)); font-family:var(--font-monospace); font-size:0.9em; }
+.narrative-canvas-plugin-host .ai-markdown pre { overflow:auto; padding:10px; border:1px solid var(--background-modifier-border); border-radius:8px; background:var(--background-primary-alt, var(--background-secondary)); }
+.narrative-canvas-plugin-host .ai-markdown pre code { padding:0; background:transparent; white-space:pre; }
+.narrative-canvas-plugin-host .ai-markdown a { color:var(--link-color, var(--interactive-accent)); text-decoration:underline; text-underline-offset:2px; }
+.narrative-canvas-plugin-host .ai-markdown hr { margin:0.75em 0; border:0; border-top:1px solid var(--background-modifier-border); }
+.narrative-canvas-plugin-host .ai-composer { display:grid; gap:8px; padding:8px; border:1px solid var(--background-modifier-border); border-radius:10px; background:var(--background-primary); }
+.narrative-canvas-plugin-host .ai-composer textarea { width:100%; min-height:96px; padding:4px; border:0; resize:vertical; background:transparent; box-shadow:none; }
+.narrative-canvas-plugin-host .ai-composer textarea:focus { box-shadow:none; outline:none; }
+.narrative-canvas-plugin-host .ai-composer-toolbar { display:flex; align-items:center; gap:6px; min-width:0; }
+.narrative-canvas-plugin-host .ai-composer-toolbar .ai-actions { margin-left:auto; }
+.narrative-canvas-plugin-host .ai-tool-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:32px; padding:5px 8px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--text-muted); font:inherit; font-size:12px; cursor:pointer; }
+.narrative-canvas-plugin-host .ai-tool-button:hover:not(:disabled), .narrative-canvas-plugin-host .ai-tool-button.active { border-color:var(--background-modifier-border); background:var(--background-modifier-hover); color:var(--text-normal); }
+.narrative-canvas-plugin-host .ai-tool-button.active { color:var(--interactive-accent); }
+.narrative-canvas-plugin-host .ai-tool-button svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
 .narrative-canvas-plugin-host .ai-actions { display:flex; gap:8px; flex-wrap:wrap; }
 /* Theme-aware action buttons (were unstyled browser defaults). */
 .narrative-canvas-plugin-host .ai-actions button {
@@ -6971,20 +7894,16 @@
 .narrative-canvas-plugin-host .ai-error { color:var(--text-error, #e0555f); }
 .narrative-canvas-plugin-host .ai-config { border:1px solid var(--background-modifier-border); border-radius:8px; padding:8px; }
 .narrative-canvas-plugin-host .ai-config label { display:grid; gap:4px; margin-top:8px; font-size:12px; }
+/* Visuals come from .project-feature-badge so every Beta tag matches; only alignment here. */
 .narrative-canvas-plugin-host .ai-beta-badge {
-  align-self:center;
-  padding:1px 7px;
-  border:1px solid color-mix(in srgb, var(--interactive-accent) 55%, transparent);
-  border-radius:999px;
-  background:color-mix(in srgb, var(--interactive-accent) 16%, transparent);
-  color:var(--interactive-accent);
-  font-size:10px;
-  font-weight:700;
-  letter-spacing:0.06em;
-  text-transform:uppercase;
-  line-height:1.4;
+  align-self: center;
 }
-.narrative-canvas-plugin-host .ai-title { display:flex; align-items:baseline; gap:8px; }
+.narrative-canvas-plugin-host .ai-title { display:flex; align-items:center; gap:8px; }
+.narrative-canvas-plugin-host .ai-title h2 {
+  color: var(--text-normal);
+  -webkit-text-fill-color: var(--text-normal);
+  opacity: 1;
+}
 
 .narrative-canvas-plugin-host .ai-floating-button {
   position: absolute;
@@ -7015,10 +7934,10 @@
 
 .narrative-canvas-plugin-host .ai-floating-window {
   position: absolute;
-  left: 18px;
+  left: calc(var(--sidebar-left-track) + var(--sidebar-left-resizer-width) + 18px);
   bottom: 110px;
-  z-index: 9;
-  width: min(420px, calc(100% - 36px));
+  z-index: 300;
+  width: min(420px, calc(100% - var(--sidebar-left-track) - var(--sidebar-left-resizer-width) - 36px));
   height: min(680px, calc(100% - 140px));
   border: 1px solid var(--background-modifier-border);
   border-radius: 12px;
@@ -7027,8 +7946,13 @@
   overflow: hidden;
 }
 
+.narrative-canvas-plugin-host .ai-floating-window[data-pinned="true"] {
+  z-index: 320;
+}
+
 .narrative-canvas-plugin-host .ai-floating-window[hidden] { display: none; }
-.narrative-canvas-plugin-host .ai-floating-header { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:10px 12px; border-bottom:1px solid var(--background-modifier-border); background:var(--background-secondary); }
+.narrative-canvas-plugin-host .ai-floating-header { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:10px 12px; border-bottom:1px solid var(--background-modifier-border); background:var(--background-secondary); cursor:grab; touch-action:none; user-select:none; }
+.narrative-canvas-plugin-host .ai-floating-window.is-moving .ai-floating-header { cursor:grabbing; }
 .narrative-canvas-plugin-host .ai-floating-header h2 { margin:1px 0 0; font-size:18px; }
 .narrative-canvas-plugin-host .ai-floating-body { height:calc(100% - 56px); padding:12px; overflow:auto; }
 .narrative-canvas-plugin-host .ai-floating-body .ai-messages { max-height:none; flex:1 1 240px; }

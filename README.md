@@ -16,7 +16,7 @@ The interface supports both English and Chinese. The web app has an `EN / 中文
 
 ## Safety Notes
 
-- The plugin runtime makes no network requests, sends no telemetry, and requires no account or payment. Project data stays in vault `.ncanvas` files and the plugin's local settings data.
+- The plugin core makes no network requests, sends no telemetry, and requires no account or payment. Project data stays in vault `.ncanvas` files and the plugin's local settings data. The optional AI copilot sends requests only to the OpenAI-compatible endpoint you configure in plugin settings.
 - `Playbook.json` is declarative. It defines `Play` titles, body text, choice options, condition syntax, and variable writes, and does not execute arbitrary JavaScript.
 - `Hide` only hides Events Sheet columns; it does not delete data. `Delete` removes a schema field and also clears matching values from frame nodes in the Events Sheet.
 - Deleted nodes are moved to an archive outside the runtime path for recovery safety, but you should still version important projects.
@@ -54,6 +54,8 @@ Plugin settings:
 - `Auto-save interval` (seconds) sets how often Narrative Canvas writes the active project file. Empty means Obsidian’s own autosave behavior applies.
 - `Current project` shows the path that the ribbon button will open next, with a clear action.
 
+Canvas editing, navigation, zoom, search, preview, and node-creation commands are available under `Settings → Hotkeys`. The plugin does not assign default key combinations, so each command can be bound without overriding existing vault shortcuts.
+
 ### Main Workflow
 
 1. Open or create a `.ncanvas` project.
@@ -67,11 +69,10 @@ Plugin settings:
 
 ### Default Node Types
 
-- The current default node types are: **Entry**, **Content**, **Dialog**, **Choice**, **Condition**, **Set**, **Marker**, **Event**, **Story Sequence**, **Clue**, **Interview Note**, **Location Frame**, **Conversation Frame**, **Investigation Event**, **Archive Note**, and **Draft Frame**.
-- **Condition** and **Set** are kept as compatibility types and are hidden by default for migration support.
+- The current default node types are: **Entry**, **Content**, **Dialog**, **Choice**, **Marker**, **Event**, **Story Sequence**, **Clue**, **Interview Note**, **Location Frame**, **Conversation Frame**, **Investigation Event**, **Archive Note**, and **Draft Frame**.
 - **Archive Note** and **Draft Frame** are hidden by default; other advanced defaults are visible.
 
-Default node types are editable templates. `Entry` is a system type and cannot be deleted. Other types can be renamed, hidden, restored, recolored, and extended with custom fields. `Set` and `Condition` are retained for legacy compatibility and are not recommended for new workflows.
+Default node types are editable templates. `Entry` is a system type and cannot be deleted. Other types can be renamed, hidden, restored, recolored, and extended with custom fields. State checks and writes use node requirements, link or choice conditions, and effects.
 
 ### Canvas Operations
 
@@ -181,9 +182,9 @@ All exporters share one mapping of node slugs and variable names. Complex variab
 
 ![AI copilot](assets/screenshots/ai-copilot.png)
 
-The **AI** button at the bottom-left of the canvas opens an experimental copilot. Discuss the story in your own language, then ask it to change the canvas — it replies with a proposal of operations (add / update nodes, add / remove links) that you **Apply to canvas** or **Reject**. Nothing changes until you apply. The current node selection is passed as context, and the panel is bilingual.
+The **AI** button at the bottom-left of the canvas opens an experimental copilot. Discuss the story in your own language, then ask it to change the canvas — it replies with a proposal of operations (add / update nodes, add / remove links) that you **Apply to canvas** or **Reject**. Nothing changes until you apply. The current node selection is passed as context, and the panel is bilingual. Messages render Markdown, support text, and can be copied individually or as a full conversation. Press Enter to send and Shift+Enter to insert a new line. The window can be dragged, resized, and pinned; reopening it from the AI button restores its default position and size.
 
-In the web app, open **Connection settings** and point it at any OpenAI-compatible endpoint (endpoint URL, API key, model); that config is stored only in your browser. In the Obsidian plugin, configure the same fields in plugin settings; the API key is stored in the plugin's local `data.json`, and requests use Obsidian's `requestUrl`. The bundled canvas code contains no browser `fetch` or `localStorage` branch. The feature is experimental and marked **Beta**.
+In the web app, open **Connection settings** and point it at any OpenAI-compatible endpoint (endpoint URL, API key, model); that config is stored only in your browser. In the Obsidian plugin, configure the same fields in plugin settings; the API key is stored in the plugin's local `data.json`, and requests use Obsidian's `requestUrl`. The feature is experimental and marked **Beta**.
 
 ## License
 

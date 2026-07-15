@@ -55,7 +55,7 @@ Each level-2 heading creates one node:
 Supported node metadata directly under the heading:
 
 - `<!-- id: n1 -->` preserves a stable node id.
-- `type: Choice` sets the node type. If omitted, import infers `Entry` for the first node, `Choice` for nodes with choices, `Condition` for nodes with branches, and `Content` otherwise.
+- `type: Choice` sets the node type. If omitted, import infers `Entry` for the first node, `Choice` for nodes with choices, and `Content` otherwise.
 - `slug: Bribe_check` adds an alternate reference name for `goto`.
 - `requires: expression` sets node requirements.
 
@@ -119,7 +119,7 @@ next:
 - goto: Other_slug if flag_ready
 ```
 
-Condition branches:
+Conditional routes:
 
 ```markdown
 branches:

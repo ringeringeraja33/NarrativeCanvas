@@ -85,7 +85,14 @@
       }
 
       function click(element) {
-        element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: element.ownerDocument.defaultView }));
+        const targetWindow = element.ownerDocument.defaultView;
+        element.dispatchEvent(new targetWindow.MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          detail: 1,
+          view: targetWindow
+        }));
       }
 
       function getPortHitInfo(doc, port) {
@@ -427,6 +434,28 @@
         await waitFor(`${label}: Document file opens`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "document");
         const editor = doc.querySelector("#documentPanel [data-document-source]");
         assert(`${label}: Document source editor renders`, Boolean(editor));
+        const documentHeader = doc.querySelector("#documentPanel .document-project-header.document-header");
+        const documentExport = documentHeader?.querySelector("[data-action='export-current-document']");
+        const documentChromeToggle = doc.querySelector("#documentPanel [data-action='toggle-document-chrome']");
+        assert(`${label}: Document uses the shared file header style`, Boolean(documentHeader));
+        assert(`${label}: Document header exposes current-format export`, documentExport?.textContent.includes("MD"));
+        assert(`${label}: Document header collapse uses an upward chevron`, documentChromeToggle?.getAttribute("aria-expanded") === "true" && Boolean(documentChromeToggle.querySelector("svg.document-chrome-chevron path")));
+        const documentChrome = doc.querySelector("#documentPanel .document-source-chrome");
+        const chromeHeightBeforeCollapse = documentChrome?.getBoundingClientRect().height || 0;
+        click(documentChromeToggle);
+        await waitFor(`${label}: Document header collapses`, () => doc.querySelector("#documentPanel .document-source-shell")?.dataset.documentChrome === "collapsed");
+        const collapsedChromeToggle = doc.querySelector("#documentPanel [data-action='toggle-document-chrome']");
+        assert(`${label}: collapsed Document hides the file header`, isElementHidden(win, documentHeader));
+        assert(`${label}: collapsed Document keeps a visible restore control`, collapsedChromeToggle?.getAttribute("aria-expanded") === "false" && !isElementHidden(win, collapsedChromeToggle));
+        const chromeHeightAfterCollapse = documentChrome?.getBoundingClientRect().height || 0;
+        assert(
+          `${label}: collapsed Document reduces the editor chrome`,
+          chromeHeightAfterCollapse < chromeHeightBeforeCollapse - 40,
+          `before=${chromeHeightBeforeCollapse.toFixed(1)} after=${chromeHeightAfterCollapse.toFixed(1)}`
+        );
+        click(collapsedChromeToggle);
+        await waitFor(`${label}: Document header expands`, () => doc.querySelector("#documentPanel .document-source-shell")?.dataset.documentChrome === "expanded");
+        assert(`${label}: expanded Document restores the file header`, !isElementHidden(win, documentHeader));
         assert(`${label}: Document offers four source formats`, doc.querySelectorAll("#documentPanel [data-document-format]").length === 4);
         const originalSource = editor?.value || "";
         assert(`${label}: plain document marks exact body boundaries`, originalSource.includes("<!-- narrativeCanvasBody:start -->") && originalSource.includes("<!-- narrativeCanvasBody:end -->"));
@@ -455,6 +484,7 @@
 
         click(doc.querySelector("#documentPanel [data-document-format='ink']"));
         await waitFor(`${label}: Ink document renders`, () => doc.querySelector("#documentPanel [data-document-format='ink']")?.classList.contains("active"));
+        assert(`${label}: Ink header updates filename and export label`, doc.querySelector("#documentPanel .document-project-header h2")?.textContent === "Document.ink" && doc.querySelector("#documentPanel [data-action='export-current-document']")?.textContent.includes("Ink"));
         const inkSource = doc.querySelector("#documentPanel [data-document-source]")?.value || "";
         assert(`${label}: Ink document carries stable node ids`, inkSource.includes("// narrativeCanvasId:"));
         assert(`${label}: Ink document carries editable node titles and body boundaries`, inkSource.includes("// nodeTitle:") && inkSource.includes("// narrativeCanvasBody:start"));
@@ -476,12 +506,15 @@
         assert(`${label}: Yarn document carries editable node titles and body boundaries`, yarnSource.includes("nodeTitle:") && yarnSource.includes("// narrativeCanvasBody:start"));
         assert(`${label}: Yarn document preserves project notes and complex variables`, yarnSource.includes("// narrativeCanvasNotes:") && yarnSource.includes("// narrativeCanvasVariable: sample_metadata ="));
         await verifyNoopRoundTrip("Yarn");
-        const yarnConditionSource = yarnSource.replace(/(->\s+[^\n]+?)\s+<<if\s+\$workflow_progress\s+>=\s+0>>/, "$1 <<if $workflow_progress >= 2 and $data_integrity >= 1>>");
+        const yarnConditionSource = yarnSource.replace(/(->\s+[^\n]+?)\s+<<if\s+\$script_builder_seen\s+==\s+true>>/, "$1 <<if $workflow_progress >= 2 and $data_integrity >= 1>>");
         assert(`${label}: Yarn choice condition can be located`, yarnConditionSource !== yarnSource);
         setControlValue(win, doc.querySelector("#documentPanel [data-document-source]"), yarnConditionSource);
-        await waitFor(`${label}: Yarn condition converts back to project expression syntax`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n4")?.choiceOptions?.[0]?.requires === "workflow_progress >= 2 && data_integrity >= 1");
+        await waitFor(`${label}: Yarn condition converts back to project expression syntax`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n4")?.choiceOptions?.[2]?.requires === "workflow_progress >= 2 && data_integrity >= 1");
         setControlValue(win, doc.querySelector("#documentPanel [data-document-source]"), yarnSource);
-        await waitFor(`${label}: Yarn condition can be restored`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n4")?.choiceOptions?.[0]?.requires === "workflow_progress >= 0");
+        await waitFor(`${label}: Yarn condition can be restored`, () => {
+          const restoredCondition = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n4")?.choiceOptions?.[2]?.requires || "";
+          return restoredCondition.includes("script_builder_seen") && restoredCondition.includes("true");
+        });
         click(doc.querySelector("#documentPanel [data-document-format='twee']"));
         await waitFor(`${label}: Twee document renders`, () => doc.querySelector("#documentPanel [data-document-format='twee']")?.classList.contains("active"));
         const tweeEditor = doc.querySelector("#documentPanel [data-document-source]");
@@ -512,6 +545,11 @@
         const overlay = doc.querySelector("#inspectorFloatOverlay");
         await waitFor(`${label}: node inspector opens in centered window`, () => overlay && !overlay.hidden && overlay.querySelector("#nodePanel"));
         const inspectorWindow = overlay.querySelector(".inspector-float-window");
+        const outsideTarget = doc.querySelector(".workspace-global-bar");
+        const inspectorPin = inspectorWindow.querySelector("[data-floating-window-pin='inspector']");
+        const inspectorClose = inspectorWindow.querySelector("[data-action='close-floating-inspector']");
+        assert(`${label}: centered inspector is modeless`, inspectorWindow.getAttribute("aria-modal") === "false" && win.getComputedStyle(overlay).pointerEvents === "none");
+        assert(`${label}: centered inspector pin sits beside close`, inspectorPin && inspectorClose?.previousElementSibling === inspectorPin);
         assert(`${label}: centered inspector is wider than sidebar`, inspectorWindow?.getBoundingClientRect().width > doc.querySelector(".sidebar-right")?.getBoundingClientRect().width);
         const inspectorBeforeMove = inspectorWindow.getBoundingClientRect();
         const inspectorHeader = inspectorWindow.querySelector("[data-floating-window-drag='inspector']");
@@ -526,7 +564,19 @@
         win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 42, clientX: inspectorAfterMove.right + 30, clientY: inspectorAfterMove.bottom + 25 }));
         const inspectorAfterResize = inspectorWindow.getBoundingClientRect();
         assert(`${label}: centered inspector can resize from its edge`, inspectorAfterResize.width > inspectorAfterMove.width + 20 && inspectorAfterResize.height > inspectorAfterMove.height + 15);
-        click(overlay.querySelector("[data-action='close-floating-inspector']"));
+        click(outsideTarget);
+        await waitFor(`${label}: unpinned inspector docks on outside click`, () => overlay.hidden && doc.querySelector(".sidebar-right #nodePanel"));
+        click(nodeFloatButton);
+        await waitFor(`${label}: centered inspector reopens for pin check`, () => !overlay.hidden && overlay.querySelector("#nodePanel"));
+        click(inspectorPin);
+        assert(`${label}: inspector pin activates`, inspectorPin.getAttribute("aria-pressed") === "true" && overlay.dataset.pinned === "true");
+        click(outsideTarget);
+        assert(`${label}: pinned inspector stays open on outside click`, !overlay.hidden && overlay.querySelector("#nodePanel"));
+        click(doc.querySelector(".inspector-tab[data-panel='project']"));
+        assert(`${label}: pinned inspector allows editing another sidebar panel`, !overlay.hidden && overlay.querySelector("#nodePanel.active") && doc.querySelector(".sidebar-right #projectPanel.active"));
+        click(inspectorPin);
+        assert(`${label}: inspector pin can be released`, inspectorPin.getAttribute("aria-pressed") === "false");
+        click(inspectorClose);
         await waitFor(`${label}: centered inspector closes`, () => overlay.hidden && doc.querySelector(".sidebar-right #nodePanel"));
 
         click(doc.querySelector("[data-action='play']"));
@@ -534,6 +584,8 @@
         await waitFor(`${label}: play panel opens`, () => playDialog?.open);
         click(playDialog.querySelector("[data-action='toggle-play-float']"));
         await waitFor(`${label}: play panel floats to center`, () => playDialog.classList.contains("floating"));
+        const playPin = playDialog.querySelector("[data-floating-window-pin='play']");
+        assert(`${label}: floating play has a pin beside close`, playPin && playDialog.querySelector("[value='close']")?.previousElementSibling === playPin);
         const playBeforeMove = playDialog.getBoundingClientRect();
         const playHeader = playDialog.querySelector("[data-floating-window-drag='play']");
         playHeader.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 43, button: 0, clientX: playBeforeMove.left + 80, clientY: playBeforeMove.top + 24 }));
@@ -547,6 +599,15 @@
         win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 44, clientX: playAfterMove.right + 30, clientY: playAfterMove.bottom + 25 }));
         const playAfterResize = playDialog.getBoundingClientRect();
         assert(`${label}: floating play window can resize from its edge`, playAfterResize.width > playAfterMove.width + 20 && playAfterResize.height > playAfterMove.height + 15);
+        click(outsideTarget);
+        await waitFor(`${label}: unpinned play returns to its dock on outside click`, () => playDialog.open && !playDialog.classList.contains("floating"));
+        click(playDialog.querySelector("[data-action='toggle-play-float']"));
+        await waitFor(`${label}: play refloats for pin check`, () => playDialog.classList.contains("floating"));
+        click(playPin);
+        assert(`${label}: play pin activates`, playPin.getAttribute("aria-pressed") === "true" && playDialog.dataset.pinned === "true");
+        click(outsideTarget);
+        assert(`${label}: pinned play stays floating on outside click`, playDialog.classList.contains("floating"));
+        click(playPin);
         await waitFor(`${label}: play focuses Node inspector`, () => doc.querySelector(".inspector-tab[data-panel='node']")?.classList.contains("active"));
         const saved = win.NarrativeCanvasApp.getSavedState();
         const selected = saved?.project?.nodes?.find((node) => node.id === saved?.ui?.selectedNodeId);
@@ -687,10 +748,17 @@
         const frame = document.createElement("iframe");
         frame.title = "web smoke target";
         frame.src = `${assetUrl("index.html")}?smoke=${Date.now()}`;
-        document.body.append(frame);
         await new Promise((resolve, reject) => {
-          frame.addEventListener("load", resolve, { once: true });
-          frame.addEventListener("error", reject, { once: true });
+          const timeoutId = setTimeout(() => reject(new Error("Web smoke iframe load timed out")), 5000);
+          frame.addEventListener("load", () => {
+            clearTimeout(timeoutId);
+            resolve();
+          }, { once: true });
+          frame.addEventListener("error", () => {
+            clearTimeout(timeoutId);
+            reject(new Error("Web smoke iframe failed to load"));
+          }, { once: true });
+          document.body.append(frame);
         });
         const win = frame.contentWindow;
         const doc = frame.contentDocument;
@@ -770,26 +838,167 @@
         const root = doc.querySelector(".app-shell");
         assert(`${label}: app shell exists`, Boolean(root));
         assert(`${label}: no startup error`, !doc.querySelector(".startup-error"));
+        assert(`${label}: canvas exposes configurable command bridge`, typeof win.NarrativeCanvasApp.canExecuteCommand === "function" && typeof win.NarrativeCanvasApp.executeCommand === "function");
+        assert(`${label}: selected node commands report availability`, win.NarrativeCanvasApp.canExecuteCommand("duplicate-selected-node") === true);
+        assert(`${label}: workspace navigation command executes`, win.NarrativeCanvasApp.executeCommand("open-characters") === true);
+        await waitFor(`${label}: workspace navigation command opens Characters`, () => root.getAttribute("data-active-file") === "characters");
+        assert(`${label}: canvas navigation command executes`, win.NarrativeCanvasApp.executeCommand("open-document") === true);
+        await waitFor(`${label}: canvas navigation command opens Document`, () => root.getAttribute("data-active-file") === "document");
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas returns after command bridge check`, () => root.getAttribute("data-active-file") === "adventure");
         assert(`${label}: export scale select exists`, Boolean(doc.querySelector("#exportImageScale")));
         assert(`${label}: theme toggle exists`, Boolean(doc.querySelector("#themeToggle")));
         assert(`${label}: project file status exists`, Boolean(doc.querySelector("#projectFileName")));
-        const firstChoiceFollowup = doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span");
-        const sharedChoiceFollowups = [...doc.querySelectorAll(".node[data-node-id='n6'] .node-choice-followup span")];
-        assert(`${label}: Choice successor shows its option above the title`, firstChoiceFollowup?.textContent.trim() === "Choice: An always-available option");
-        assert(`${label}: shared Choice successor shows every incoming option`, sharedChoiceFollowups.length === 2 && sharedChoiceFollowups.every((item) => item.textContent.trim()));
+        const frameTypeSettings = doc.querySelector("[data-action='edit-node-type'][data-node-type='Event']");
+        if (frameTypeSettings) click(frameTypeSettings);
+        await waitFor(`${label}: Frame type dialog opens`, () => Boolean(doc.querySelector("#nodeTypeDialog")?.open));
+        const frameBuiltInFields = [...doc.querySelectorAll("#nodeTypeBuiltinFields [data-node-type-built-in-field]")];
+        assert(`${label}: Frame type dialog shows built-in fields`, frameBuiltInFields.some((field) => field.dataset.nodeTypeBuiltInField === "title") && frameBuiltInFields.some((field) => field.dataset.nodeTypeBuiltInField === "eventType"));
+        assert(`${label}: Frame type dialog separates custom fields`, Boolean(doc.querySelector("#nodeTypeFieldsInput")) && doc.querySelector("#nodeTypeCustomFieldsLabel")?.textContent.trim());
+        const typeVisibilityOptions = [...doc.querySelectorAll("#nodeTypeDialog .type-dialog-visibility .nc-checkbox-field:not([hidden])")];
+        assert(`${label}: Frame type visibility options share one aligned group`, typeVisibilityOptions.length === 2 && typeVisibilityOptions.every((option) => option.parentElement?.classList.contains("type-dialog-visibility")));
+        assert(`${label}: Frame type visibility labels stay on one line`, typeVisibilityOptions.every((option) => option.getBoundingClientRect().height <= 42));
+        const typeSettings = doc.querySelector("#nodeTypeDialog .type-dialog-settings");
+        const typeAppearanceGroup = doc.querySelector("#nodeTypeDialog .type-dialog-appearance-group");
+        const typeVisibilityGroup = doc.querySelector("#nodeTypeDialog .type-dialog-visibility-group");
+        const typeColorInput = doc.querySelector("#nodeTypeColorInput");
+        const typeHiddenInput = doc.querySelector("#nodeTypeHiddenInput");
+        assert(`${label}: appearance and visibility are separate sibling groups`, typeAppearanceGroup?.parentElement === typeSettings && typeVisibilityGroup?.parentElement === typeSettings && !typeAppearanceGroup.contains(typeVisibilityGroup));
+        assert(`${label}: node type color picker stays compact`, typeColorInput?.getBoundingClientRect().width <= 120);
+        typeHiddenInput.checked = true;
+        const typeCheckboxStyle = win.getComputedStyle(typeHiddenInput);
+        const typeCheckmarkStyle = win.getComputedStyle(typeHiddenInput, "::before");
+        assert(`${label}: checked node type option uses a centered checkmark`, typeCheckboxStyle.width === "18px" && typeCheckboxStyle.height === "18px" && typeCheckmarkStyle.opacity === "1" && Number.parseFloat(typeCheckmarkStyle.height) >= 8);
+        doc.querySelector("#nodeTypeDialog")?.close("cancel");
+        const firstChoiceFollowup = doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button");
+        const dialogChoiceFollowups = [...doc.querySelectorAll(".node[data-node-id='n6'] .node-choice-followup-button")];
+        assert(`${label}: Choice successor shows its option above the title`, firstChoiceFollowup?.textContent.trim() === "Choice: See a variable change");
+        assert(`${label}: each sample successor shows only its own incoming option`, dialogChoiceFollowups.length === 1 && dialogChoiceFollowups[0]?.textContent.trim() === "Choice: See dialog and characters");
+        assert(`${label}: Choice successor cue identifies its source node`, firstChoiceFollowup?.dataset.choiceSourceNodeId === "n4");
+        assert(`${label}: Choice successor cue does not cover wrapped options with a native tooltip`, !firstChoiceFollowup?.hasAttribute("title"));
+        const dialogChoiceFollowupGroup = doc.querySelector(".node[data-node-id='n6'] .node-choice-followup");
+        assert(`${label}: sample successor does not clip its option cue`, !dialogChoiceFollowupGroup || dialogChoiceFollowupGroup.scrollHeight <= dialogChoiceFollowupGroup.clientHeight + 1);
         if (firstChoiceFollowup) {
           const choiceFollowupStyle = win.getComputedStyle(firstChoiceFollowup);
           assert(`${label}: Choice successor option uses a glow treatment`, choiceFollowupStyle.boxShadow !== "none" && choiceFollowupStyle.textShadow !== "none");
         }
         const originalUiLanguage = win.NarrativeCanvasApp.getLanguage();
         win.NarrativeCanvasApp.setLanguage("zh", { persist: false });
-        await waitFor(`${label}: Choice successor cue adapts to Chinese`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === "选择：An always-available option");
+        await waitFor(`${label}: Choice successor cue adapts to Chinese`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button")?.textContent.trim() === "选择：See a variable change");
         win.NarrativeCanvasApp.setLanguage(originalUiLanguage, { persist: false });
-        await waitFor(`${label}: Choice successor cue restores English`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === "Choice: An always-available option");
+        await waitFor(`${label}: Choice successor cue restores English`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button")?.textContent.trim() === "Choice: See a variable change");
+        const characterChip = doc.querySelector(".node[data-node-id='n6'] .node-cast-chip-button[data-character-id='c1']");
+        assert(`${label}: node character chip is clickable`, characterChip?.tagName === "BUTTON");
+        if (characterChip) click(characterChip);
+        await waitFor(`${label}: node character chip opens Characters search`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "characters" && doc.querySelector("[data-character-search]")?.value === "Guide");
+        assert(`${label}: node character search shows the matching character`, Boolean(doc.querySelector("[data-character-card-id='c1']")));
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas returns after node character search check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
+        const frameFocusScaleBefore = Number.parseInt(doc.querySelector("#zoomReadout")?.textContent || "100", 10);
+        const frameFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='e2']");
+        if (frameFocus) click(frameFocus);
+        await waitFor(`${label}: Frame renders before full character check`, () => Boolean(doc.querySelector(".node.frame[data-node-id='e2']")));
+        win.NarrativeCanvasApp.executeCommand("focus-selected-node");
+        const renderedFrameBackgrounds = [...doc.querySelectorAll(".node.frame[data-node-id]")]
+          .map((frame) => win.getComputedStyle(frame).backgroundColor);
+        const backgroundAlpha = (value) => Number(value.match(/\/\s*([\d.]+)\s*\)$/)?.[1] ?? value.match(/rgba\([^)]*,\s*([\d.]+)\s*\)$/)?.[1] ?? 1);
+        assert(
+          `${label}: every rendered Frame surface is translucent`,
+          renderedFrameBackgrounds.length > 0 && renderedFrameBackgrounds.every((value) => backgroundAlpha(value) < 1),
+          renderedFrameBackgrounds.join(", ")
+        );
+        await waitFor(`${label}: Frame focus settles before character check`, () => doc.querySelector(".node.frame[data-node-id='e2']")?.classList.contains("selected") && doc.querySelector("#zoomReadout")?.textContent === "100%");
+        await wait(80);
+        let frameCharacterChips = [...doc.querySelectorAll(".node.frame[data-node-id='e2'] .node-cast-chip-button")];
+        assert(`${label}: Frame shows every character without a folded count`, frameCharacterChips.length > 3 && !doc.querySelector(".node.frame[data-node-id='e2'] .node-cast-chip.more"), `count=${frameCharacterChips.length}`);
+        const findVisibleFrameCharacterChip = () => {
+          frameCharacterChips = [...doc.querySelectorAll(".node.frame[data-node-id='e2'] .node-cast-chip-button")];
+          const canvasViewportRect = doc.querySelector("#canvasViewport")?.getBoundingClientRect();
+          return frameCharacterChips.find((chip) => {
+            const rect = chip.getBoundingClientRect();
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            return canvasViewportRect
+              && x >= canvasViewportRect.left && x <= canvasViewportRect.right
+              && y >= canvasViewportRect.top && y <= canvasViewportRect.bottom
+              && doc.elementsFromPoint(x, y).includes(chip);
+          });
+        };
+        let frameCharacterChip = findVisibleFrameCharacterChip();
+        for (let attempt = 0; attempt < 12 && !frameCharacterChip; attempt += 1) {
+          click(doc.querySelector("[data-action='zoom-out']"));
+          await wait(20);
+          frameCharacterChip = findVisibleFrameCharacterChip();
+        }
+        frameCharacterChip ||= [...doc.querySelectorAll(".node.frame[data-node-id='e2'] .node-cast-chip-button")].at(-1);
+        const frameCharacter = win.NarrativeCanvasApp.getSavedState()?.project?.characters?.find((character) => character.id === frameCharacterChip?.dataset.characterId);
+        if (frameCharacterChip) {
+          const chipRect = frameCharacterChip.getBoundingClientRect();
+          const chipX = chipRect.left + chipRect.width / 2;
+          const chipY = chipRect.top + chipRect.height / 2;
+          const pointStack = doc.elementsFromPoint(chipX, chipY);
+          const pointTarget = pointStack[0];
+          assert(`${label}: Frame character chip participates in real pointer hit testing`, pointStack.includes(frameCharacterChip), `hit=${pointTarget?.className || pointTarget?.tagName || ""}`);
+          pointTarget?.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 93, button: 0, clientX: chipX, clientY: chipY }));
+          pointTarget?.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 93, button: 0, clientX: chipX, clientY: chipY }));
+          pointTarget?.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win, clientX: chipX, clientY: chipY }));
+        }
+        await waitFor(`${label}: Frame character chip opens the matching Characters search`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "characters" && doc.querySelector("[data-character-search]")?.value === frameCharacter?.name);
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas returns after Frame character search check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          const currentScale = Number.parseInt(doc.querySelector("#zoomReadout")?.textContent || "100", 10);
+          if (currentScale === frameFocusScaleBefore) break;
+          click(doc.querySelector(`[data-action='${currentScale > frameFocusScaleBefore ? "zoom-out" : "zoom-in"}']`));
+        }
+        assert(`${label}: Frame character check restores canvas zoom`, Number.parseInt(doc.querySelector("#zoomReadout")?.textContent || "0", 10) === frameFocusScaleBefore);
         const aiButton = doc.querySelector("#aiFloatingButton");
         const aiWindow = doc.querySelector("#aiFloatingWindow");
         const aiCloseButton = doc.querySelector("[data-action='close-ai-window']");
+        const aiPin = doc.querySelector("[data-floating-window-pin='ai']");
         assert(`${label}: AI floating controls exist`, Boolean(aiButton && aiWindow && aiCloseButton));
+        assert(`${label}: AI pin sits beside close`, aiPin && aiCloseButton.previousElementSibling === aiPin);
+        click(aiButton);
+        const aiDefaultRect = aiWindow.getBoundingClientRect();
+        const highestDividerZ = Math.max(...[...doc.querySelectorAll(".sidebar-resizer")].map((element) => Number.parseInt(win.getComputedStyle(element).zIndex, 10) || 0));
+        const aiWindowZ = Number.parseInt(win.getComputedStyle(aiWindow).zIndex, 10) || 0;
+        assert(`${label}: AI window stays above sidebar dividers`, aiWindowZ > highestDividerZ, `aiZ=${aiWindowZ}, dividerZ=${highestDividerZ}`);
+        const aiHeader = aiWindow.querySelector("[data-floating-window-drag='ai']");
+        aiHeader.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 45, button: 0, clientX: aiDefaultRect.left + 80, clientY: aiDefaultRect.top + 24 }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 45, clientX: aiDefaultRect.left + 112, clientY: aiDefaultRect.top - 6 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 45, clientX: aiDefaultRect.left + 112, clientY: aiDefaultRect.top - 6 }));
+        const aiMovedRect = aiWindow.getBoundingClientRect();
+        assert(`${label}: AI window can be dragged`, aiMovedRect.left > aiDefaultRect.left + 20 && aiMovedRect.top < aiDefaultRect.top - 20);
+        const aiMoveDelta = { x: aiMovedRect.left - aiDefaultRect.left, y: aiMovedRect.top - aiDefaultRect.top };
+        assert(`${label}: AI drag stays aligned with the pointer`, Math.abs(aiMoveDelta.x - 32) <= 3 && Math.abs(aiMoveDelta.y + 30) <= 3, `delta=${aiMoveDelta.x.toFixed(1)},${aiMoveDelta.y.toFixed(1)}`);
+        click(aiWindow.querySelector("[data-ai-prompt]"));
+        assert(`${label}: clicking inside a moved AI window does not close it`, !aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "true");
+        const workspaceRect = doc.querySelector(".canvas-workspace").getBoundingClientRect();
+        const crossPanelStart = aiWindow.getBoundingClientRect();
+        const crossPanelTargetX = workspaceRect.left - Math.min(48, workspaceRect.left / 2);
+        const crossPanelDeltaX = crossPanelTargetX - crossPanelStart.left;
+        aiHeader.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 47, button: 0, clientX: crossPanelStart.left + 80, clientY: crossPanelStart.top + 24 }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 47, clientX: crossPanelStart.left + 80 + crossPanelDeltaX, clientY: crossPanelStart.top + 24 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 47, clientX: crossPanelStart.left + 80 + crossPanelDeltaX, clientY: crossPanelStart.top + 24 }));
+        const crossPanelRect = aiWindow.getBoundingClientRect();
+        assert(`${label}: AI window can cross from the canvas into the sidebar`, crossPanelRect.left < workspaceRect.left - 10, `aiLeft=${crossPanelRect.left.toFixed(1)}, workspaceLeft=${workspaceRect.left.toFixed(1)}`);
+        const aiResize = aiWindow.querySelector("[data-floating-window='ai'][data-floating-window-resize='se']");
+        aiResize.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 46, button: 0, clientX: crossPanelRect.right, clientY: crossPanelRect.bottom }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 46, clientX: crossPanelRect.right + 30, clientY: crossPanelRect.bottom + 25 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 46, clientX: crossPanelRect.right + 30, clientY: crossPanelRect.bottom + 25 }));
+        const aiResizedRect = aiWindow.getBoundingClientRect();
+        assert(`${label}: AI window can resize from its edge`, aiResizedRect.width > crossPanelRect.width + 20 && aiResizedRect.height > crossPanelRect.height + 15);
+        click(aiCloseButton);
+        click(aiButton);
+        const aiReopenedRect = aiWindow.getBoundingClientRect();
+        assert(`${label}: AI button reopens the window at its default position`, Math.abs(aiReopenedRect.left - aiDefaultRect.left) <= 2 && Math.abs(aiReopenedRect.top - aiDefaultRect.top) <= 2 && Math.abs(aiReopenedRect.width - aiDefaultRect.width) <= 2 && Math.abs(aiReopenedRect.height - aiDefaultRect.height) <= 2);
+        click(aiPin);
+        assert(`${label}: AI pin activates`, !aiWindow.hidden && aiPin.getAttribute("aria-pressed") === "true" && aiWindow.dataset.pinned === "true");
+        click(doc.querySelector(".workspace-global-bar"));
+        assert(`${label}: pinned AI stays open on outside click`, !aiWindow.hidden);
+        click(aiPin);
+        click(doc.querySelector(".workspace-global-bar"));
+        assert(`${label}: unpinned AI returns to its entry on outside click`, aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "false");
         for (let index = 0; index < 20; index += 1) {
           click(aiButton);
           assert(`${label}: AI button opens reliably ${index + 1}`, !aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "true");
@@ -797,6 +1006,98 @@
           assert(`${label}: AI close button responds reliably ${index + 1}`, aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "false");
         }
         if (win.NarrativeCanvasHost) {
+          const OriginalMediaRecorder = win.MediaRecorder;
+          const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(win.navigator, "mediaDevices");
+          const originalAiTranscribe = win.NarrativeCanvasHost.aiTranscribe;
+          class FakeMediaRecorder {
+            static isTypeSupported() { return true; }
+            constructor(_stream, options = {}) { this.mimeType = options.mimeType || "audio/webm"; this.state = "inactive"; }
+            start() { this.state = "recording"; }
+            stop() {
+              this.state = "inactive";
+              this.ondataavailable?.({ data: new win.Blob(["fake audio"], { type: this.mimeType }) });
+              this.onstop?.();
+            }
+          }
+          let hostedTranscriptionPayload = null;
+          win.MediaRecorder = FakeMediaRecorder;
+          Object.defineProperty(win.navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } });
+          win.NarrativeCanvasHost.aiTranscribe = async (payload) => { hostedTranscriptionPayload = payload; return { text: "托管转写内容" }; };
+          click(doc.querySelector("[data-action='ai-toggle-voice']"));
+          await waitFor(`${label}: hosted AI voice recording starts`, () => doc.querySelector("[data-action='ai-toggle-voice']")?.getAttribute("aria-pressed") === "true");
+          click(doc.querySelector("[data-action='ai-toggle-voice']"));
+          await waitFor(`${label}: hosted AI transcription writes into the composer`, () => doc.querySelector("[data-ai-prompt]")?.value.includes("托管转写内容"));
+          assert(`${label}: hosted AI transcription receives recorded audio`, hostedTranscriptionPayload?.dataUrl?.startsWith("data:audio/") && hostedTranscriptionPayload?.language);
+          win.NarrativeCanvasHost.aiTranscribe = originalAiTranscribe;
+          win.MediaRecorder = OriginalMediaRecorder;
+          if (mediaDevicesDescriptor) Object.defineProperty(win.navigator, "mediaDevices", mediaDevicesDescriptor);
+          else delete win.navigator.mediaDevices;
+          click(doc.querySelector("[data-action='ai-clear']"));
+
+          const OriginalSpeechRecognition = win.SpeechRecognition;
+          const OriginalWebkitSpeechRecognition = win.webkitSpeechRecognition;
+          class FakeSpeechRecognition {
+            start() {
+              this.onstart?.();
+              const result = [{ transcript: "语音内容" }];
+              result.isFinal = true;
+              this.onresult?.({ resultIndex: 0, results: [result] });
+            }
+            stop() { this.onend?.(); }
+          }
+          win.SpeechRecognition = FakeSpeechRecognition;
+          win.webkitSpeechRecognition = FakeSpeechRecognition;
+          click(doc.querySelector("[data-action='ai-toggle-voice']"));
+          await waitFor(`${label}: AI voice input writes the transcript into the composer`, () => doc.querySelector("[data-ai-prompt]")?.value.includes("语音内容"));
+          assert(`${label}: AI voice button exposes its listening state`, doc.querySelector("[data-action='ai-toggle-voice']")?.getAttribute("aria-pressed") === "true");
+          click(doc.querySelector("[data-action='ai-toggle-voice']"));
+          await waitFor(`${label}: AI voice input can stop`, () => doc.querySelector("[data-action='ai-toggle-voice']")?.getAttribute("aria-pressed") === "false");
+          win.SpeechRecognition = OriginalSpeechRecognition;
+          win.webkitSpeechRecognition = OriginalWebkitSpeechRecognition;
+          click(doc.querySelector("[data-action='ai-clear']"));
+
+          const keyboardPrompt = doc.querySelector("[data-ai-prompt]");
+          assert(`${label}: AI composer explains Enter and Shift+Enter`, keyboardPrompt?.placeholder.includes("Enter") && keyboardPrompt?.placeholder.includes("Shift+Enter"));
+          const keyboardMessageCount = doc.querySelectorAll(".ai-message-user").length;
+          setControlInputValue(win, keyboardPrompt, "Keep editing");
+          keyboardPrompt.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }));
+          assert(`${label}: Shift+Enter does not send the AI prompt`, doc.querySelectorAll(".ai-message-user").length === keyboardMessageCount);
+          win.NarrativeCanvasHost.aiChatStream = async (_payload, onDelta) => { onDelta("Keyboard reply"); return "Keyboard reply"; };
+          setControlInputValue(win, keyboardPrompt, "Keyboard send");
+          keyboardPrompt.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+          await waitFor(`${label}: Enter sends the AI prompt`, () => [...doc.querySelectorAll(".ai-message-user")].some((message) => message.textContent.includes("Keyboard send")));
+          click(doc.querySelector("[data-action='ai-clear']"));
+
+          const attachmentInput = doc.querySelector("[data-ai-attachment-input]");
+          const attachmentFile = new win.File(["# Attachment heading\n\nAttachment body"], "notes.md", { type: "text/markdown" });
+          const transfer = new win.DataTransfer();
+          transfer.items.add(attachmentFile);
+          Object.defineProperty(attachmentInput, "files", { configurable: true, value: transfer.files });
+          attachmentInput.dispatchEvent(new win.Event("change", { bubbles: true }));
+          await waitFor(`${label}: AI attachment picker shows the selected file`, () => doc.querySelector(".ai-composer .ai-attachment")?.textContent.includes("notes.md"));
+          let richPayload = null;
+          win.NarrativeCanvasHost.aiChatStream = async (payload, onDelta) => {
+            richPayload = payload;
+            onDelta("# Reply heading\n\n**Reply bold**\n\n- Reply item\n\n[Reply link](https://example.com)");
+            return "# Reply heading\n\n**Reply bold**\n\n- Reply item\n\n[Reply link](https://example.com)";
+          };
+          setControlInputValue(win, doc.querySelector("[data-ai-prompt]"), "**User bold**");
+          click(doc.querySelector("[data-action='ai-send']"));
+          await waitFor(`${label}: AI Markdown response finishes`, () => !doc.querySelector(".ai-message-assistant.streaming") && Boolean(doc.querySelector(".ai-message-assistant .ai-markdown h1")));
+          assert(`${label}: user Markdown renders as rich text`, Boolean(doc.querySelector(".ai-message-user .ai-markdown strong")));
+          assert(`${label}: AI Markdown renders headings, emphasis, lists and links`, Boolean(doc.querySelector(".ai-message-assistant .ai-markdown h1") && doc.querySelector(".ai-message-assistant .ai-markdown strong") && doc.querySelector(".ai-message-assistant .ai-markdown ul") && doc.querySelector(".ai-message-assistant .ai-markdown a[href='https://example.com']")));
+          const sentUserMessage = richPayload?.messages?.findLast?.((message) => message.role === "user") || [...(richPayload?.messages || [])].reverse().find((message) => message.role === "user");
+          assert(`${label}: text attachment content is included in the AI payload`, typeof sentUserMessage?.content === "string" && sentUserMessage.content.includes("notes.md") && sentUserMessage.content.includes("Attachment body"));
+          assert(`${label}: sent attachment remains visible with its message`, Boolean(doc.querySelector(".ai-message-user .ai-attachment")));
+          let copiedAiText = "";
+          try { Object.defineProperty(win.navigator, "clipboard", { configurable: true, value: { writeText: async (value) => { copiedAiText = value; } } }); } catch (_error) { /* Clipboard may already be replaceable directly. */ }
+          click(doc.querySelector(".ai-message-user [data-action='ai-copy-message']"));
+          await waitFor(`${label}: AI message can be copied`, () => copiedAiText === "**User bold**");
+          copiedAiText = "";
+          click(doc.querySelector("[data-action='ai-copy-conversation']"));
+          await waitFor(`${label}: full AI conversation can be copied`, () => copiedAiText.includes("**User bold**") && copiedAiText.includes("# Reply heading"));
+          click(doc.querySelector("[data-action='ai-clear']"));
+
           win.NarrativeCanvasHost.aiChatStream = async (_payload, onDelta, signal) => {
             onDelta("Stream ");
             await wait(80);
@@ -1326,16 +1627,30 @@
         const savedChoiceBranches = (readSavedProject(win)?.project?.links || [])
           .filter((link) => link.from === "n4")
           .sort((a, b) => a.choiceIndex - b.choiceIndex);
-        assert(`${label}: sample choice branches keep authored labels without manual ordinals`, savedChoiceBranches.map((link) => link.label).join("|") === "An always-available option|An option that changes a variable|An option with a prerequisite");
+        assert(`${label}: sample choice branches keep authored labels without manual ordinals`, savedChoiceBranches.map((link) => link.label).join("|") === "See a variable change|See dialog and characters|See Playbook gate an option");
         assert(`${label}: sample choice branches keep explicit indexes`, savedChoiceBranches.map((link) => link.choiceIndex).join("|") === "0|1|2");
         const savedRequirementGateLinks = (readSavedProject(win)?.project?.links || []).filter((link) => link.from === "n10");
         assert(`${label}: sample requirement gate continues by normal link`, savedRequirementGateLinks.length === 1 && savedRequirementGateLinks[0].to === "n11");
         const sampleStateWithPlaybook = win.NarrativeCanvasApp.getSavedState()?.project || {};
         const sampleNodeTitles = new Set((sampleStateWithPlaybook.nodes || []).map((node) => node.title));
+        assert(`${label}: retired Condition and Set node types are absent`, !(sampleStateWithPlaybook.nodeTypes || []).some((typeDef) => typeDef.type === "Condition" || typeDef.type === "Set"));
+        assert(`${label}: nodes do not retain retired direct fields`, (sampleStateWithPlaybook.nodes || []).every((node) => !["condition", "conditionMode", "variable", "variables", "value"].some((key) => Object.prototype.hasOwnProperty.call(node, key))));
+        assert(`${label}: runtime node templates do not retain retired field mappings`, Object.values(sampleStateWithPlaybook.script?.nodeTypes || {}).every((script) => !Object.prototype.hasOwnProperty.call(script, "condition") && !Object.prototype.hasOwnProperty.call(script, "set")));
         const sampleActions = sampleStateWithPlaybook.script?.actions || [];
         const sampleRequirementGate = (sampleStateWithPlaybook.nodes || []).find((node) => node.id === "n10");
         const sampleChoice = (sampleStateWithPlaybook.nodes || []).find((node) => node.id === "n4");
         const sampleChoiceOptions = (sampleStateWithPlaybook.nodes || []).flatMap((node) => node.choiceOptions || []);
+        const sampleChoiceIds = new Set((sampleStateWithPlaybook.nodes || []).filter((node) => node.type === "Choice").map((node) => node.id));
+        const sampleChoiceBranches = (sampleStateWithPlaybook.links || []).filter((link) => sampleChoiceIds.has(link.from) && link.choiceOptionId);
+        const choiceBranchTargets = new Map();
+        sampleChoiceBranches.forEach((link) => {
+          const targets = choiceBranchTargets.get(link.from) || [];
+          targets.push(link.to);
+          choiceBranchTargets.set(link.from, targets);
+        });
+        assert(`${label}: each sample choice option has a distinct immediate target`, [...choiceBranchTargets.values()].every((targets) => targets.length === new Set(targets).size));
+        assert(`${label}: revised sample contains distinct feedback nodes`, ["n20", "n21", "n22", "n23"].every((nodeId) => (sampleStateWithPlaybook.nodes || []).some((node) => node.id === nodeId)));
+        assert(`${label}: revised sample version is recorded`, sampleStateWithPlaybook.variables?.sample_version === 2);
         assert(`${label}: sample includes condition-gate requirement`, sampleNodeTitles.has("A Condition Gate") && sampleRequirementGate?.stateLogic?.requirements === "section_notes_ready === true || data_integrity >= 2");
         assert(`${label}: sample includes choice-option state write`, sampleChoiceOptions.some((option) => (option.effects || []).some((effect) => effect.trigger === "onChoose" && effect.op === "add" && effect.key === "data_integrity")));
         const sampleActionKeys = new Set(sampleActions.map((action) => action.key));
@@ -1596,7 +1911,10 @@
           const editedSuccessorFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n5']");
           if (editedSuccessorFocus) click(editedSuccessorFocus);
           await waitFor(`${label}: Choice successor card renders for cue check`, () => Boolean(doc.querySelector(".node[data-node-id='n5']")));
-          await waitFor(`${label}: Choice edit updates successor cue`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup span")?.textContent.trim() === "Choice: Edited on canvas");
+          await waitFor(`${label}: Choice edit updates successor cue`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button")?.textContent.trim() === "Choice: Edited on canvas");
+          const sourceChoiceCue = doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button");
+          if (sourceChoiceCue) click(sourceChoiceCue);
+          await waitFor(`${label}: Choice successor cue focuses its source Choice`, () => doc.querySelector(".node[data-node-id='n4']")?.classList.contains("selected"));
           const returnToChoice = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n4']");
           if (returnToChoice) click(returnToChoice);
           await waitFor(`${label}: Choice card returns after successor cue check`, () => Boolean(doc.querySelector(".node[data-node-id='n4'] .node-choice-label-input")));
@@ -1644,8 +1962,19 @@
           win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 61, clientX: previewRect.left + previewRect.width * dialogRatioBeforeResize / 100 + 28 }));
           const dialogRatioAfterResize = Number.parseFloat(dialogPreviewBeforeResize.style.getPropertyValue("--dialog-speaker-ratio"));
           assert(`${label}: Dragging Dialog separator changes both rows column ratio`, dialogRatioAfterResize > dialogRatioBeforeResize);
+          const inspectorDialogEditor = doc.querySelector("#nodePanel .dialog-turns-editor");
+          const inspectorDialogHandle = inspectorDialogEditor?.querySelector("[data-dialog-column-resize]");
+          assert(`${label}: Dialog inspector exposes a draggable column separator`, Boolean(inspectorDialogHandle));
+          if (inspectorDialogHandle && inspectorDialogEditor) {
+            const inspectorRect = inspectorDialogEditor.getBoundingClientRect();
+            inspectorDialogHandle.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 62, button: 0, clientX: inspectorRect.left + inspectorRect.width * dialogRatioAfterResize / 100 }));
+            win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 62, clientX: inspectorRect.left + inspectorRect.width * dialogRatioAfterResize / 100 + 24 }));
+            win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, pointerId: 62, clientX: inspectorRect.left + inspectorRect.width * dialogRatioAfterResize / 100 + 24 }));
+            const inspectorRatioAfterResize = Number.parseFloat(inspectorDialogEditor.style.getPropertyValue("--dialog-speaker-ratio"));
+            assert(`${label}: Dialog inspector resize updates card and inspector together`, inspectorRatioAfterResize > dialogRatioAfterResize && Number.parseFloat(dialogPreviewBeforeResize.style.getPropertyValue("--dialog-speaker-ratio")) === inspectorRatioAfterResize);
+          }
           await win.NarrativeCanvasApp.save({ silent: true });
-          assert(`${label}: Dialog speaker column ratio is saved`, readSavedProject(win)?.project?.nodes?.find((item) => item.id === "n6")?.dialogSpeakerRatio === dialogRatioAfterResize);
+          assert(`${label}: Dialog speaker column ratio is saved`, readSavedProject(win)?.project?.nodes?.find((item) => item.id === "n6")?.dialogSpeakerRatio === Number.parseFloat(dialogPreviewBeforeResize.style.getPropertyValue("--dialog-speaker-ratio")));
         }
         let canvasDialogLine = doc.querySelector(".node[data-node-id='n6'] .node-dialog-line-input");
         let canvasDialogSpeaker = doc.querySelector(".node[data-node-id='n6'] .node-dialog-speaker-input");
@@ -1739,6 +2068,8 @@
           await waitFor(`${label}: Add variable works from playbook`, () => doc.querySelectorAll("#variablesPanel .variable-row:not(.variable-heading)").length === emptyProjectVariableRowsBeforeAdd + 1);
           click(doc.querySelector("#variablesPanel [data-action='select-playbook-tab'][data-playbook-tab='rules']"));
         await waitFor(`${label}: play rules tab opens after empty project`, () => doc.querySelector("#variablesPanel")?.textContent.includes("Start Node"));
+          const endConditionEditor = doc.querySelector("[data-runner-rule-field='endCondition']");
+          assert(`${label}: end condition uses a resizable multiline editor`, endConditionEditor?.tagName === "TEXTAREA" && getComputedStyle(endConditionEditor).resize === "vertical");
           click(doc.querySelector("#variablesPanel [data-action='add-play-rule']"));
           await waitFor(`${label}: Add play rule dialog opens`, () => doc.querySelector("#playRuleDialog")?.open);
           doc.querySelector("#playRuleDialog [data-action='create-play-rule'][data-playbook-rule-kind='debugMode']")?.click();
@@ -1770,9 +2101,56 @@
         assert("plugin zh: save button translated", doc.querySelector("[data-action='save-project']")?.textContent.trim() === "保存");
         assert("plugin zh: project file heading translated", doc.querySelector(".project-file-section h2")?.textContent.trim() === "项目文件");
         assert("plugin zh: node search placeholder translated", doc.querySelector("#queryInput")?.getAttribute("placeholder") === "查找节点");
+        assert("plugin zh: node template options translated", [...(doc.querySelector("#customNodeKind")?.options || [])].map((option) => option.textContent.trim()).join("|") === "基础节点|对话|选择|框架");
+        assert("plugin zh: node type dialog template options translated", [...(doc.querySelector("#nodeTypeKindInput")?.options || [])].map((option) => option.textContent.trim()).join("|") === "基础节点|对话|选择|框架");
+        win.NarrativeCanvasApp.executeCommand("open-events");
+        await wait(80);
+        click(doc.querySelector("[data-action='delete-event-column']"));
+        await wait(40);
+        assert("plugin zh: event column delete dialog title translated", /^删除“.+”列？$/.test(doc.querySelector("#eventColumnDeleteTitle")?.textContent.trim() || ""));
+        assert("plugin zh: event column delete dialog body translated", doc.querySelector("#eventColumnDeleteBody")?.textContent.includes("隐藏只会隐藏该列并保留数据"));
+        click(doc.querySelector("#eventColumnDeleteDialog [value='cancel']"));
         win.NarrativeCanvasApp.setLanguage("en");
         await wait(80);
         assert("plugin language: can switch back to English", doc.querySelector("[data-action='save-project']")?.textContent.trim() === "Save");
+        assert("plugin en: node template options restored", [...(doc.querySelector("#customNodeKind")?.options || [])].map((option) => option.textContent.trim()).join("|") === "Basic Node|Dialog|Choice|Frame");
+        assert("plugin en: node type dialog template options restored", [...(doc.querySelector("#nodeTypeKindInput")?.options || [])].map((option) => option.textContent.trim()).join("|") === "Basic Node|Dialog|Choice|Frame");
+        win.NarrativeCanvasApp.destroy?.();
+        frame.remove();
+      }
+
+      async function runCustomTemplateChecks() {
+        const target = await loadPluginFrame();
+        const { win, doc, frame } = target;
+        const label = "plugin templates";
+        const customTemplateSelect = doc.querySelector("#customNodeKind");
+        const customTemplateValues = [...customTemplateSelect.options].map((option) => option.value);
+        assert(`${label}: custom node form offers specialized templates`, ["node", "dialog", "choice", "frame"].every((value) => customTemplateValues.includes(value)));
+        click(doc.querySelector("[data-action='edit-node-type'][data-node-type='Choice']"));
+        await waitFor(`${label}: Choice type dialog opens`, () => Boolean(doc.querySelector("#nodeTypeDialog")?.open));
+        assert(`${label}: Choice type uses the Choice template`, doc.querySelector("#nodeTypeKindInput")?.value === "choice" && Boolean(doc.querySelector("#nodeTypeBuiltinFields [data-node-type-built-in-field='choices']")));
+        doc.querySelector("#nodeTypeDialog")?.close("cancel");
+        click(doc.querySelector("[data-action='edit-node-type'][data-node-type='Dialog']"));
+        await waitFor(`${label}: Dialog type dialog opens`, () => Boolean(doc.querySelector("#nodeTypeDialog")?.open));
+        assert(`${label}: Dialog type uses the Dialog template`, doc.querySelector("#nodeTypeKindInput")?.value === "dialog" && Boolean(doc.querySelector("#nodeTypeBuiltinFields [data-node-type-built-in-field='turns']")));
+        doc.querySelector("#nodeTypeDialog")?.close("cancel");
+        setControlValue(win, doc.querySelector("#customNodeName"), "Smoke Choice Type");
+        setControlValue(win, customTemplateSelect, "choice");
+        click(doc.querySelector("[data-action='add-custom-node-type']"));
+        await waitFor(`${label}: custom Choice template is added`, () => [...doc.querySelectorAll("[data-action='add-node']")].some((button) => button.textContent.includes("Smoke Choice Type")));
+        const customChoiceButton = [...doc.querySelectorAll("[data-action='add-node']")].find((button) => button.textContent.includes("Smoke Choice Type"));
+        click(customChoiceButton);
+        await waitFor(`${label}: custom Choice template creates a specialized node`, () => Boolean(doc.querySelector(".node.selected .node-choice-preview") && doc.querySelector("#nodePanel .choice-options-editor")));
+        setControlValue(win, doc.querySelector("#customNodeName"), "Smoke Dialog Type");
+        setControlValue(win, customTemplateSelect, "dialog");
+        click(doc.querySelector("[data-action='add-custom-node-type']"));
+        await waitFor(`${label}: custom Dialog template is added`, () => [...doc.querySelectorAll("[data-action='add-node']")].some((button) => button.textContent.includes("Smoke Dialog Type")));
+        const customDialogButton = [...doc.querySelectorAll("[data-action='add-node']")].find((button) => button.textContent.includes("Smoke Dialog Type"));
+        click(customDialogButton);
+        await waitFor(`${label}: custom Dialog template creates a specialized node`, () => Boolean(doc.querySelector("#nodePanel .dialog-turns-editor")));
+        await win.NarrativeCanvasApp.save({ silent: true });
+        const templateProject = readSavedProject(win)?.project;
+        assert(`${label}: custom specialized templates persist`, templateProject?.nodeTypes?.some((typeDef) => typeDef.label === "Smoke Choice Type" && typeDef.template === "choice") && templateProject?.nodeTypes?.some((typeDef) => typeDef.label === "Smoke Dialog Type" && typeDef.template === "dialog"));
         win.NarrativeCanvasApp.destroy?.();
         frame.remove();
       }
@@ -1811,6 +2189,12 @@
           assert(`${item.label}: sample filename follows language`, win.__createdProjectOptions[0]?.filenameOverride === item.fileName);
           assert(`${item.label}: sample title follows language`, sampleState.title === item.title);
           assert(`${item.label}: sample language marker follows language`, sampleState.variables?.sample_language === item.language);
+          assert(`${item.label}: sample version marker is current`, sampleState.variables?.sample_version === 2);
+          const branchTargets = (sampleState.links || []).filter((link) => ["n4", "n12"].includes(link.from)).reduce((groups, link) => {
+            (groups[link.from] ||= []).push(link.to);
+            return groups;
+          }, {});
+          assert(`${item.label}: onboarding choices have distinct feedback targets`, Object.values(branchTargets).every((targets) => targets.length === new Set(targets).size));
           if (item.language === "zh") {
             const sampleText = JSON.stringify(sampleState);
             const guideNode = sampleState.nodes?.find((node) => node.id === "n3");
@@ -1831,6 +2215,7 @@
 
           const plugin = await loadPluginFrame();
           await runCoreChecks("plugin", plugin);
+          await runCustomTemplateChecks();
           await runSampleLanguageChecks();
           await runLanguageChecks();
           await runWebLanguageChecks();

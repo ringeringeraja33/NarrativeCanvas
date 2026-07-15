@@ -4,7 +4,7 @@ const { spawnSync } = require("child_process");
 
 const projectRoot = path.resolve(__dirname, "..");
 const releaseFiles = ["main.js", "manifest.json", "styles.css"];
-const sourceFiles = ["app.js", "canvas.css", "index.html", "versions.json", "RELEASE_NOTES.md"];
+const sourceFiles = ["app.js", "canvas.css", "plugin.css", "index.html", "versions.json", "RELEASE_NOTES.md"];
 const failures = [];
 
 function fail(message) {
@@ -92,6 +92,7 @@ if (manifest) {
 }
 
 const main = readUtf8("main.js");
+const appSource = readUtf8("app.js");
 if (!main.includes("// BEGIN bundled app.js") || !main.includes("// END bundled app.js")) {
   fail("main.js is missing bundled app markers");
 } else {
@@ -103,6 +104,106 @@ if (!main.includes("对话节点") || !main.includes("选择节点")) {
   pass("main.js preserves expected Chinese content");
 }
 
+const translationStartMarker = "const uiTranslations = ";
+const translationEndMarker = "\n};\n\nfunction normalizeUiLanguage";
+const translationStart = appSource.indexOf(translationStartMarker);
+const translationEnd = appSource.indexOf(translationEndMarker, translationStart);
+let zhTranslations = {};
+try {
+  const translationSource = appSource.slice(translationStart + translationStartMarker.length, translationEnd + 2);
+  zhTranslations = Function(`"use strict"; return (${translationSource});`)().zh || {};
+} catch (error) {
+  fail(`app.js Chinese translation table could not be inspected: ${error.message}`);
+}
+const missingDialogTranslations = [];
+for (const match of appSource.matchAll(/showGeneric(?:Confirm|TextInput)\(\{([\s\S]*?)\n\s*\}\);/g)) {
+  for (const property of match[1].matchAll(/^\s*(kicker|title|message|confirmLabel|secondaryLabel|label):\s*"((?:\\.|[^"\\])*)"/gm)) {
+    const value = JSON.parse(`"${property[2]}"`);
+    if (!zhTranslations[value]) missingDialogTranslations.push(value);
+  }
+}
+if (missingDialogTranslations.length) {
+  fail(`app.js dialogs are missing Chinese translations: ${[...new Set(missingDialogTranslations)].join(" | ")}`);
+} else {
+  pass("all literal confirm and text-dialog copy has Chinese translations");
+}
+if (!appSource.includes('const title = t("Delete {label} column?"') || !appSource.includes("const message = t('Hide only hides the column")) {
+  fail("event column delete dialog bypasses dynamic localization");
+} else {
+  pass("event column delete dialog localizes its dynamic title and body");
+}
+
+const requiredCommandIds = [
+  "new-project",
+  "undo",
+  "redo",
+  "add-content-node",
+  "add-dialog-node",
+  "add-choice-node",
+  "add-frame",
+  "duplicate-selected-node",
+  "delete-selection",
+  "zoom-in",
+  "zoom-out",
+  "fit-canvas-to-view",
+  "focus-selected-node",
+  "focus-workspace-search",
+  "open-characters",
+  "open-events",
+  "open-playbook",
+  "open-document",
+  "start-play-preview",
+  "toggle-immersive-fullscreen"
+];
+const fixedEnglishCommands = [
+  ["open", "Open canvas"],
+  ["save-to-vault", "Save current project"],
+  ["create-sample-project", "Create sample project"],
+  ["add-content-node", "Add Basic Node"],
+  ["add-dialog-node", "Add Dialog"],
+  ["add-choice-node", "Add Choice"],
+  ["add-frame", "Add Frame"]
+];
+for (const [commandId, commandName] of fixedEnglishCommands) {
+  const commandPattern = new RegExp(`id: "${commandId}",[\\s\\S]{0,120}name: "${commandName}"`);
+  if (!commandPattern.test(main)) fail(`main.js does not keep command ${commandId} in English`);
+  else pass(`main.js keeps command ${commandId} in English`);
+}
+for (const commandId of requiredCommandIds) {
+  if (!main.includes(`id: "${commandId}"`)) fail(`main.js is missing command: ${commandId}`);
+  else pass(`main.js registers command ${commandId}`);
+}
+if (!main.includes("name: definition.name")) fail("canvas commands are still localized in Obsidian hotkey settings");
+else pass("canvas command names remain English in Obsidian hotkey settings");
+if (/name: pluginText\(this, (?:definition\.name|"(?:Open canvas|Save current project|Create sample project)")\)/.test(main)) {
+  fail("Obsidian command names still pass through interface localization");
+} else {
+  pass("Obsidian command names bypass interface localization");
+}
+if (main.includes("hotkeys:")) fail("main.js assigns default command hotkeys");
+else pass("main.js leaves command hotkeys user-configurable");
+
+const aiArtifactRequirements = [
+  ["data-floating-window-drag=\\\"ai\\\"", "AI window includes a drag handle"],
+  ["data-floating-window=\\\"ai\\\"", "AI window includes resize handles"],
+  ["data-action=\"ai-copy-message\"", "AI messages expose copy controls"],
+  ["Shift+Enter for a new line", "AI composer documents its send and newline keys"]
+];
+for (const [token, description] of aiArtifactRequirements) {
+  if (!main.includes(token)) fail(`main.js ${description} check failed`);
+  else pass(description);
+}
+if (!main.includes("M5 7h14M5 12h14M5 17h14")) {
+  fail("main.js outline toggle does not use the centered SVG icon");
+} else {
+  pass("outline toggle uses the centered SVG icon");
+}
+if (!main.includes('class="playbook-end-condition-editor"') || !main.includes('data-runner-rule-field="endCondition" rows="3"')) {
+  fail("main.js end condition is not a multiline resizable editor");
+} else {
+  pass("end condition uses the multiline editor artifact");
+}
+
 const styles = readUtf8("styles.css");
 const unscopedSelectors = styles
   .split("\n")
@@ -111,7 +212,8 @@ const unscopedSelectors = styles
     line.endsWith("{")
     && /^[.#\[:A-Za-z_-]/.test(line)
     && !/^(from|to)\s*\{/.test(line)
-    && !line.startsWith(".narrative-canvas-plugin-host")
+    && !line.includes(".narrative-canvas-plugin-host")
+    && !line.startsWith(".narrative-canvas-")
   ));
 if (unscopedSelectors.length) {
   fail(`styles.css has unscoped selectors at lines ${unscopedSelectors.slice(0, 8).map((item) => item.number).join(", ")}`);
@@ -125,14 +227,45 @@ if (/\.narrative-canvas-plugin-host\s*\/\*/.test(styles)) {
 }
 
 const requiredSelectors = [
+  ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"]",
+  ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"] :is(.ai-title h2, .document-header h2)",
+  ".narrative-canvas-plugin-host input[type=\"checkbox\"]::before",
+  ".narrative-canvas-plugin-host input[type=\"checkbox\"]::after",
   ".narrative-canvas-plugin-host .node.graph-hover-node",
   ".narrative-canvas-plugin-host .link-path.graph-hover-link",
   ".narrative-canvas-plugin-host .node .node-dialog-speaker-input",
-  ".narrative-canvas-plugin-host .node .node-choice-label-input"
+  ".narrative-canvas-plugin-host .node .node-choice-label-input",
+  ".narrative-canvas-plugin-host .workspace-toc-button > svg",
+  ".narrative-canvas-plugin-host .playbook-end-condition-editor"
 ];
 for (const selector of requiredSelectors) {
   if (!styles.includes(selector)) fail(`styles.css is missing required rule: ${selector}`);
   else pass(`styles.css contains ${selector}`);
+}
+if (!styles.includes("@media (orientation: portrait) and (max-width: 1200px)")) {
+  fail("styles.css is missing the portrait-display layout breakpoint");
+} else if (!styles.includes('.narrative-canvas-plugin-host .app-shell[data-play-panel="open"]')) {
+  fail("styles.css does not preserve the workspace behind the portrait play overlay");
+} else {
+  pass("styles.css contains the portrait-display layout constraints");
+}
+const lightHeadingRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell\.app-shell\[data-theme="light"\] :is\(\.ai-title h2, \.document-header h2\)\s*\{([^}]*)\}/)?.[1] || "";
+if (!lightHeadingRule.includes("color: #17181b") || !lightHeadingRule.includes("-webkit-text-fill-color: #17181b") || !lightHeadingRule.includes("opacity: 1")) {
+  fail("styles.css does not lock embedded light-theme headings to a readable color");
+} else {
+  pass("styles.css locks embedded light-theme headings to a readable color");
+}
+const checkboxAfterRule = styles.match(/\.narrative-canvas-plugin-host input\[type="checkbox"\]::after\s*\{([^}]*)\}/)?.[1] || "";
+if (!checkboxAfterRule.includes("content: none !important") || !checkboxAfterRule.includes("display: none !important")) {
+  fail("styles.css does not suppress the Obsidian checkbox ::after mark");
+} else {
+  pass("styles.css suppresses the Obsidian checkbox ::after mark");
+}
+const checkboxBeforeRule = styles.match(/\.narrative-canvas-plugin-host input\[type="checkbox"\]::before\s*\{([^}]*)\}/)?.[1] || "";
+if (!checkboxBeforeRule.includes("position: static") || !checkboxBeforeRule.includes("inset: auto")) {
+  fail("styles.css does not isolate the custom checkbox checkmark geometry");
+} else {
+  pass("styles.css isolates the custom checkbox checkmark geometry");
 }
 
 if (failures.length) {
