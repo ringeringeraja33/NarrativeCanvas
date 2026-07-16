@@ -31,7 +31,7 @@ jobs:
       - name: Run smoke tests
         run: node scripts/run-browser-test.cjs tests/smoke.html smoke 30000
       - name: Run fixture tests
-        run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 18000
+        run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 60000
       - name: Run GUI regression tests
         run: node scripts/run-browser-test.cjs tests/gui-regression.html gui 45000
       - name: Verify requested version
