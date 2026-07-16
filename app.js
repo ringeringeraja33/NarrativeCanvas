@@ -2158,7 +2158,7 @@ function createInitialRuntimeState() {
   playVisitRecords: [],
   playManualActionRunIds: new Set(),
   playDebugOpen: true,
-  playRefreshFrame: null,
+  playRefreshTimer: null,
   immersiveFullscreen: false,
   nodePanelPointerDown: false,
   floatingInspectorPanel: "",
@@ -2668,9 +2668,9 @@ function destroyNarrativeCanvas() {
     window.cancelAnimationFrame(state.canvasViewportRenderFrame);
     state.canvasViewportRenderFrame = null;
   }
-  if (state.playRefreshFrame) {
-    window.cancelAnimationFrame(state.playRefreshFrame);
-    state.playRefreshFrame = null;
+  if (state.playRefreshTimer) {
+    window.clearTimeout(state.playRefreshTimer);
+    state.playRefreshTimer = null;
   }
   clearAutoSaveTimer();
   clearStatusTimer();
@@ -23412,9 +23412,9 @@ function openPreview() {
 }
 
 function resetPreviewSessionState() {
-  if (state.playRefreshFrame) {
-    window.cancelAnimationFrame(state.playRefreshFrame);
-    state.playRefreshFrame = null;
+  if (state.playRefreshTimer) {
+    window.clearTimeout(state.playRefreshTimer);
+    state.playRefreshTimer = null;
   }
   state.playNodeId = null;
   state.playPath = [];
@@ -23428,12 +23428,15 @@ function resetPreviewSessionState() {
 }
 
 function scheduleOpenPreviewRefresh() {
-  if (!state.playNodeId || !dom.playDialog?.open || state.playRefreshFrame) return;
-  state.playRefreshFrame = window.requestAnimationFrame(() => {
-    state.playRefreshFrame = null;
+  if (!state.playNodeId || !dom.playDialog?.open || state.playRefreshTimer) return;
+  // Debounce with a timer rather than requestAnimationFrame: rAF can be starved under
+  // headless/virtual-time test runs, so the open play preview would intermittently fail to
+  // refresh after a focused-node edit. A short timeout coalesces the same way and fires reliably.
+  state.playRefreshTimer = window.setTimeout(() => {
+    state.playRefreshTimer = null;
     if (!state.playNodeId || !dom.playDialog?.open) return;
     renderPreviewNode(state.playNodeId, { skipVisit: true, skipCanvasFocus: true });
-  });
+  }, 33);
 }
 
 function clonePreviewVariables(variables) {

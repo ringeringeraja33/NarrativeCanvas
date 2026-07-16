@@ -1467,7 +1467,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003cmeta charset=\"utf-8\"\u003e",
   "    \u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\u003e",
   "    \u003ctitle\u003eNarrative Canvas\u003c/title\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260716e-1.2.5\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260716f-1.2.6\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -2003,7 +2003,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=20260716e-1.2.5\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=20260716f-1.2.6\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -4169,7 +4169,7 @@ function installNarrativeCanvasApp() {
     playVisitRecords: [],
     playManualActionRunIds: new Set(),
     playDebugOpen: true,
-    playRefreshFrame: null,
+    playRefreshTimer: null,
     immersiveFullscreen: false,
     nodePanelPointerDown: false,
     floatingInspectorPanel: "",
@@ -4679,9 +4679,9 @@ function installNarrativeCanvasApp() {
       window.cancelAnimationFrame(state.canvasViewportRenderFrame);
       state.canvasViewportRenderFrame = null;
     }
-    if (state.playRefreshFrame) {
-      window.cancelAnimationFrame(state.playRefreshFrame);
-      state.playRefreshFrame = null;
+    if (state.playRefreshTimer) {
+      window.clearTimeout(state.playRefreshTimer);
+      state.playRefreshTimer = null;
     }
     clearAutoSaveTimer();
     clearStatusTimer();
@@ -25369,9 +25369,9 @@ function installNarrativeCanvasApp() {
   }
 
   function resetPreviewSessionState() {
-    if (state.playRefreshFrame) {
-      window.cancelAnimationFrame(state.playRefreshFrame);
-      state.playRefreshFrame = null;
+    if (state.playRefreshTimer) {
+      window.clearTimeout(state.playRefreshTimer);
+      state.playRefreshTimer = null;
     }
     state.playNodeId = null;
     state.playPath = [];
@@ -25385,12 +25385,15 @@ function installNarrativeCanvasApp() {
   }
 
   function scheduleOpenPreviewRefresh() {
-    if (!state.playNodeId || !dom.playDialog?.open || state.playRefreshFrame) return;
-    state.playRefreshFrame = window.requestAnimationFrame(() => {
-      state.playRefreshFrame = null;
+    if (!state.playNodeId || !dom.playDialog?.open || state.playRefreshTimer) return;
+    // Debounce with a timer rather than requestAnimationFrame: rAF can be starved under
+    // headless/virtual-time test runs, so the open play preview would intermittently fail to
+    // refresh after a focused-node edit. A short timeout coalesces the same way and fires reliably.
+    state.playRefreshTimer = window.setTimeout(() => {
+      state.playRefreshTimer = null;
       if (!state.playNodeId || !dom.playDialog?.open) return;
       renderPreviewNode(state.playNodeId, { skipVisit: true, skipCanvasFocus: true });
-    });
+    }, 33);
   }
 
   function clonePreviewVariables(variables) {
