@@ -1,6 +1,6 @@
 # Narrative Canvas
 
-[![Verify plugin artifacts](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml)
+[![Verify plugin artifacts](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg?branch=main)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml?query=branch%3Amain)
 
 Current release: [1.2.7](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.7) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 

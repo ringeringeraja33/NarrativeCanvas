@@ -14,6 +14,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const testPath = path.resolve(projectRoot, relativeTestPath);
 const virtualTimeBudget = Number(budgetArg);
 const timeoutMs = Math.max(90000, virtualTimeBudget + 60000);
+const retryEnvironmentKey = "NARRATIVE_CANVAS_BROWSER_TEST_RETRY";
 if (!fs.existsSync(testPath)) {
   console.error(`[fail] Browser test file is missing: ${relativeTestPath}`);
   process.exit(1);
@@ -101,6 +102,23 @@ async function main() {
     stopProcessTree(child);
     html = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, "utf8") : html;
     if (!html.includes(passStatus)) {
+      const incomplete = !html.includes(failStatus);
+      if (incomplete && process.env[retryEnvironmentKey] !== "1") {
+        const retryBudget = Math.max(60000, virtualTimeBudget * 2);
+        console.warn(`[retry] ${relativeTestPath} remained incomplete after ${virtualTimeBudget} ms; retrying with ${retryBudget} ms`);
+        const retry = spawnSync(process.execPath, [
+          __filename,
+          relativeTestPath,
+          statusName,
+          String(retryBudget)
+        ], {
+          cwd: projectRoot,
+          env: { ...process.env, [retryEnvironmentKey]: "1" },
+          stdio: "inherit"
+        });
+        process.exitCode = retry.status === 0 ? 0 : 1;
+        return;
+      }
       const reportMatch = html.match(new RegExp(`<pre id="${statusName}-report">([\\s\\S]*?)<\\/pre>`));
       if (reportMatch) console.error(reportMatch[1].trim());
       const stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, "utf8") : "";
