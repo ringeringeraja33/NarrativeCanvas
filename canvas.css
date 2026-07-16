@@ -2430,15 +2430,38 @@ button {
 }
 
 .node-choice-index {
+  appearance: none;
   display: grid;
   place-items: center;
   width: 18px;
   height: 18px;
+  margin: 0;
+  padding: 0;
   border: 1px solid var(--node-header-border);
   border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.node-choice-index:hover:not(:disabled),
+.node-choice-index:focus-visible,
+.node-choice-index.graph-hover-choice-option {
+  border-color: var(--accent-purple);
+  background: color-mix(in srgb, var(--accent-purple) 18%, transparent);
+  color: var(--text-normal);
+  outline: none;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-purple) 62%, transparent);
+}
+
+.node-choice-index:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .node .node-choice-label-input {
@@ -2460,6 +2483,14 @@ button {
 .node .node-choice-label-input:hover {
   border-color: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
   background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);
+}
+
+.node .node-choice-label-input.graph-hover-choice-option {
+  border-color: var(--accent-purple);
+  background: color-mix(in srgb, var(--accent-purple) 12%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-purple) 34%, transparent),
+    0 0 10px color-mix(in srgb, var(--accent-purple) 38%, transparent);
 }
 
 .node .node-choice-label-input:focus,

@@ -4,7 +4,9 @@
 
 English version: [README.md](README.md)
 
-当前版本：[1.2.7](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.7) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+当前版本：[1.2.8](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.8) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+
+Obsidian 社区插件：[Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
 <video src="https://github.com/ringeringeraja33/NarrativeCanvas/raw/main/assets/videos/runtime.mp4" controls width="800" muted></video>
 
