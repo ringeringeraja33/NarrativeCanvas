@@ -2852,27 +2852,34 @@ button {
 }
 
 .canvas-radial-menu .radial-button {
-  position: absolute;
-  inset: 0;
-  width: 180px;
-  height: 180px;
-  padding: 0;
-  border: 1px solid var(--background-modifier-border-hover);
-  border-radius: 50%;
-  background: var(--background-secondary-alt);
-  color: var(--text-normal);
   cursor: pointer;
-  animation: radial-pop 120ms ease-out;
 }
 
-.canvas-radial-menu .radial-button:hover {
-  border-color: var(--interactive-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary-alt));
+.canvas-radial-menu .radial-wedge {
+  fill: var(--background-secondary-alt);
+  stroke: var(--background-modifier-border-hover);
+  stroke-width: 1;
+  transition: fill 120ms ease, stroke 120ms ease;
 }
 
-.canvas-radial-menu .radial-button:disabled {
+.canvas-radial-menu .radial-button:hover .radial-wedge {
+  fill: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary-alt));
+  stroke: var(--interactive-accent);
+}
+
+.canvas-radial-menu .radial-button:focus-visible {
+  outline: none;
+}
+
+.canvas-radial-menu .radial-button:focus-visible .radial-wedge {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+}
+
+.canvas-radial-menu .radial-button.is-disabled {
   cursor: default;
   opacity: 0.42;
+  pointer-events: none;
 }
 
 .canvas-radial-menu .radial-arc {
@@ -2883,67 +2890,23 @@ button {
   height: 180px;
   overflow: visible;
   filter: drop-shadow(0 9px 18px rgba(0, 0, 0, 0.34));
+  animation: radial-pop 120ms ease-out;
 }
 
-/* Right-half ring around the cursor: four 45-degree segments running from
-   12 o'clock through 3 o'clock down to 6 o'clock. */
-.canvas-radial-menu .radial-segment-1 {
-  clip-path: polygon(50% 0, 85.4% 14.6%, 65.7% 34.3%, 50% 27.8%);
-}
-
-.canvas-radial-menu .radial-segment-2 {
-  clip-path: polygon(85.4% 14.6%, 100% 50%, 72.2% 50%, 65.7% 34.3%);
-}
-
-.canvas-radial-menu .radial-segment-3 {
-  clip-path: polygon(100% 50%, 85.4% 85.4%, 65.7% 65.7%, 72.2% 50%);
-}
-
-.canvas-radial-menu .radial-segment-4 {
-  clip-path: polygon(85.4% 85.4%, 50% 100%, 50% 72.2%, 65.7% 65.7%);
-}
-
-.canvas-radial-menu .radial-content {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  gap: 2px;
-  width: 42px;
-  transform: translate(-50%, -50%);
+/* Right-half ring around the cursor: four straight-edged wedges (SVG polygons)
+   running from 12 o'clock through 3 o'clock down to 6 o'clock. */
+.canvas-radial-menu .radial-icon {
+  fill: var(--text-normal);
+  font-size: 15px;
   pointer-events: none;
 }
 
-.canvas-radial-menu .radial-segment-1 .radial-content {
-  left: 64%;
-  top: 17%;
-}
-
-.canvas-radial-menu .radial-segment-2 .radial-content {
-  left: 83%;
-  top: 36%;
-}
-
-.canvas-radial-menu .radial-segment-3 .radial-content {
-  left: 83%;
-  top: 64%;
-}
-
-.canvas-radial-menu .radial-segment-4 .radial-content {
-  left: 64%;
-  top: 83%;
-}
-
-.canvas-radial-menu .radial-icon {
-  font-size: 15px;
-  line-height: 1;
-}
-
 .canvas-radial-menu .radial-label {
-  color: var(--text-muted);
+  fill: var(--text-muted);
   font-size: 9px;
   font-weight: 650;
-  line-height: 1;
   letter-spacing: 0.02em;
+  pointer-events: none;
 }
 
 @keyframes radial-pop {
@@ -3292,64 +3255,44 @@ select {
   padding: 4px 8px;
 }
 
-input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
+/* Custom checkbox WITHOUT fighting the host. The native <input> stays for interaction and
+   accessibility but is laid transparently over the whole field (see .nc-checkbox-field); the visible
+   box and checkmark live on a sibling <span class="nc-checkbox-box"> that Obsidian never targets.
+   Because the host's checkbox styles land on the invisible input, nothing needs to override them —
+   so there are no priority overrides or geometry resets fighting the host CSS. */
+.nc-checkbox-box {
   box-sizing: border-box;
+  flex: 0 0 auto;
   display: inline-grid;
   place-content: center;
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  min-width: 16px;
-  min-height: 16px;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--background-modifier-border-hover);
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--text-muted);
   border-radius: 3px;
   background: var(--background-control);
-  background-image: none !important;
-  box-shadow: none;
-  cursor: pointer;
 }
 
-/* Draw the check with ::before and suppress the host's ::after checkmark. */
-input[type="checkbox"]::before {
+.nc-checkbox-box::before {
   content: "";
-  display: block;
-  position: static;
-  inset: auto;
   box-sizing: border-box;
   width: 5px;
   height: 9px;
-  margin: 0;
   border-right: 2px solid var(--text-on-accent);
   border-bottom: 2px solid var(--text-on-accent);
-  background: none;
-  box-shadow: none;
-  clip-path: none;
-  -webkit-mask: none;
-  mask: none;
-  opacity: 0;
   transform: translateY(-1px) rotate(45deg);
-  transform-origin: center;
+  opacity: 0;
 }
 
-input[type="checkbox"]::after {
-  content: none !important;
-  display: none !important;
-}
-
-input[type="checkbox"]:checked {
+.nc-checkbox-field input[type="checkbox"]:checked + .nc-checkbox-box {
   border-color: var(--interactive-accent);
   background: var(--interactive-accent);
 }
 
-input[type="checkbox"]:checked::before {
+.nc-checkbox-field input[type="checkbox"]:checked + .nc-checkbox-box::before {
   opacity: 1;
 }
 
-input[type="checkbox"]:focus-visible {
+.nc-checkbox-field input[type="checkbox"]:focus-visible + .nc-checkbox-box {
   outline: 2px solid color-mix(in srgb, var(--focus-accent) 70%, transparent);
   outline-offset: 2px;
 }
@@ -6607,7 +6550,10 @@ select:focus {
 
 .type-dialog-settings {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* Reserve a floor for the visibility column so its longest label (e.g. the English
+     "Hide frame rows from Events Sheet") stays on one line, while the appearance column keeps
+     a consistent, compact width in every language instead of ballooning when labels are short. */
+  grid-template-columns: minmax(0, 1fr) minmax(288px, auto);
   align-items: stretch;
   gap: 14px;
 }
@@ -6631,7 +6577,7 @@ select:focus {
 }
 
 .type-dialog {
-  width: min(540px, calc(100vw - 32px));
+  width: min(580px, calc(100vw - 32px));
 }
 
 .type-shell {
@@ -6672,7 +6618,7 @@ select:focus {
   background: var(--background-control);
   color: var(--text-normal);
   font-size: 15px;
-  text-align: center;
+  text-align: start;
 }
 
 .type-dialog-inline-reset {
@@ -6718,18 +6664,33 @@ select:focus {
   border-radius: 2px;
 }
 
-.type-dialog-opacity-field input[type="range"] {
+.type-dialog-opacity-field .nc-range-control {
+  --range-ratio: 1;
+  --range-track-height: 4px;
+  --range-thumb-size: 12px;
+  position: relative;
   flex: 1 1 0;
-  width: auto;
   min-width: 0;
-  height: 16px;
+  height: 18px;
+}
+
+.type-dialog-opacity-field input[type="range"] {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
-  line-height: 1;
-  vertical-align: middle;
+  border: 0;
+  border-radius: 0;
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
+  box-shadow: none;
+  opacity: 0;
   cursor: pointer;
 }
 
@@ -6743,53 +6704,69 @@ select:focus {
 }
 
 .type-dialog-opacity-field input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--background-modifier-border-hover);
+  height: 100%;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .type-dialog-opacity-field input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  box-sizing: border-box;
-  width: 12px;
-  height: 12px;
-  margin-top: -4px;
+  width: var(--range-thumb-size);
+  height: var(--range-thumb-size);
+  margin-top: 0;
   border: none;
-  border-radius: 999px;
-  background: var(--text-muted);
-  cursor: pointer;
-}
-
-.type-dialog-opacity-field input[type="range"]:hover::-webkit-slider-thumb {
-  background: var(--text-normal);
-}
-
-.type-dialog-opacity-field input[type="range"]:focus-visible::-webkit-slider-thumb {
-  background: var(--interactive-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+  background: transparent;
+  box-shadow: none;
 }
 
 .type-dialog-opacity-field input[type="range"]::-moz-range-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--background-modifier-border-hover);
+  height: 100%;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .type-dialog-opacity-field input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: var(--range-thumb-size);
+  height: var(--range-thumb-size);
   border: none;
-  border-radius: 999px;
-  background: var(--text-muted);
-  cursor: pointer;
+  background: transparent;
+  box-shadow: none;
 }
 
-.type-dialog-opacity-field input[type="range"]:hover::-moz-range-thumb {
+.type-dialog-opacity-field .nc-range-track {
+  position: absolute;
+  inset: 50% 0 auto;
+  height: var(--range-track-height);
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover);
+  box-shadow: none;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.type-dialog-opacity-field .nc-range-thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--range-ratio) * (100% - var(--range-thumb-size)));
+  box-sizing: border-box;
+  width: var(--range-thumb-size);
+  height: var(--range-thumb-size);
+  border: 0;
+  border-radius: 999px;
+  background: var(--text-muted);
+  box-shadow: none;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.type-dialog-opacity-field input[type="range"]:hover + .nc-range-track .nc-range-thumb {
   background: var(--text-normal);
 }
 
-.type-dialog-opacity-field input[type="range"]:focus-visible::-moz-range-thumb {
+.type-dialog-opacity-field input[type="range"]:focus-visible + .nc-range-track .nc-range-thumb {
   background: var(--interactive-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
 }
@@ -6874,6 +6851,7 @@ select:focus {
 }
 
 .nc-checkbox-field {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -6889,19 +6867,30 @@ select:focus {
   line-height: 1.35;
 }
 
+/* Native input overlays the whole field, invisible but focusable/clickable; the label forwards
+   clicks and the visible control is .nc-checkbox-box. */
 .nc-checkbox-field input[type="checkbox"] {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
-  min-height: 18px;
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
-  border: 2px solid var(--text-muted);
-  border-radius: 3px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  opacity: 0;
+  cursor: pointer;
 }
 
-.nc-checkbox-field span {
+.nc-checkbox-text {
   min-width: 0;
 }
 
@@ -7613,7 +7602,6 @@ select:focus {
     padding: 6px;
     overflow-x: auto;
     overflow-y: hidden;
-    scrollbar-width: thin;
   }
 
   .canvas-workspace-tabs .toolbar-group {

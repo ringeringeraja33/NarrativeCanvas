@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Narrative Canvas</title>
-    <link rel="stylesheet" href="./canvas.css?v=20260716g-1.2.6">
+    <link rel="stylesheet" href="./canvas.css?v=20260716m-1.2.7">
   </head>
   <body>
     <div class="app-shell">
@@ -507,7 +507,12 @@
               </label>
               <label id="nodeTypeOpacityField" class="type-dialog-field-row type-dialog-opacity-field" hidden>
                 <span class="type-dialog-setting-label">Card opacity</span>
-                <input id="nodeTypeOpacityInput" type="range" min="0" max="100" step="5">
+                <span class="nc-range-control">
+                  <input id="nodeTypeOpacityInput" type="range" min="0" max="100" step="5">
+                  <span class="nc-range-track" aria-hidden="true">
+                    <span class="nc-range-thumb"></span>
+                  </span>
+                </span>
                 <span class="type-dialog-opacity-value" data-node-type-opacity-value>100%</span>
               </label>
             </div>
@@ -517,11 +522,13 @@
             <div class="type-dialog-visibility">
               <label class="nc-checkbox-field">
                 <input id="nodeTypeHiddenInput" type="checkbox">
-                <span>Hide from library</span>
+                <span class="nc-checkbox-box" aria-hidden="true"></span>
+                <span class="nc-checkbox-text">Hide from library</span>
               </label>
               <label class="nc-checkbox-field">
                 <input id="nodeTypeEventHiddenInput" type="checkbox">
-                <span>Hide frame rows from Events Sheet</span>
+                <span class="nc-checkbox-box" aria-hidden="true"></span>
+                <span class="nc-checkbox-text">Hide frame rows from Events Sheet</span>
               </label>
             </div>
           </section>
@@ -540,6 +547,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260716g-1.2.6"></script>
+    <script src="./app.js?v=20260716m-1.2.7"></script>
   </body>
 </html>

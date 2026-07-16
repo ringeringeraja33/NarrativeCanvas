@@ -865,9 +865,22 @@
         const typeHiddenInput = doc.querySelector("#nodeTypeHiddenInput");
         assert(`${label}: appearance and visibility are separate sibling groups`, typeAppearanceGroup?.parentElement === typeSettings && typeVisibilityGroup?.parentElement === typeSettings && !typeAppearanceGroup.contains(typeVisibilityGroup));
         assert(`${label}: node type color picker stays compact`, typeColorInput?.getBoundingClientRect().width <= 120);
+        const typeOpacityInput = doc.querySelector("#nodeTypeOpacityInput");
+        const typeOpacityControl = typeOpacityInput?.closest(".nc-range-control");
+        const typeOpacityTrack = typeOpacityControl?.querySelector(".nc-range-track");
+        const typeOpacityThumb = typeOpacityControl?.querySelector(".nc-range-thumb");
+        const opacityInputStyle = typeOpacityInput ? win.getComputedStyle(typeOpacityInput) : null;
+        const opacityTrackRect = typeOpacityTrack?.getBoundingClientRect();
+        const opacityThumbRect = typeOpacityThumb?.getBoundingClientRect();
+        const opacityCenterDelta = opacityTrackRect && opacityThumbRect
+          ? Math.abs((opacityTrackRect.top + opacityTrackRect.height / 2) - (opacityThumbRect.top + opacityThumbRect.height / 2))
+          : Infinity;
+        assert(`${label}: Frame opacity uses an isolated custom range visual`, opacityInputStyle?.opacity === "0" && opacityInputStyle?.position === "absolute" && Boolean(typeOpacityTrack) && Boolean(typeOpacityThumb));
+        assert(`${label}: Frame opacity thumb stays centered on its track`, opacityCenterDelta <= 0.5);
         typeHiddenInput.checked = true;
-        const typeCheckboxStyle = win.getComputedStyle(typeHiddenInput);
-        const typeCheckmarkStyle = win.getComputedStyle(typeHiddenInput, "::before");
+        const typeCheckboxBox = typeHiddenInput.parentElement.querySelector(".nc-checkbox-box");
+        const typeCheckboxStyle = win.getComputedStyle(typeCheckboxBox);
+        const typeCheckmarkStyle = win.getComputedStyle(typeCheckboxBox, "::before");
         assert(`${label}: checked node type option uses a centered checkmark`, typeCheckboxStyle.width === "18px" && typeCheckboxStyle.height === "18px" && typeCheckmarkStyle.opacity === "1" && Number.parseFloat(typeCheckmarkStyle.height) >= 8);
         doc.querySelector("#nodeTypeDialog")?.close("cancel");
         const firstChoiceFollowup = doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button");

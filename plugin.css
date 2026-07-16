@@ -95,18 +95,18 @@
 }
 
 /* Keep Beta badges consistent; Obsidian's --text-accent can differ by context. */
-.narrative-canvas-plugin-host .project-feature-badge,
-.narrative-canvas-plugin-host .ai-beta-badge {
-  color: #7f6df2 !important;
-  border-color: color-mix(in srgb, #7f6df2 25%, transparent) !important;
-  background: color-mix(in srgb, #7f6df2 18%, transparent) !important;
+.narrative-canvas-plugin-host .app-shell .project-feature-badge,
+.narrative-canvas-plugin-host .app-shell .ai-beta-badge {
+  color: #7f6df2;
+  border-color: color-mix(in srgb, #7f6df2 25%, transparent);
+  background: color-mix(in srgb, #7f6df2 18%, transparent);
 }
 
 .narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] .project-feature-badge,
 .narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] .ai-beta-badge {
-  color: #7f6df2 !important;
-  border-color: color-mix(in srgb, #7f6df2 25%, transparent) !important;
-  background: color-mix(in srgb, #7f6df2 18%, transparent) !important;
+  color: #7f6df2;
+  border-color: color-mix(in srgb, #7f6df2 25%, transparent);
+  background: color-mix(in srgb, #7f6df2 18%, transparent);
 }
 
 /* Isolate node-type dialog native controls from Obsidian theming. */
@@ -129,55 +129,38 @@
   border-radius: 2px;
 }
 
-.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 18px;
-  padding: 0;
-  line-height: 1;
-  vertical-align: middle;
-  background: transparent;
-}
-
-.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--background-modifier-border-hover);
-}
-
-.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  box-sizing: border-box;
-  width: 12px;
-  height: 12px;
-  margin-top: -4px;
-  border: none;
-  border-radius: 999px;
-  background: var(--text-muted);
-}
-
-.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-moz-range-track {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--background-modifier-border-hover);
-}
-
-.narrative-canvas-plugin-host .app-shell .type-dialog-opacity-field input[type="range"]::-moz-range-thumb {
-  box-sizing: border-box;
-  width: 12px;
-  height: 12px;
-  border: none;
-  border-radius: 999px;
-  background: var(--text-muted);
-}
-
 .narrative-canvas-plugin-host .app-shell .nc-checkbox-field input[type="checkbox"] {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--text-muted);
-  border-radius: 3px;
-  background: var(--background-control);
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  opacity: 0;
+}
+
+.narrative-canvas-plugin-host .app-shell .nc-checkbox-field input[type="checkbox"]::before,
+.narrative-canvas-plugin-host .app-shell .nc-checkbox-field input[type="checkbox"]::after {
+  content: none;
+  position: static;
+  inset: auto;
+  display: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
 }

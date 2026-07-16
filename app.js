@@ -2429,6 +2429,7 @@ function bindDom(scopeOverride = null) {
   dom.nodeTypeIconInput = dom.scope.querySelector("#nodeTypeIconInput");
   dom.nodeTypeColorInput = dom.scope.querySelector("#nodeTypeColorInput");
   dom.nodeTypeOpacityInput = dom.scope.querySelector("#nodeTypeOpacityInput");
+  dom.nodeTypeOpacityControl = dom.nodeTypeOpacityInput?.closest(".nc-range-control");
   dom.nodeTypeOpacityValue = dom.scope.querySelector("[data-node-type-opacity-value]");
   dom.nodeTypeOpacityField = dom.scope.querySelector("#nodeTypeOpacityField");
   dom.nodeTypeHiddenInput = dom.scope.querySelector("#nodeTypeHiddenInput");
@@ -2560,6 +2561,7 @@ function bindEvents() {
   window.addEventListener("pointerup", () => { state.nodePanelPointerDown = false; }, { capture: true, signal });
   window.addEventListener("pointercancel", () => { state.nodePanelPointerDown = false; }, { capture: true, signal });
   dom.canvasRadialMenu?.addEventListener("click", handleCanvasRadialMenuClick, { signal });
+  dom.canvasRadialMenu?.addEventListener("keydown", handleCanvasRadialMenuKeydown, { signal });
   dom.viewport.addEventListener("scroll", handleViewportScroll, { signal });
   dom.viewport.addEventListener("pointerdown", handleViewportPointerDown, { signal });
   dom.viewport.addEventListener("pointermove", handleViewportPointerMove, { signal });
@@ -4043,8 +4045,8 @@ function localizeStaticDialogs() {
     ["#nodeTypeDialog .type-dialog-color-field .type-dialog-setting-label", "Color"],
     ["#nodeTypeDialog .type-dialog-opacity-field .type-dialog-setting-label", "Card opacity"],
     ["#nodeTypeVisibilityLabel", "Visibility"],
-    ["#nodeTypeHiddenInput + span", "Hide from library"],
-    ["#nodeTypeEventHiddenInput + span", "Hide frame rows from Events Sheet"],
+    ["#nodeTypeHiddenInput ~ .nc-checkbox-text", "Hide from library"],
+    ["#nodeTypeEventHiddenInput ~ .nc-checkbox-text", "Hide frame rows from Events Sheet"],
     ["#nodeTypeDialog [value='confirm']", "Save"],
     ["#nodeRequiredDialog .pane-kicker", "Node Inspector"],
     ["#nodeRequiredDialog p", "Select a node first to open the Node inspector."]
@@ -12382,20 +12384,32 @@ function showCanvasRadialMenu(clientX, clientY) {
   const spawnAttrs = `data-spawn-x="${escapeAttr(String(spawn.x))}" data-spawn-y="${escapeAttr(String(spawn.y))}"`;
   dom.canvasRadialMenu.setAttribute("aria-label", t("Canvas quick menu"));
   dom.canvasRadialMenu.innerHTML = `
-    <div class="radial-arc" role="group" aria-label="${escapeAttr(t("Canvas quick menu"))}">
-      <button class="radial-button radial-segment-1" type="button" data-radial-toggle="add" aria-haspopup="menu" aria-expanded="false" title="${escapeAttr(t("Add"))}">
-        <span class="radial-content"><span class="radial-icon">＋</span><span class="radial-label">${t("Add")}</span></span>
-      </button>
-      <button class="radial-button radial-segment-2" type="button" ${frameType ? `data-action="add-node" data-type="${escapeAttr(frameType)}" ${spawnAttrs}` : "disabled"} title="${escapeAttr(t("Frame"))}">
-        <span class="radial-content"><span class="radial-icon">▣</span><span class="radial-label">${t("Frame")}</span></span>
-      </button>
-      <button class="radial-button radial-segment-3" type="button" data-action="play" title="${escapeAttr(t("Play"))}">
-        <span class="radial-content"><span class="radial-icon">▶</span><span class="radial-label">${t("Play")}</span></span>
-      </button>
-      <button class="radial-button radial-segment-4" type="button" data-action="center-view" title="${escapeAttr(t("Center"))}">
-        <span class="radial-content"><span class="radial-icon">⌖</span><span class="radial-label">${t("Center")}</span></span>
-      </button>
-    </div>
+    <svg class="radial-arc" viewBox="0 0 180 180" role="group" aria-label="${escapeAttr(t("Canvas quick menu"))}">
+      <g class="radial-button radial-segment-1" data-radial-toggle="add" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" aria-label="${escapeAttr(t("Add"))}">
+        <title>${escapeHtml(t("Add"))}</title>
+        <polygon class="radial-wedge" points="90,0 153.72,26.28 118.26,61.74 90,50.04"></polygon>
+        <text class="radial-icon" x="115.2" y="27.6" text-anchor="middle" dominant-baseline="middle">＋</text>
+        <text class="radial-label" x="115.2" y="39.6" text-anchor="middle" dominant-baseline="middle">${escapeHtml(t("Add"))}</text>
+      </g>
+      <g class="radial-button radial-segment-2${frameType ? "" : " is-disabled"}" ${frameType ? `data-action="add-node" data-type="${escapeAttr(frameType)}" ${spawnAttrs} role="button" tabindex="0"` : `aria-disabled="true"`} aria-label="${escapeAttr(t("Frame"))}">
+        <title>${escapeHtml(t("Frame"))}</title>
+        <polygon class="radial-wedge" points="153.72,26.28 180,90 129.96,90 118.26,61.74"></polygon>
+        <text class="radial-icon" x="149.4" y="61.8" text-anchor="middle" dominant-baseline="middle">▣</text>
+        <text class="radial-label" x="149.4" y="73.8" text-anchor="middle" dominant-baseline="middle">${escapeHtml(t("Frame"))}</text>
+      </g>
+      <g class="radial-button radial-segment-3" data-action="play" role="button" tabindex="0" aria-label="${escapeAttr(t("Play"))}">
+        <title>${escapeHtml(t("Play"))}</title>
+        <polygon class="radial-wedge" points="180,90 153.72,153.72 118.26,118.26 129.96,90"></polygon>
+        <text class="radial-icon" x="149.4" y="112.2" text-anchor="middle" dominant-baseline="middle">▶</text>
+        <text class="radial-label" x="149.4" y="124.2" text-anchor="middle" dominant-baseline="middle">${escapeHtml(t("Play"))}</text>
+      </g>
+      <g class="radial-button radial-segment-4" data-action="center-view" role="button" tabindex="0" aria-label="${escapeAttr(t("Center"))}">
+        <title>${escapeHtml(t("Center"))}</title>
+        <polygon class="radial-wedge" points="153.72,153.72 90,180 90,129.96 118.26,118.26"></polygon>
+        <text class="radial-icon" x="115.2" y="146.4" text-anchor="middle" dominant-baseline="middle">⌖</text>
+        <text class="radial-label" x="115.2" y="158.4" text-anchor="middle" dominant-baseline="middle">${escapeHtml(t("Center"))}</text>
+      </g>
+    </svg>
     <button class="radial-hub" type="button" data-radial-close="true" title="${escapeAttr(t("Close"))}" aria-label="${escapeAttr(t("Close"))}">×</button>
     <div class="radial-add-list" role="menu" aria-label="${escapeAttr(t("Node Library"))}" hidden>${renderCanvasRadialAddList(spawn)}</div>
   `;
@@ -12414,6 +12428,15 @@ function positionCanvasRadialMenu(clientX, clientY) {
   const maxTop = Math.max(margin, containerRect.height - margin);
   dom.canvasRadialMenu.style.left = `${clamp(pointerX, margin, maxLeft)}px`;
   dom.canvasRadialMenu.style.top = `${clamp(pointerY, margin, maxTop)}px`;
+}
+
+function handleCanvasRadialMenuKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+  if (!event.target.closest?.("[data-action], [data-radial-toggle], [data-radial-close]")) return;
+  // SVG <g role="button"> segments don't fire a native click on Enter/Space; route the key to the
+  // same handler so the radial menu keeps full keyboard support after the clip-path→SVG rewrite.
+  event.preventDefault();
+  handleCanvasRadialMenuClick(event);
 }
 
 function handleCanvasRadialMenuClick(event) {
@@ -17338,7 +17361,12 @@ function applyNodeTypeDialog() {
 
 function updateNodeTypeOpacityReadout() {
   if (!dom.nodeTypeOpacityValue || !dom.nodeTypeOpacityInput) return;
-  dom.nodeTypeOpacityValue.textContent = `${Number(dom.nodeTypeOpacityInput.value) || 0}%`;
+  const value = Number(dom.nodeTypeOpacityInput.value) || 0;
+  const min = Number(dom.nodeTypeOpacityInput.min) || 0;
+  const max = Number(dom.nodeTypeOpacityInput.max) || 100;
+  const ratio = max > min ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
+  dom.nodeTypeOpacityValue.textContent = `${value}%`;
+  dom.nodeTypeOpacityControl?.style.setProperty("--range-ratio", String(ratio));
 }
 
 function resetNodeTypeIconInput() {

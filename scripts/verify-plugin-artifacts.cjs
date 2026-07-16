@@ -229,14 +229,16 @@ if (/\.narrative-canvas-plugin-host\s*\/\*/.test(styles)) {
 const requiredSelectors = [
   ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"]",
   ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"] :is(.ai-title h2, .document-header h2)",
-  ".narrative-canvas-plugin-host input[type=\"checkbox\"]::before",
-  ".narrative-canvas-plugin-host input[type=\"checkbox\"]::after",
+  ".narrative-canvas-plugin-host .nc-checkbox-box",
+  ".narrative-canvas-plugin-host .nc-checkbox-field input[type=\"checkbox\"]:checked + .nc-checkbox-box",
   ".narrative-canvas-plugin-host .node.graph-hover-node",
   ".narrative-canvas-plugin-host .link-path.graph-hover-link",
   ".narrative-canvas-plugin-host .node .node-dialog-speaker-input",
   ".narrative-canvas-plugin-host .node .node-choice-label-input",
   ".narrative-canvas-plugin-host .workspace-toc-button > svg",
-  ".narrative-canvas-plugin-host .playbook-end-condition-editor"
+  ".narrative-canvas-plugin-host .playbook-end-condition-editor",
+  ".narrative-canvas-plugin-host .type-dialog-opacity-field .nc-range-track",
+  ".narrative-canvas-plugin-host .type-dialog-opacity-field .nc-range-thumb"
 ];
 for (const selector of requiredSelectors) {
   if (!styles.includes(selector)) fail(`styles.css is missing required rule: ${selector}`);
@@ -255,17 +257,58 @@ if (!lightHeadingRule.includes("color: #17181b") || !lightHeadingRule.includes("
 } else {
   pass("styles.css locks embedded light-theme headings to a readable color");
 }
-const checkboxAfterRule = styles.match(/\.narrative-canvas-plugin-host input\[type="checkbox"\]::after\s*\{([^}]*)\}/)?.[1] || "";
-if (!checkboxAfterRule.includes("content: none !important") || !checkboxAfterRule.includes("display: none !important")) {
-  fail("styles.css does not suppress the Obsidian checkbox ::after mark");
+// The custom checkbox must NOT fight the host: the native <input> is neutralized (laid transparent
+// over the field) rather than overriding Obsidian's checkbox mark with !important. Guard that the
+// input is invisible and that the sibling .nc-checkbox-box carries the checkmark.
+const checkboxInputRule = styles.match(/\.narrative-canvas-plugin-host \.nc-checkbox-field input\[type="checkbox"\]\s*\{([^}]*)\}/)?.[1] || "";
+const checkboxInputResets = ["opacity: 0", "position: absolute", "appearance: none", "background: transparent", "box-shadow: none", "transform: none"];
+if (checkboxInputResets.some((reset) => !checkboxInputRule.includes(reset))) {
+  fail("styles.css does not fully neutralize the native checkbox input");
 } else {
-  pass("styles.css suppresses the Obsidian checkbox ::after mark");
+  pass("styles.css fully neutralizes the native checkbox input");
 }
-const checkboxBeforeRule = styles.match(/\.narrative-canvas-plugin-host input\[type="checkbox"\]::before\s*\{([^}]*)\}/)?.[1] || "";
-if (!checkboxBeforeRule.includes("position: static") || !checkboxBeforeRule.includes("inset: auto")) {
-  fail("styles.css does not isolate the custom checkbox checkmark geometry");
+if (styles.includes("input[type=\"checkbox\"]") && /input\[type="checkbox"\][^{]*\{[^}]*!important/.test(styles)) {
+  fail("styles.css still uses !important on a checkbox rule");
 } else {
-  pass("styles.css isolates the custom checkbox checkmark geometry");
+  pass("styles.css keeps checkbox rules free of !important");
+}
+const checkboxMarkRule = styles.match(/input\[type="checkbox"\]:checked \+ \.nc-checkbox-box::before\s*\{([^}]*)\}/)?.[1] || "";
+if (!checkboxMarkRule.includes("opacity: 1")) {
+  fail("styles.css does not reveal the custom checkbox checkmark when checked");
+} else {
+  pass("styles.css reveals the custom checkbox checkmark when checked");
+}
+const checkboxPseudoRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell \.nc-checkbox-field input\[type="checkbox"\]::before,\s*\.narrative-canvas-plugin-host \.app-shell \.nc-checkbox-field input\[type="checkbox"\]::after\s*\{([^}]*)\}/)?.[1] || "";
+const checkboxPseudoResets = ["content: none", "display: none", "position: static", "background: transparent", "box-shadow: none", "transform: none"];
+if (checkboxPseudoResets.some((reset) => !checkboxPseudoRule.includes(reset))) {
+  fail("styles.css does not neutralize the host checkbox pseudo-elements");
+} else {
+  pass("styles.css neutralizes the host checkbox pseudo-elements");
+}
+const rangeInputRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field input\[type="range"\]\s*\{([^}]*)\}/)?.[1] || "";
+if (!rangeInputRule.includes("opacity: 0") || !rangeInputRule.includes("position: absolute") || !rangeInputRule.includes("appearance: none") || !rangeInputRule.includes("background: transparent") || !rangeInputRule.includes("box-shadow: none")) {
+  fail("styles.css does not fully neutralize the native range control");
+} else {
+  pass("styles.css fully neutralizes the native range control");
+}
+const rangeWebkitTrackRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field input\[type="range"\]::\-webkit-slider-runnable-track\s*\{([^}]*)\}/)?.[1] || "";
+const rangeWebkitThumbRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field input\[type="range"\]::\-webkit-slider-thumb\s*\{([^}]*)\}/)?.[1] || "";
+const rangeMozTrackRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field input\[type="range"\]::\-moz-range-track\s*\{([^}]*)\}/)?.[1] || "";
+const rangeMozThumbRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field input\[type="range"\]::\-moz-range-thumb\s*\{([^}]*)\}/)?.[1] || "";
+const nativeRangeParts = [rangeWebkitTrackRule, rangeWebkitThumbRule, rangeMozTrackRule, rangeMozThumbRule];
+if (nativeRangeParts.some((rule) => !rule.includes("background: transparent") || !rule.includes("box-shadow: none") || !rule.includes("border: none"))) {
+  fail("styles.css does not neutralize every native range track and thumb pseudo-element");
+} else {
+  pass("styles.css neutralizes every native range track and thumb pseudo-element");
+}
+const rangeTrackRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field \.nc-range-track\s*\{([^}]*)\}/)?.[1] || "";
+const rangeThumbRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field \.nc-range-thumb\s*\{([^}]*)\}/)?.[1] || "";
+const rangeTrackCentered = rangeTrackRule.includes("inset: 50%") && rangeTrackRule.includes("translateY(-50%)");
+const rangeThumbCentered = rangeThumbRule.includes("top: 50%") && rangeThumbRule.includes("translateY(-50%)");
+if (!rangeTrackCentered || !rangeThumbCentered) {
+  fail("styles.css does not center the custom range track and thumb on the same axis");
+} else {
+  pass("styles.css centers the custom range track and thumb on the same axis");
 }
 
 if (failures.length) {

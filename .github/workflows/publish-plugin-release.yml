@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: plugin-release-${{ inputs.tag }}
@@ -38,6 +40,13 @@ jobs:
         run: |
           MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
           test "$RELEASE_TAG" = "$MANIFEST_VERSION"
+      - name: Attest build provenance for release assets
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
       - name: Publish verified root artifacts
         env:
           GH_TOKEN: ${{ github.token }}
