@@ -1,4 +1,4 @@
-# Narrative Canvas 1.2.4
+# Narrative Canvas 1.2.5
 
 What's different since 1.2.3, from what you'll actually see.
 

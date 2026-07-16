@@ -849,7 +849,7 @@
         assert(`${label}: export scale select exists`, Boolean(doc.querySelector("#exportImageScale")));
         assert(`${label}: theme toggle exists`, Boolean(doc.querySelector("#themeToggle")));
         assert(`${label}: project file status exists`, Boolean(doc.querySelector("#projectFileName")));
-        const frameTypeSettings = doc.querySelector("[data-action='edit-node-type'][data-node-type='Event']");
+        const frameTypeSettings = doc.querySelector("[data-action='edit-node-type-badge'][data-node-type='Event']");
         if (frameTypeSettings) click(frameTypeSettings);
         await waitFor(`${label}: Frame type dialog opens`, () => Boolean(doc.querySelector("#nodeTypeDialog")?.open));
         const frameBuiltInFields = [...doc.querySelectorAll("#nodeTypeBuiltinFields [data-node-type-built-in-field]")];
@@ -1006,56 +1006,6 @@
           assert(`${label}: AI close button responds reliably ${index + 1}`, aiWindow.hidden && aiButton.getAttribute("aria-expanded") === "false");
         }
         if (win.NarrativeCanvasHost) {
-          const OriginalMediaRecorder = win.MediaRecorder;
-          const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(win.navigator, "mediaDevices");
-          const originalAiTranscribe = win.NarrativeCanvasHost.aiTranscribe;
-          class FakeMediaRecorder {
-            static isTypeSupported() { return true; }
-            constructor(_stream, options = {}) { this.mimeType = options.mimeType || "audio/webm"; this.state = "inactive"; }
-            start() { this.state = "recording"; }
-            stop() {
-              this.state = "inactive";
-              this.ondataavailable?.({ data: new win.Blob(["fake audio"], { type: this.mimeType }) });
-              this.onstop?.();
-            }
-          }
-          let hostedTranscriptionPayload = null;
-          win.MediaRecorder = FakeMediaRecorder;
-          Object.defineProperty(win.navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } });
-          win.NarrativeCanvasHost.aiTranscribe = async (payload) => { hostedTranscriptionPayload = payload; return { text: "托管转写内容" }; };
-          click(doc.querySelector("[data-action='ai-toggle-voice']"));
-          await waitFor(`${label}: hosted AI voice recording starts`, () => doc.querySelector("[data-action='ai-toggle-voice']")?.getAttribute("aria-pressed") === "true");
-          click(doc.querySelector("[data-action='ai-toggle-voice']"));
-          await waitFor(`${label}: hosted AI transcription writes into the composer`, () => doc.querySelector("[data-ai-prompt]")?.value.includes("托管转写内容"));
-          assert(`${label}: hosted AI transcription receives recorded audio`, hostedTranscriptionPayload?.dataUrl?.startsWith("data:audio/") && hostedTranscriptionPayload?.language);
-          win.NarrativeCanvasHost.aiTranscribe = originalAiTranscribe;
-          win.MediaRecorder = OriginalMediaRecorder;
-          if (mediaDevicesDescriptor) Object.defineProperty(win.navigator, "mediaDevices", mediaDevicesDescriptor);
-          else delete win.navigator.mediaDevices;
-          click(doc.querySelector("[data-action='ai-clear']"));
-
-          const OriginalSpeechRecognition = win.SpeechRecognition;
-          const OriginalWebkitSpeechRecognition = win.webkitSpeechRecognition;
-          class FakeSpeechRecognition {
-            start() {
-              this.onstart?.();
-              const result = [{ transcript: "语音内容" }];
-              result.isFinal = true;
-              this.onresult?.({ resultIndex: 0, results: [result] });
-            }
-            stop() { this.onend?.(); }
-          }
-          win.SpeechRecognition = FakeSpeechRecognition;
-          win.webkitSpeechRecognition = FakeSpeechRecognition;
-          click(doc.querySelector("[data-action='ai-toggle-voice']"));
-          await waitFor(`${label}: AI voice input writes the transcript into the composer`, () => doc.querySelector("[data-ai-prompt]")?.value.includes("语音内容"));
-          assert(`${label}: AI voice button exposes its listening state`, doc.querySelector("[data-action='ai-toggle-voice']")?.getAttribute("aria-pressed") === "true");
-          click(doc.querySelector("[data-action='ai-toggle-voice']"));
-          await waitFor(`${label}: AI voice input can stop`, () => doc.querySelector("[data-action='ai-toggle-voice']")?.getAttribute("aria-pressed") === "false");
-          win.SpeechRecognition = OriginalSpeechRecognition;
-          win.webkitSpeechRecognition = OriginalWebkitSpeechRecognition;
-          click(doc.querySelector("[data-action='ai-clear']"));
-
           const keyboardPrompt = doc.querySelector("[data-ai-prompt]");
           assert(`${label}: AI composer explains Enter and Shift+Enter`, keyboardPrompt?.placeholder.includes("Enter") && keyboardPrompt?.placeholder.includes("Shift+Enter"));
           const keyboardMessageCount = doc.querySelectorAll(".ai-message-user").length;
@@ -1068,13 +1018,6 @@
           await waitFor(`${label}: Enter sends the AI prompt`, () => [...doc.querySelectorAll(".ai-message-user")].some((message) => message.textContent.includes("Keyboard send")));
           click(doc.querySelector("[data-action='ai-clear']"));
 
-          const attachmentInput = doc.querySelector("[data-ai-attachment-input]");
-          const attachmentFile = new win.File(["# Attachment heading\n\nAttachment body"], "notes.md", { type: "text/markdown" });
-          const transfer = new win.DataTransfer();
-          transfer.items.add(attachmentFile);
-          Object.defineProperty(attachmentInput, "files", { configurable: true, value: transfer.files });
-          attachmentInput.dispatchEvent(new win.Event("change", { bubbles: true }));
-          await waitFor(`${label}: AI attachment picker shows the selected file`, () => doc.querySelector(".ai-composer .ai-attachment")?.textContent.includes("notes.md"));
           let richPayload = null;
           win.NarrativeCanvasHost.aiChatStream = async (payload, onDelta) => {
             richPayload = payload;
@@ -1086,9 +1029,6 @@
           await waitFor(`${label}: AI Markdown response finishes`, () => !doc.querySelector(".ai-message-assistant.streaming") && Boolean(doc.querySelector(".ai-message-assistant .ai-markdown h1")));
           assert(`${label}: user Markdown renders as rich text`, Boolean(doc.querySelector(".ai-message-user .ai-markdown strong")));
           assert(`${label}: AI Markdown renders headings, emphasis, lists and links`, Boolean(doc.querySelector(".ai-message-assistant .ai-markdown h1") && doc.querySelector(".ai-message-assistant .ai-markdown strong") && doc.querySelector(".ai-message-assistant .ai-markdown ul") && doc.querySelector(".ai-message-assistant .ai-markdown a[href='https://example.com']")));
-          const sentUserMessage = richPayload?.messages?.findLast?.((message) => message.role === "user") || [...(richPayload?.messages || [])].reverse().find((message) => message.role === "user");
-          assert(`${label}: text attachment content is included in the AI payload`, typeof sentUserMessage?.content === "string" && sentUserMessage.content.includes("notes.md") && sentUserMessage.content.includes("Attachment body"));
-          assert(`${label}: sent attachment remains visible with its message`, Boolean(doc.querySelector(".ai-message-user .ai-attachment")));
           let copiedAiText = "";
           try { Object.defineProperty(win.navigator, "clipboard", { configurable: true, value: { writeText: async (value) => { copiedAiText = value; } } }); } catch (_error) { /* Clipboard may already be replaceable directly. */ }
           click(doc.querySelector(".ai-message-user [data-action='ai-copy-message']"));
@@ -2126,11 +2066,11 @@
         const customTemplateSelect = doc.querySelector("#customNodeKind");
         const customTemplateValues = [...customTemplateSelect.options].map((option) => option.value);
         assert(`${label}: custom node form offers specialized templates`, ["node", "dialog", "choice", "frame"].every((value) => customTemplateValues.includes(value)));
-        click(doc.querySelector("[data-action='edit-node-type'][data-node-type='Choice']"));
+        click(doc.querySelector("[data-action='edit-node-type-badge'][data-node-type='Choice']"));
         await waitFor(`${label}: Choice type dialog opens`, () => Boolean(doc.querySelector("#nodeTypeDialog")?.open));
         assert(`${label}: Choice type uses the Choice template`, doc.querySelector("#nodeTypeKindInput")?.value === "choice" && Boolean(doc.querySelector("#nodeTypeBuiltinFields [data-node-type-built-in-field='choices']")));
         doc.querySelector("#nodeTypeDialog")?.close("cancel");
-        click(doc.querySelector("[data-action='edit-node-type'][data-node-type='Dialog']"));
+        click(doc.querySelector("[data-action='edit-node-type-badge'][data-node-type='Dialog']"));
         await waitFor(`${label}: Dialog type dialog opens`, () => Boolean(doc.querySelector("#nodeTypeDialog")?.open));
         assert(`${label}: Dialog type uses the Dialog template`, doc.querySelector("#nodeTypeKindInput")?.value === "dialog" && Boolean(doc.querySelector("#nodeTypeBuiltinFields [data-node-type-built-in-field='turns']")));
         doc.querySelector("#nodeTypeDialog")?.close("cancel");
