@@ -1,8 +1,8 @@
 # Narrative Canvas (中文)
 
-English version: [README.md](NarrativeCanvas/README.md)
+English version: [README.md](README.md)
 
-Changelog and release notes: [GitHub Releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+当前版本：[1.2.7](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.7) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 <video src="https://github.com/ringeringeraja33/NarrativeCanvas/raw/main/assets/videos/runtime.mp4" controls width="800" muted></video>
 
@@ -10,7 +10,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 建议将它用于结构整理、分支检查、方案展示和复杂叙事说明。正文润色、对白精修和剧本定稿仍建议在专用写作工具中完成。
 
-界面支持英文与中文。网页端右下角提供 `EN / 中` 浮动切换按钮；Obsidian 插件设置提供 `语言` 选项，支持跟随 Obsidian 界面语言。
+界面支持英文与中文。网页端提供 `EN / 中` 浮动切换按钮；Obsidian 插件设置提供 `语言` 选项，支持跟随 Obsidian 界面语言。
 
 ![Narrative Canvas 主画布](assets/screenshots/main-canvas-zh.png)
 

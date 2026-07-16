@@ -1,6 +1,6 @@
 # Narrative Canvas
 
-Changelog and release notes: [GitHub Releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+Current release: [1.2.7](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.7) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 [中文版本](README-zh.md)
 
@@ -10,7 +10,7 @@ Narrative Canvas is a node-based workspace for building complex interactive narr
 
 It is intended for structure planning, branch validation, pitch preparation, and narrative explanation. Keep prose drafting, text polishing, and dialogue writing in your preferred writing tool.
 
-The interface supports both English and Chinese. The web app has an `EN / 中文` floating language switch in the lower-right corner, and the Obsidian plugin has a `Language` setting that can follow Obsidian’s language.
+The interface supports both English and Chinese. The web app has an `EN / 中` floating language switch, and the Obsidian plugin has a `Language` setting that can follow Obsidian’s language.
 
 ![Narrative Canvas main canvas](assets/screenshots/main-canvas.png)
 
@@ -34,7 +34,7 @@ Open `index.html` directly, or visit:
 
 When the Project File control shows `Browser storage`, the web app reads and writes `localStorage` (not browser HTTP cache). If you clear browser cache, the saved project file may still remain. Use `Clear storage` if you want a full local reset.
 
-The lower-right floating `EN / 中文` button switches language. The web app stores your last choice in `localStorage`; on first load it auto-selects based on document and browser locale.
+The floating `EN / 中` button switches language. The web app stores your last choice in `localStorage`; on first load it auto-selects based on document and browser locale.
 
 ### Obsidian Plugin
 
