@@ -2,7 +2,9 @@
 
 [![Verify plugin artifacts](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg?branch=main)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml?query=branch%3Amain)
 
-Current release: [1.2.7](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.7) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+Current release: [1.2.8](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.8) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+
+Obsidian Community Plugins: [Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
 [中文版本](README-zh.md)
 

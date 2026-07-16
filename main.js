@@ -3100,6 +3100,8 @@ function installNarrativeCanvasApp() {
       "Cast": "演员表",
       "Choice: {label}": "选择：{label}",
       "Focus source Choice node: {label}": "聚焦来源选择节点：{label}",
+      "Focus next node: {title}": "聚焦下一个节点：{title}",
+      "No linked next node": "未连接下一个节点",
       "Edit choice option": "编辑选项",
       "Clear": "清除",
       "Open AI assistant": "打开 AI 助手",
@@ -11022,7 +11024,16 @@ function installNarrativeCanvasApp() {
       <ol class="node-choice-preview" aria-label="${escapeAttr(t("Choices"))}" tabindex="0">
         ${options.map((option, index) => {
           const displayLabel = stripChoiceDisplayOrdinal(option.label);
-          return `<li><span class="node-choice-index" aria-hidden="true">${index + 1}</span><input class="node-choice-label-input" data-canvas-choice-option="true" data-choice-node-id="${escapeAttr(node.id)}" data-choice-option-id="${escapeAttr(option.id)}" data-choice-option-index="${option.index}" data-choice-option-field="label" data-choice-initial-value="${escapeAttr(option.label)}" data-no-drag="true" value="${escapeAttr(displayLabel)}" title="${escapeAttr(t("Edit choice option"))}" aria-label="${escapeAttr(t("Edit choice option"))}"></li>`;
+          const successorLink = findChoiceOptionLink(option, option.index, getOutgoing(node.id));
+          const successor = successorLink?.to ? getNode(successorLink.to) : null;
+          const focusLabel = successor
+            ? t("Focus next node: {title}", { title: successor.title || getNodeDisplayId(successor) })
+            : t("No linked next node");
+          const focusAttributes = successor
+            ? `data-action="focus-canvas-node" data-node-id="${escapeAttr(successor.id)}"`
+            : "disabled";
+          const optionHoverAttributes = `data-canvas-choice-option="true" data-choice-node-id="${escapeAttr(node.id)}" data-choice-option-id="${escapeAttr(option.id)}" data-choice-option-index="${option.index}"`;
+          return `<li><button class="node-choice-index" type="button" ${focusAttributes} ${optionHoverAttributes} data-no-drag="true" title="${escapeAttr(focusLabel)}" aria-label="${escapeAttr(focusLabel)}">${index + 1}</button><input class="node-choice-label-input" ${optionHoverAttributes} data-choice-option-field="label" data-choice-initial-value="${escapeAttr(option.label)}" data-no-drag="true" value="${escapeAttr(displayLabel)}" title="${escapeAttr(t("Edit choice option"))}" aria-label="${escapeAttr(t("Edit choice option"))}"></li>`;
         }).join("")}
       </ol>
     `;
@@ -11522,13 +11533,14 @@ function installNarrativeCanvasApp() {
   }
 
   function clearGraphHover() {
-    if (!state.graphHover && !dom.root?.querySelector(".graph-hover-node, .graph-hover-origin, .graph-hover-link")) return;
+    if (!state.graphHover && !dom.root?.querySelector(".graph-hover-node, .graph-hover-origin, .graph-hover-link, .graph-hover-choice-option")) return;
     state.graphHover = null;
     clearGraphHoverClasses();
   }
 
   function clearGraphHoverClasses() {
     dom.nodeLayer?.querySelectorAll(".graph-hover-node, .graph-hover-origin").forEach((element) => element.classList.remove("graph-hover-node", "graph-hover-origin"));
+    dom.nodeLayer?.querySelectorAll(".graph-hover-choice-option").forEach((element) => element.classList.remove("graph-hover-choice-option"));
     dom.frameLayer?.querySelectorAll(".graph-hover-node, .graph-hover-origin").forEach((element) => element.classList.remove("graph-hover-node", "graph-hover-origin"));
     dom.linkLayer?.querySelectorAll(".graph-hover-link").forEach((element) => element.classList.remove("graph-hover-link"));
   }
@@ -11543,6 +11555,16 @@ function installNarrativeCanvasApp() {
   function addGraphHoverLink(linkId) {
     if (!linkId || !dom.linkLayer) return;
     dom.linkLayer.querySelectorAll(`[data-link-id="${CSS.escape(linkId)}"]`).forEach((element) => element.classList.add("graph-hover-link"));
+  }
+
+  function addGraphHoverChoiceOption(descriptor) {
+    dom.nodeLayer?.querySelectorAll("[data-canvas-choice-option][data-choice-node-id]").forEach((element) => {
+      const sameNode = element.dataset.choiceNodeId === descriptor.nodeId;
+      const sameOption = descriptor.optionId
+        ? element.dataset.choiceOptionId === descriptor.optionId
+        : Number(element.dataset.choiceOptionIndex) === descriptor.optionIndex;
+      if (sameNode && sameOption) element.classList.add("graph-hover-choice-option");
+    });
   }
 
   function getRenderedGraphLinkEntries() {
@@ -11577,6 +11599,7 @@ function installNarrativeCanvasApp() {
       return;
     }
     if (descriptor.kind === "choice") {
+      addGraphHoverChoiceOption(descriptor);
       entries.filter(({ link }) => link.from === descriptor.nodeId && (
         (descriptor.optionId && link.choiceOptionId === descriptor.optionId)
         || (!link.choiceOptionId && Number.isInteger(descriptor.optionIndex) && Number(link.choiceIndex) === descriptor.optionIndex)
@@ -13427,7 +13450,9 @@ function installNarrativeCanvasApp() {
     const nodeId = getCanvasNodeIdFromTargetForClick(target, event);
     if (state.ignoreNextCanvasClick) {
       const isCanvasReleaseClick = Boolean(dom.viewport?.contains(target));
+      const isExplicitControl = Boolean(target.closest?.("[data-action], [data-file-id], [data-panel], [data-sidebar-toggle], [data-port]"));
       const shouldIgnore = isCanvasReleaseClick
+        && !isExplicitControl
         && (state.ignoreNextCanvasClickTargetId == null || state.ignoreNextCanvasClickTargetId === nodeId);
       state.ignoreNextCanvasClick = false;
       state.ignoreNextCanvasClickTargetId = null;
@@ -21122,7 +21147,7 @@ function installNarrativeCanvasApp() {
     const links = getChoiceOrderedLinks(outgoing || []);
     return labels.map((label, index) => {
       const option = options[index];
-      const link = findExportChoiceLink(option, index, links);
+      const link = findChoiceOptionLink(option, index, links);
       const requires = option?.requires ? renderExportTemplate(option.requires, node, option.requires, model, "runtime") : "";
       const linkCondition = link ? getExportLinkCondition(link, model, warnings, { nodeId: node.id, linkId: link.id }) : "";
       const targetRequirement = link ? getExportTargetRequirementCondition(link, model, warnings, { nodeId: node.id, linkId: link.id }) : "";
@@ -21208,7 +21233,7 @@ function installNarrativeCanvasApp() {
     return null;
   }
 
-  function findExportChoiceLink(option, index, links) {
+  function findChoiceOptionLink(option, index, links) {
     if (option?.id) {
       const byId = links.find((link) => link.choiceOptionId === option.id);
       if (byId) return byId;

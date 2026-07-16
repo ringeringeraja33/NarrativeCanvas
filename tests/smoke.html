@@ -1879,8 +1879,20 @@
           `${label}: Choice card generates option numbers`,
           [...doc.querySelectorAll(".node[data-node-id='n4'] .node-choice-index")].map((item) => item.textContent.trim()).join(",") === "1,2,3"
         );
+        const firstChoiceNumber = doc.querySelector(".node[data-node-id='n4'] .node-choice-index[data-node-id='n5']");
+        assert(`${label}: Choice option number links to its successor`, firstChoiceNumber?.tagName === "BUTTON" && firstChoiceNumber.dataset.action === "focus-canvas-node");
+        if (firstChoiceNumber) click(firstChoiceNumber);
+        await waitFor(`${label}: Choice option number focuses its successor`, () => doc.querySelector(".node[data-node-id='n5']")?.classList.contains("selected"));
+        const choiceReturnAfterNumberFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n4']");
+        if (choiceReturnAfterNumberFocus) click(choiceReturnAfterNumberFocus);
+        await waitFor(`${label}: Choice card returns after option-number navigation`, () => Boolean(doc.querySelector(".node[data-node-id='n4'] .node-choice-label-input")));
         const firstChoiceInput = doc.querySelector(".node[data-node-id='n4'] [data-choice-option-id='opt_map_story']");
+        const firstChoiceIndex = doc.querySelector(".node[data-node-id='n4'] .node-choice-index[data-choice-option-id='opt_map_story']");
+        firstChoiceIndex?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 50 }));
+        assert(`${label}: Choice number hover highlights its number and input`, firstChoiceIndex?.classList.contains("graph-hover-choice-option") && firstChoiceInput?.classList.contains("graph-hover-choice-option"));
+        assert(`${label}: Choice number hover highlights its bound link and downstream card`, doc.querySelector(".link-path[data-link-id='l4']")?.classList.contains("graph-hover-link") && doc.querySelector(".node[data-node-id='n5']")?.classList.contains("graph-hover-node"));
         firstChoiceInput?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 51 }));
+        assert(`${label}: Choice input hover highlights its input and number`, firstChoiceInput?.classList.contains("graph-hover-choice-option") && firstChoiceIndex?.classList.contains("graph-hover-choice-option"));
         assert(`${label}: Choice option hover highlights only its bound link`, doc.querySelector(".link-path[data-link-id='l4']")?.classList.contains("graph-hover-link") && !doc.querySelector(".link-path[data-link-id='l5']")?.classList.contains("graph-hover-link"));
         assert(`${label}: Choice option hover highlights only its downstream card`, doc.querySelector(".node[data-node-id='n5']")?.classList.contains("graph-hover-node") && !doc.querySelector(".node[data-node-id='n6']")?.classList.contains("graph-hover-node"));
         const choiceNode = doc.querySelector(".node[data-node-id='n4']");
@@ -1900,9 +1912,16 @@
         assert(`${label}: Choice card contains scroll chaining`, choicePreviewStyle.overscrollBehaviorY === "contain" || choicePreviewStyle.overscrollBehavior === "contain", `overscroll=${choicePreviewStyle.overscrollBehavior}`);
         assert(`${label}: Choice card scroll area is keyboard focusable`, choicePreview.tabIndex === 0);
         choicePreviewClones.forEach((item) => item.remove());
-        const dialogFocus = doc.querySelector("[data-action='focus-canvas-node'][data-node-id='n6']");
+        const dialogFocus = doc.querySelector(".node[data-node-id='n4'] .node-choice-index[data-action='focus-canvas-node'][data-node-id='n6']");
+        assert(`${label}: Dialog option number links to the Dialog successor`, Boolean(dialogFocus));
         if (dialogFocus) click(dialogFocus);
-        await waitFor(`${label}: Dialog card renders after focus`, () => Boolean(doc.querySelector(".node[data-node-id='n6']")));
+        await waitFor(`${label}: Dialog card is selected after focus`, () => doc.querySelector(".node[data-node-id='n6']")?.classList.contains("selected"));
+        await waitFor(
+          `${label}: Dialog inspector renders after focus`,
+          () => doc.querySelector("#nodePanel")?.dataset.renderedNodeId === "n6" && Boolean(doc.querySelector("#nodePanel .dialog-turns-editor [data-dialog-column-resize]")),
+          4000,
+          () => `selected=${doc.querySelector(".node.selected")?.dataset.nodeId || "none"} rendered=${doc.querySelector("#nodePanel")?.dataset.renderedNodeId || "none"}`
+        );
         assert(`${label}: Dialog card previews authored turns`, doc.querySelectorAll(".node[data-node-id='n6'] .node-dialog-line").length === 2);
         const dialogColumnHandle = doc.querySelector(".node[data-node-id='n6'] [data-dialog-column-resize]");
         const dialogPreviewBeforeResize = doc.querySelector(".node[data-node-id='n6'] .node-dialog-preview");
@@ -1959,7 +1978,7 @@
         assert(`${label}: Dialog card contains scroll chaining`, dialogPreviewStyle.overscrollBehaviorY === "contain" || dialogPreviewStyle.overscrollBehavior === "contain", `overscroll=${dialogPreviewStyle.overscrollBehavior}`);
         assert(`${label}: Dialog card scroll area is keyboard focusable`, dialogPreview.tabIndex === 0 && dialogPreview.getAttribute("role") === "region");
         dialogPreviewClones.forEach((item) => item.remove());
-        const dialogTurnsEditor = doc.querySelector(".dialog-turns-editor");
+        const dialogTurnsEditor = doc.querySelector("#nodePanel .dialog-turns-editor");
         assert(`${label}: Add turn remains below the turn list`, dialogTurnsEditor?.querySelector(".dialog-turns-list")?.nextElementSibling?.classList.contains("dialog-turns-footer"));
         await verifyCanvasRadialMenu(label, win, doc);
         await verifyFrameContextMenu(label, win, doc);
