@@ -884,6 +884,16 @@
         for (const action of fixture.exports) {
           const button = doc.querySelector(`[data-action="${action}"]`);
           assert(`${fixture.name}: ${action} button exists`, Boolean(button));
+          // The export-all assertion validates the ZIP manifest. Dedicated image
+          // fixtures below validate real raster output, so keep this ZIP test
+          // independent of slow 4096 px canvas encoding on shared CI runners.
+          if (action === "export-all") {
+            await win.eval(`
+              svgToPngBlob = async () => new Blob(["fixture-raster"], { type: "image/png" });
+              exportAll();
+            `);
+            continue;
+          }
           button.click();
         }
 
