@@ -7890,10 +7890,10 @@ textarea[data-project-field="variables"]::selection {
 .app-shell[data-theme="light"] .theme-toggle-button,
 :root[data-theme="light"] .theme-toggle-button[aria-pressed="true"],
 .app-shell[data-theme="light"] .theme-toggle-button[aria-pressed="true"] {
-  border-color: var(--interactive-accent);
-  background: var(--interactive-accent);
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
+  border-color: #b8afff;
+  background: #f7f5ff;
+  background-color: #f7f5ff;
+  color: #201a45;
   box-shadow: none;
 }
 
@@ -7901,10 +7901,10 @@ textarea[data-project-field="variables"]::selection {
 .app-shell[data-theme="light"] .theme-toggle-button:hover,
 :root[data-theme="light"] .theme-toggle-button[aria-pressed="true"]:hover,
 .app-shell[data-theme="light"] .theme-toggle-button[aria-pressed="true"]:hover {
-  border-color: var(--interactive-accent-hover);
-  background: var(--interactive-accent-hover);
-  background-color: var(--interactive-accent-hover);
-  color: var(--text-on-accent);
+  border-color: #c6bfff;
+  background: #ffffff;
+  background-color: #ffffff;
+  color: #201a45;
 }
 
 :root[data-theme="light"] .help-button,
