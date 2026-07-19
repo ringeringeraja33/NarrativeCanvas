@@ -1035,6 +1035,11 @@ const uiTranslations = {
     "Add choice": "添加选项",
     "Add script line": "添加旧脚本行",
     "Add turn": "添加轮次",
+    "{count} turns": "{count} 轮对话",
+    "Split after this turn": "在此轮后拆分",
+    "Split Dialog": "拆分对话节点",
+    "Dialog split into two nodes.": "对话已拆分为两个节点。",
+    "{title} (continued)": "{title}（续）",
     "Add variable": "添加变量",
     "Add a variable definition before adding a variable action.": "添加变量动作前，请添加变量定义。",
     "Advanced JSON": "高级 JSON",
@@ -2136,7 +2141,7 @@ function createInitialRuntimeState() {
   characterBacklinkExpandedIds: new Set(),
   choiceOptionExpandedIds: new Set(),
   choiceOptionConditionExpandedIds: new Set(),
-  nodeSectionExpandedIds: new Set(),
+  nodeSectionExpandedIds: new Set(["dialogTurns"]),
   nodeConditionDraftNodeId: "",
   nodeEffectDraftNodeId: "",
   choiceConditionDraftIds: new Set(),
@@ -3707,6 +3712,7 @@ function shouldRecordAction(action) {
     "delete-selected-nodes",
     "delete-context-link",
     "toggle-frame-collapse",
+    "split-dialog-turns",
     "assign-choice-link"
   ]).has(action);
 }
@@ -10207,14 +10213,17 @@ function renderNodePanel(node) {
 function renderNodeDialogTurnsField(node) {
   const turns = Array.isArray(node.turns) ? node.turns : [];
   const speakerRatio = normalizeDialogSpeakerRatio(node.dialogSpeakerRatio);
+  const expanded = isNodeSectionExpanded("dialogTurns");
   const headerHint = turns.length
     ? t("{count} turns — Play steps through each line. Cast Speaker chips auto-fill from speakers below.", { count: turns.length })
     : t("Optional: split this Dialog into multiple turns so a single node carries a back-and-forth exchange.");
   return `
-    <section class="dialog-turns-editor" style="--dialog-speaker-ratio:${speakerRatio}%">
-      <header>
-        <span>${t("Turns")}</span>
+    <section class="dialog-turns-editor nc-collapsible${expanded ? " expanded" : ""}" style="--dialog-speaker-ratio:${speakerRatio}%">
+      <header class="nc-collapsible-header">
+        ${renderNodeSectionToggle("dialogTurns", t("Turns"), expanded)}
+        <span class="nc-section-count">${escapeHtml(t("{count} turns", { count: turns.length }))}</span>
       </header>
+      ${expanded ? `
       <div class="dialog-turns-hint">${escapeHtml(headerHint)}</div>
       <div class="dialog-turns-list">
         ${turns.length === 0 ? `<div class="nc-empty-state">${t("No turns yet.")}</div>` : turns.map((turn, index) => `
@@ -10229,6 +10238,13 @@ function renderNodeDialogTurnsField(node) {
               <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete turn"))}" data-action="delete-dialog-turn" data-dialog-turn-index="${index}">x</button>
             </div>
           </div>
+          ${index < turns.length - 1 ? `
+            <div class="dialog-turn-split-row">
+              <span aria-hidden="true"></span>
+              <button class="small-button dialog-turn-split-button" type="button" title="${escapeAttr(t("Split Dialog"))}" data-action="split-dialog-turns" data-dialog-turn-index="${index}">${t("Split after this turn")}</button>
+              <span aria-hidden="true"></span>
+            </div>
+          ` : ""}
         `).join("")}
       </div>
       <div class="dialog-turns-footer">
@@ -10237,6 +10253,7 @@ function renderNodeDialogTurnsField(node) {
       <datalist id="dialogTurnSpeakerOptions">
         ${getCharacters().map((char) => `<option value="${escapeAttr(char.name)}"></option>`).join("")}
       </datalist>
+      ` : ""}
     </section>
   `;
 }
@@ -11958,6 +11975,7 @@ function handleAction(target) {
   if (action === "toggle-choice-option-expanded") toggleChoiceOptionExpanded(target.dataset.choiceOptionId);
   if (action === "toggle-node-section") toggleNodeSection(target.dataset.nodeSection);
   if (action === "add-dialog-turn") addDialogTurn();
+  if (action === "split-dialog-turns") splitDialogTurns(Number(target.dataset.dialogTurnIndex));
   if (action === "delete-dialog-turn") deleteDialogTurn(Number(target.dataset.dialogTurnIndex));
   if (action === "copy-dialog-turn") copyDialogTurn(Number(target.dataset.dialogTurnIndex));
   if (action === "move-dialog-turn-up") moveDialogTurn(Number(target.dataset.dialogTurnIndex), -1);
@@ -12374,6 +12392,13 @@ function isCanvasRadialMenuOpen() {
 
 function hideCanvasRadialMenu() {
   if (!dom.canvasRadialMenu) return;
+  const addList = dom.canvasRadialMenu.querySelector(".radial-add-list");
+  if (addList) addList.hidden = true;
+  dom.canvasRadialMenu.querySelectorAll("[data-radial-toggle]").forEach((toggle) => {
+    toggle.setAttribute("aria-expanded", "false");
+  });
+  const focused = document.activeElement;
+  if (focused && dom.canvasRadialMenu.contains(focused) && typeof focused.blur === "function") focused.blur();
   dom.canvasRadialMenu.hidden = true;
   dom.canvasRadialMenu.setAttribute("aria-hidden", "true");
 }
@@ -12477,6 +12502,11 @@ function handleCanvasRadialMenuClick(event) {
     if (!list) return;
     list.hidden = !list.hidden;
     toggleTarget.setAttribute("aria-expanded", String(!list.hidden));
+    if (!list.hidden && event.type === "keydown") {
+      list.querySelector("[role='menuitem']")?.focus();
+    } else if (typeof toggleTarget.blur === "function") {
+      toggleTarget.blur();
+    }
     return;
   }
   const actionTarget = event.target.closest("[data-action]");
@@ -15947,6 +15977,95 @@ function syncDialogBodyFromTurns(node) {
   }).join("\n");
   // Auto-fill cast Speaker chips from the unique speakers in turns.
   syncDialogCastFromTurns(node);
+}
+
+function makeUniqueNodeTitle(baseTitle, ignoredNodeId = "") {
+  const base = normalizeOptionalString(baseTitle).trim() || t("Untitled");
+  const used = new Set(state.project.nodes
+    .filter((node) => node.id !== ignoredNodeId)
+    .map((node) => normalizeOptionalString(node.title).trim().toLocaleLowerCase())
+    .filter(Boolean));
+  if (!used.has(base.toLocaleLowerCase())) return base;
+  let suffix = 2;
+  while (used.has(`${base} ${suffix}`.toLocaleLowerCase())) suffix += 1;
+  return `${base} ${suffix}`;
+}
+
+function syncSplitDialogCast(node, sourceCast) {
+  const nonSpeakerCast = (Array.isArray(sourceCast) ? sourceCast : [])
+    .filter((entry) => entry?.role !== "Speaker")
+    .map((entry) => cloneProject(entry));
+  const characterByName = new Map(getCharacters().map((character) => [character.name, character]));
+  const speakerIds = new Set();
+  (node.turns || []).forEach((turn) => {
+    const character = characterByName.get(normalizeOptionalString(turn.speaker).trim());
+    if (character) speakerIds.add(character.id);
+  });
+  const cast = [
+    ...nonSpeakerCast,
+    ...[...speakerIds].map((characterId) => ({ characterId, role: "Speaker" }))
+  ];
+  if (cast.length) node.cast = cast;
+  else delete node.cast;
+}
+
+function splitDialogTurns(index) {
+  const node = getSelectedDialogNode();
+  if (!node || !Number.isInteger(index)) return;
+  const turns = ensureDialogTurns(node);
+  if (turns.length < 2 || index < 0 || index >= turns.length - 1) return;
+
+  const sourceId = node.id;
+  const sourceCast = cloneProject(Array.isArray(node.cast) ? node.cast : []);
+  const sourceLogic = normalizeNodeStateLogic(node.stateLogic);
+  const sourceSize = nodeLayoutSize(node);
+  const secondNode = cloneProject(node);
+  secondNode.id = nextId("n", state.project.nodes);
+  secondNode.title = makeUniqueNodeTitle(t("{title} (continued)", {
+    title: normalizeOptionalString(node.title).trim() || getNodeTypeLabel(node.type)
+  }));
+  secondNode.x = Number(node.x || 0) + sourceSize.width + 80;
+  secondNode.y = Number(node.y || 0);
+
+  node.turns = cloneProject(turns.slice(0, index + 1));
+  secondNode.turns = cloneProject(turns.slice(index + 1));
+  syncDialogBodyFromTurns(node);
+  syncDialogBodyFromTurns(secondNode);
+  syncSplitDialogCast(node, sourceCast);
+  syncSplitDialogCast(secondNode, sourceCast);
+
+  node.stateLogic = {
+    requirements: sourceLogic.requirements,
+    requirementsMode: sourceLogic.requirementsMode,
+    effects: sourceLogic.effects.filter((effect) => effect.trigger !== "onChoose")
+  };
+  secondNode.stateLogic = {
+    requirements: "",
+    requirementsMode: sourceLogic.requirementsMode,
+    effects: sourceLogic.effects.filter((effect) => effect.trigger === "onChoose")
+  };
+  cleanupNodeStateLogic(node);
+  cleanupNodeStateLogic(secondNode);
+  delete node.routing;
+
+  state.project.links.forEach((link) => {
+    if (link.from === sourceId) link.from = secondNode.id;
+  });
+  state.project.links.push({
+    id: nextId("l", state.project.links),
+    from: sourceId,
+    to: secondNode.id
+  });
+  state.project.nodes.push(secondNode);
+  invalidateLinkIndexes();
+  invalidateCharacterRenderContext();
+  clearStoryOrderOverrides();
+  clearEventRowOrderOverrides();
+  if (secondNode.frameId) expandFrameToFitMembers(getNode(secondNode.frameId));
+  markProjectStructureChanged();
+  setProjectDirty(true);
+  selectNode(secondNode.id);
+  setStatus(t("Dialog split into two nodes."));
 }
 
 function addDialogTurn() {

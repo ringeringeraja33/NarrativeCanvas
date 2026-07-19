@@ -9,10 +9,17 @@ const SAVED_STATE_VERSION = 1;
 const DEFAULT_FILENAME_TEMPLATE = "{{project title}}-{{YYYY-MM-DD HHmmss}}.ncanvas";
 const DEFAULT_AUTO_SAVE_INTERVAL_SECONDS = 0;
 const DEFAULT_LANGUAGE_SETTING = "auto";
+const DEFAULT_CONTENT_FONT_SETTING = "obsidian";
 const FALLBACK_AUTO_SAVE_INTERVAL_SECONDS = 2;
 const MIN_AUTO_SAVE_INTERVAL_SECONDS = 1;
 const MAX_AUTO_SAVE_INTERVAL_SECONDS = 3600;
 const LANGUAGE_SETTING_VALUES = new Set(["auto", "en", "zh"]);
+const CONTENT_FONT_SETTING_VALUES = new Set(["obsidian", "system", "cascadia", "serif"]);
+const CONTENT_FONT_CSS_VALUES = {
+  system: 'system-ui, "Segoe UI", sans-serif',
+  cascadia: '"Cascadia Code", "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  serif: 'Georgia, Cambria, "Times New Roman", serif'
+};
 const FILENAME_TEMPLATE_TOKENS = [
   "{{project title}}",
   "{{YYYY-MM-DD}}",
@@ -26,6 +33,7 @@ const DEFAULT_SETTINGS = {
   filenameTemplate: DEFAULT_FILENAME_TEMPLATE,
   autoSaveIntervalSeconds: DEFAULT_AUTO_SAVE_INTERVAL_SECONDS,
   language: DEFAULT_LANGUAGE_SETTING,
+  contentFont: DEFAULT_CONTENT_FONT_SETTING,
   aiEndpoint: "",
   aiApiKey: "",
   aiModel: "",
@@ -36,6 +44,10 @@ const PLUGIN_TEXT = {
   zh: {
     "Auto-save interval": "自动保存间隔",
     "Choose the Narrative Canvas interface language. Auto follows Obsidian's interface language.": "选择 Narrative Canvas 界面语言。自动会跟随 Obsidian 界面语言。",
+    "Content font": "正文字体",
+    "Choose the font used for Play and narrative content.": "选择 Play 和叙事正文使用的字体。",
+    "System font": "系统字体",
+    "Classic serif": "经典衬线体",
     "Clear": "清除",
     "Create and open a sample Narrative Canvas project.": "创建并打开一个 Narrative Canvas 示例项目。",
     "Current project": "上次编辑的项目",
@@ -361,7 +373,23 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     return resolvePluginLanguage(this.settings?.language, this.app);
   }
 
+  getContentFontCssValue() {
+    const setting = normalizeContentFontSetting(this.settings?.contentFont);
+    return CONTENT_FONT_CSS_VALUES[setting] || "";
+  }
+
+  applyContentFontSettings(root = null) {
+    const targets = root ? [root] : [...document.querySelectorAll(".narrative-canvas-plugin-host")];
+    const cssValue = this.getContentFontCssValue();
+    targets.forEach((target) => {
+      if (!target?.style) return;
+      if (cssValue) target.style.setProperty("--nc-plugin-content-font", cssValue);
+      else target.style.removeProperty("--nc-plugin-content-font");
+    });
+  }
+
   notifyCanvasSettingsChanged() {
+    this.applyContentFontSettings();
     window.NarrativeCanvasApp?.configureAutoSave?.();
     window.NarrativeCanvasApp?.setLanguage?.(this.getEffectiveLanguage());
   }
@@ -852,6 +880,7 @@ class NarrativeCanvasView extends ItemView {
     if (this.duplicateOf || this.tryDedupNow()) return;
 
     this.contentEl.addClass("narrative-canvas-plugin-host");
+    this.plugin.applyContentFontSettings(this.contentEl);
     this.contentEl.createEl("div", {
       cls: "narrative-canvas-plugin-loading",
       text: "Loading Narrative Canvas..."
@@ -1012,6 +1041,23 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName(text("Content font"))
+      .setDesc(text("Choose the font used for Play and narrative content."))
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("obsidian", text("Follow Obsidian"))
+          .addOption("system", text("System font"))
+          .addOption("cascadia", "Cascadia Code")
+          .addOption("serif", text("Classic serif"))
+          .setValue(normalizeContentFontSetting(this.plugin.settings.contentFont))
+          .onChange(async (value) => {
+            this.plugin.settings.contentFont = normalizeContentFontSetting(value);
+            await this.plugin.savePluginData();
+            this.plugin.notifyCanvasSettingsChanged();
+          });
+      });
+
+    new Setting(containerEl)
       .setName(text("Sample project"))
       .setDesc(text("Create and open a sample Narrative Canvas project."))
       .addButton((button) => {
@@ -1115,6 +1161,7 @@ function normalizeSettings(rawSettings) {
     filenameTemplate: normalizeFilenameTemplate(source.filenameTemplate),
     autoSaveIntervalSeconds: normalizeAutoSaveIntervalSeconds(source.autoSaveIntervalSeconds),
     language: normalizeLanguageSetting(source.language),
+    contentFont: normalizeContentFontSetting(source.contentFont),
     aiEndpoint: String(source.aiEndpoint || "").trim(),
     aiApiKey: String(source.aiApiKey || "").trim(),
     aiModel: String(source.aiModel || "").trim(),
@@ -1126,6 +1173,11 @@ function normalizeSettings(rawSettings) {
 function normalizeLanguageSetting(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return LANGUAGE_SETTING_VALUES.has(normalized) ? normalized : DEFAULT_LANGUAGE_SETTING;
+}
+
+function normalizeContentFontSetting(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CONTENT_FONT_SETTING_VALUES.has(normalized) ? normalized : DEFAULT_CONTENT_FONT_SETTING;
 }
 
 function resolvePluginLanguage(setting, app) {
@@ -3059,6 +3111,11 @@ function installNarrativeCanvasApp() {
       "Add choice": "添加选项",
       "Add script line": "添加旧脚本行",
       "Add turn": "添加轮次",
+      "{count} turns": "{count} 轮对话",
+      "Split after this turn": "在此轮后拆分",
+      "Split Dialog": "拆分对话节点",
+      "Dialog split into two nodes.": "对话已拆分为两个节点。",
+      "{title} (continued)": "{title}（续）",
       "Add variable": "添加变量",
       "Add a variable definition before adding a variable action.": "添加变量动作前，请添加变量定义。",
       "Advanced JSON": "高级 JSON",
@@ -4160,7 +4217,7 @@ function installNarrativeCanvasApp() {
     characterBacklinkExpandedIds: new Set(),
     choiceOptionExpandedIds: new Set(),
     choiceOptionConditionExpandedIds: new Set(),
-    nodeSectionExpandedIds: new Set(),
+    nodeSectionExpandedIds: new Set(["dialogTurns"]),
     nodeConditionDraftNodeId: "",
     nodeEffectDraftNodeId: "",
     choiceConditionDraftIds: new Set(),
@@ -5731,6 +5788,7 @@ function installNarrativeCanvasApp() {
       "delete-selected-nodes",
       "delete-context-link",
       "toggle-frame-collapse",
+      "split-dialog-turns",
       "assign-choice-link"
     ]).has(action);
   }
@@ -12218,14 +12276,17 @@ function installNarrativeCanvasApp() {
   function renderNodeDialogTurnsField(node) {
     const turns = Array.isArray(node.turns) ? node.turns : [];
     const speakerRatio = normalizeDialogSpeakerRatio(node.dialogSpeakerRatio);
+    const expanded = isNodeSectionExpanded("dialogTurns");
     const headerHint = turns.length
       ? t("{count} turns — Play steps through each line. Cast Speaker chips auto-fill from speakers below.", { count: turns.length })
       : t("Optional: split this Dialog into multiple turns so a single node carries a back-and-forth exchange.");
     return `
-      <section class="dialog-turns-editor" style="--dialog-speaker-ratio:${speakerRatio}%">
-        <header>
-          <span>${t("Turns")}</span>
+      <section class="dialog-turns-editor nc-collapsible${expanded ? " expanded" : ""}" style="--dialog-speaker-ratio:${speakerRatio}%">
+        <header class="nc-collapsible-header">
+          ${renderNodeSectionToggle("dialogTurns", t("Turns"), expanded)}
+          <span class="nc-section-count">${escapeHtml(t("{count} turns", { count: turns.length }))}</span>
         </header>
+        ${expanded ? `
         <div class="dialog-turns-hint">${escapeHtml(headerHint)}</div>
         <div class="dialog-turns-list">
           ${turns.length === 0 ? `<div class="nc-empty-state">${t("No turns yet.")}</div>` : turns.map((turn, index) => `
@@ -12240,6 +12301,13 @@ function installNarrativeCanvasApp() {
                 <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete turn"))}" data-action="delete-dialog-turn" data-dialog-turn-index="${index}">x</button>
               </div>
             </div>
+            ${index < turns.length - 1 ? `
+              <div class="dialog-turn-split-row">
+                <span aria-hidden="true"></span>
+                <button class="small-button dialog-turn-split-button" type="button" title="${escapeAttr(t("Split Dialog"))}" data-action="split-dialog-turns" data-dialog-turn-index="${index}">${t("Split after this turn")}</button>
+                <span aria-hidden="true"></span>
+              </div>
+            ` : ""}
           `).join("")}
         </div>
         <div class="dialog-turns-footer">
@@ -12248,6 +12316,7 @@ function installNarrativeCanvasApp() {
         <datalist id="dialogTurnSpeakerOptions">
           ${getCharacters().map((char) => `<option value="${escapeAttr(char.name)}"></option>`).join("")}
         </datalist>
+        ` : ""}
       </section>
     `;
   }
@@ -13969,6 +14038,7 @@ function installNarrativeCanvasApp() {
     if (action === "toggle-choice-option-expanded") toggleChoiceOptionExpanded(target.dataset.choiceOptionId);
     if (action === "toggle-node-section") toggleNodeSection(target.dataset.nodeSection);
     if (action === "add-dialog-turn") addDialogTurn();
+    if (action === "split-dialog-turns") splitDialogTurns(Number(target.dataset.dialogTurnIndex));
     if (action === "delete-dialog-turn") deleteDialogTurn(Number(target.dataset.dialogTurnIndex));
     if (action === "copy-dialog-turn") copyDialogTurn(Number(target.dataset.dialogTurnIndex));
     if (action === "move-dialog-turn-up") moveDialogTurn(Number(target.dataset.dialogTurnIndex), -1);
@@ -14357,6 +14427,13 @@ function installNarrativeCanvasApp() {
 
   function hideCanvasRadialMenu() {
     if (!dom.canvasRadialMenu) return;
+    const addList = dom.canvasRadialMenu.querySelector(".radial-add-list");
+    if (addList) addList.hidden = true;
+    dom.canvasRadialMenu.querySelectorAll("[data-radial-toggle]").forEach((toggle) => {
+      toggle.setAttribute("aria-expanded", "false");
+    });
+    const focused = document.activeElement;
+    if (focused && dom.canvasRadialMenu.contains(focused) && typeof focused.blur === "function") focused.blur();
     dom.canvasRadialMenu.hidden = true;
     dom.canvasRadialMenu.setAttribute("aria-hidden", "true");
   }
@@ -14460,6 +14537,11 @@ function installNarrativeCanvasApp() {
       if (!list) return;
       list.hidden = !list.hidden;
       toggleTarget.setAttribute("aria-expanded", String(!list.hidden));
+      if (!list.hidden && event.type === "keydown") {
+        list.querySelector("[role='menuitem']")?.focus();
+      } else if (typeof toggleTarget.blur === "function") {
+        toggleTarget.blur();
+      }
       return;
     }
     const actionTarget = event.target.closest("[data-action]");
@@ -17930,6 +18012,95 @@ function installNarrativeCanvasApp() {
     }).join("\n");
     // Auto-fill cast Speaker chips from the unique speakers in turns.
     syncDialogCastFromTurns(node);
+  }
+
+  function makeUniqueNodeTitle(baseTitle, ignoredNodeId = "") {
+    const base = normalizeOptionalString(baseTitle).trim() || t("Untitled");
+    const used = new Set(state.project.nodes
+      .filter((node) => node.id !== ignoredNodeId)
+      .map((node) => normalizeOptionalString(node.title).trim().toLocaleLowerCase())
+      .filter(Boolean));
+    if (!used.has(base.toLocaleLowerCase())) return base;
+    let suffix = 2;
+    while (used.has(`${base} ${suffix}`.toLocaleLowerCase())) suffix += 1;
+    return `${base} ${suffix}`;
+  }
+
+  function syncSplitDialogCast(node, sourceCast) {
+    const nonSpeakerCast = (Array.isArray(sourceCast) ? sourceCast : [])
+      .filter((entry) => entry?.role !== "Speaker")
+      .map((entry) => cloneProject(entry));
+    const characterByName = new Map(getCharacters().map((character) => [character.name, character]));
+    const speakerIds = new Set();
+    (node.turns || []).forEach((turn) => {
+      const character = characterByName.get(normalizeOptionalString(turn.speaker).trim());
+      if (character) speakerIds.add(character.id);
+    });
+    const cast = [
+      ...nonSpeakerCast,
+      ...[...speakerIds].map((characterId) => ({ characterId, role: "Speaker" }))
+    ];
+    if (cast.length) node.cast = cast;
+    else delete node.cast;
+  }
+
+  function splitDialogTurns(index) {
+    const node = getSelectedDialogNode();
+    if (!node || !Number.isInteger(index)) return;
+    const turns = ensureDialogTurns(node);
+    if (turns.length < 2 || index < 0 || index >= turns.length - 1) return;
+
+    const sourceId = node.id;
+    const sourceCast = cloneProject(Array.isArray(node.cast) ? node.cast : []);
+    const sourceLogic = normalizeNodeStateLogic(node.stateLogic);
+    const sourceSize = nodeLayoutSize(node);
+    const secondNode = cloneProject(node);
+    secondNode.id = nextId("n", state.project.nodes);
+    secondNode.title = makeUniqueNodeTitle(t("{title} (continued)", {
+      title: normalizeOptionalString(node.title).trim() || getNodeTypeLabel(node.type)
+    }));
+    secondNode.x = Number(node.x || 0) + sourceSize.width + 80;
+    secondNode.y = Number(node.y || 0);
+
+    node.turns = cloneProject(turns.slice(0, index + 1));
+    secondNode.turns = cloneProject(turns.slice(index + 1));
+    syncDialogBodyFromTurns(node);
+    syncDialogBodyFromTurns(secondNode);
+    syncSplitDialogCast(node, sourceCast);
+    syncSplitDialogCast(secondNode, sourceCast);
+
+    node.stateLogic = {
+      requirements: sourceLogic.requirements,
+      requirementsMode: sourceLogic.requirementsMode,
+      effects: sourceLogic.effects.filter((effect) => effect.trigger !== "onChoose")
+    };
+    secondNode.stateLogic = {
+      requirements: "",
+      requirementsMode: sourceLogic.requirementsMode,
+      effects: sourceLogic.effects.filter((effect) => effect.trigger === "onChoose")
+    };
+    cleanupNodeStateLogic(node);
+    cleanupNodeStateLogic(secondNode);
+    delete node.routing;
+
+    state.project.links.forEach((link) => {
+      if (link.from === sourceId) link.from = secondNode.id;
+    });
+    state.project.links.push({
+      id: nextId("l", state.project.links),
+      from: sourceId,
+      to: secondNode.id
+    });
+    state.project.nodes.push(secondNode);
+    invalidateLinkIndexes();
+    invalidateCharacterRenderContext();
+    clearStoryOrderOverrides();
+    clearEventRowOrderOverrides();
+    if (secondNode.frameId) expandFrameToFitMembers(getNode(secondNode.frameId));
+    markProjectStructureChanged();
+    setProjectDirty(true);
+    selectNode(secondNode.id);
+    setStatus(t("Dialog split into two nodes."));
   }
 
   function addDialogTurn() {

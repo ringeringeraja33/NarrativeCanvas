@@ -440,6 +440,43 @@
         assert(`${label}: node body textarea accepts text`, nodeBody?.value.includes("body input accepts"));
       }
 
+      async function assertDialogSplitInteractions(label, win, doc) {
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas opens for Dialog split`, () => Boolean(doc.querySelector(".node[data-node-id='n6']")));
+        const before = win.NarrativeCanvasApp.getSavedState().project;
+        const sourceBefore = before.nodes.find((node) => node.id === "n6");
+        const outgoingBefore = before.links.filter((link) => link.from === "n6").map((link) => ({ ...link }));
+        const incomingBefore = before.links.filter((link) => link.to === "n6").map((link) => ({ ...link }));
+        const beforeNodeIds = new Set(before.nodes.map((node) => node.id));
+
+        click(doc.querySelector(".node[data-node-id='n6']"));
+        await waitFor(`${label}: Dialog split control appears`, () => Boolean(doc.querySelector("[data-action='split-dialog-turns'][data-dialog-turn-index='0']")));
+        const dialogToggle = doc.querySelector("[data-action='toggle-node-section'][data-node-section='dialogTurns']");
+        click(dialogToggle);
+        await waitFor(`${label}: Dialog turns can collapse`, () => doc.querySelector("[data-action='toggle-node-section'][data-node-section='dialogTurns']")?.getAttribute("aria-expanded") === "false" && !doc.querySelector(".dialog-turns-list"));
+        click(doc.querySelector("[data-action='toggle-node-section'][data-node-section='dialogTurns']"));
+        await waitFor(`${label}: Dialog turns can expand`, () => Boolean(doc.querySelector("[data-action='split-dialog-turns'][data-dialog-turn-index='0']")));
+        click(doc.querySelector("[data-action='split-dialog-turns'][data-dialog-turn-index='0']"));
+        await waitFor(`${label}: Dialog split creates one node`, () => win.NarrativeCanvasApp.getSavedState().project.nodes.length === before.nodes.length + 1);
+
+        const after = win.NarrativeCanvasApp.getSavedState().project;
+        const first = after.nodes.find((node) => node.id === "n6");
+        const second = after.nodes.find((node) => !beforeNodeIds.has(node.id));
+        const bridge = after.links.find((link) => link.from === "n6" && link.to === second?.id);
+        const movedOutgoing = after.links.filter((link) => outgoingBefore.some((oldLink) => oldLink.id === link.id));
+        const incomingAfter = after.links.filter((link) => incomingBefore.some((oldLink) => oldLink.id === link.id));
+        assert(`${label}: Dialog turns split at the selected boundary`, first?.turns?.length === 1 && second?.turns?.length === 1 && first.turns[0].line === sourceBefore?.turns?.[0]?.line && second.turns[0].line === sourceBefore?.turns?.[1]?.line);
+        assert(`${label}: Dialog split adds a direct bridge`, Boolean(bridge));
+        assert(`${label}: Dialog outgoing links move with metadata`, movedOutgoing.length === outgoingBefore.length && movedOutgoing.every((link) => link.from === second?.id && JSON.stringify({ ...link, from: "n6" }) === JSON.stringify(outgoingBefore.find((oldLink) => oldLink.id === link.id))));
+        assert(`${label}: Dialog incoming links stay on the first node`, incomingAfter.length === incomingBefore.length && incomingAfter.every((link) => link.to === "n6"));
+        assert(`${label}: Dialog split rebuilds Speaker cast and preserves other roles`, first?.cast?.some((entry) => entry.characterId === "c1" && entry.role === "Speaker") && !first?.cast?.some((entry) => entry.characterId === "c2" && entry.role === "Speaker") && second?.cast?.some((entry) => entry.characterId === "c2" && entry.role === "Speaker") && first?.cast?.some((entry) => entry.characterId === "c4" && entry.role === "Mentioned") && second?.cast?.some((entry) => entry.characterId === "c4" && entry.role === "Mentioned"));
+
+        click(doc.querySelector("[data-action='undo']"));
+        await waitFor(`${label}: Dialog split is one undo step`, () => win.NarrativeCanvasApp.getSavedState().project.nodes.length === before.nodes.length);
+        const undone = win.NarrativeCanvasApp.getSavedState().project;
+        assert(`${label}: undo restores Dialog links`, JSON.stringify(undone.links.filter((link) => outgoingBefore.some((oldLink) => oldLink.id === link.id))) === JSON.stringify(outgoingBefore));
+      }
+
       function dispatchPointerDrag(win, startElement, moveTarget, start, end, pointerId = 701) {
         startElement.dispatchEvent(new win.PointerEvent("pointerdown", {
           bubbles: true,
@@ -840,12 +877,40 @@
         doc.body.style.margin = "0";
         doc.body.style.overflow = "hidden";
 
+        const hostileTheme = doc.createElement("style");
+        hostileTheme.textContent = `
+          :root {
+            --font-interface: "GUI Obsidian Interface", system-ui;
+            --font-text: "GUI Obsidian Text", system-ui;
+            --font-monospace: "GUI Obsidian Mono", monospace;
+          }
+          .narrative-canvas-plugin-host textarea,
+          .narrative-canvas-plugin-host input,
+          .narrative-canvas-plugin-host select {
+            color: #211a3d;
+            -webkit-text-fill-color: #211a3d;
+            background-color: #211a3d;
+            text-shadow: 0 0 2px #211a3d;
+            opacity: 0.45;
+          }
+          .narrative-canvas-plugin-host .document-editor-highlight span {
+            color: #211a3d;
+            -webkit-text-fill-color: #211a3d;
+            background: #211a3d;
+            box-shadow: 0 0 0 2px #211a3d;
+            text-shadow: 0 0 2px #211a3d;
+            opacity: 0.45;
+          }
+        `;
+        doc.head.append(hostileTheme);
+
         const style = doc.createElement("style");
         style.textContent = css;
         doc.head.append(style);
 
         const host = doc.createElement("div");
         host.className = "narrative-canvas-plugin-host";
+        host.style.setProperty("--nc-plugin-content-font", '"Cascadia Code", ui-monospace');
         host.innerHTML = extractBodyHtml(html);
         doc.body.append(host);
 
@@ -873,6 +938,22 @@
         return { frame, win, doc };
       }
 
+      async function assertPluginThemeAndFontIsolation(target) {
+        const { win, doc } = target;
+        const playFont = win.getComputedStyle(doc.querySelector("#playBody")).fontFamily;
+        assert("plugin: Play uses the selected content font", playFont.includes("Cascadia Code"), playFont);
+        click(doc.querySelector("[data-file-id='document']"));
+        await waitFor("plugin: Document opens for hostile-theme check", () => Boolean(doc.querySelector(".document-editor-highlight span")));
+        const surface = doc.querySelector(".document-editor-surface");
+        const token = doc.querySelector(".document-editor-highlight span");
+        const editor = doc.querySelector(".document-source-editor");
+        const surfaceStyle = win.getComputedStyle(surface);
+        const tokenStyle = win.getComputedStyle(token);
+        const editorStyle = win.getComputedStyle(editor);
+        assert("plugin: Document syntax text remains visible under hostile theme", tokenStyle.backgroundColor === "rgba(0, 0, 0, 0)" && tokenStyle.color !== surfaceStyle.backgroundColor && tokenStyle.webkitTextFillColor !== surfaceStyle.backgroundColor && tokenStyle.opacity === "1", `token=${tokenStyle.color}/${tokenStyle.webkitTextFillColor}/${tokenStyle.backgroundColor}/${tokenStyle.opacity} surface=${surfaceStyle.backgroundColor}`);
+        assert("plugin: Document input remains a transparent caret layer", editorStyle.backgroundColor === "rgba(0, 0, 0, 0)" && editorStyle.webkitTextFillColor === "rgba(0, 0, 0, 0)", `fill=${editorStyle.webkitTextFillColor} background=${editorStyle.backgroundColor}`);
+      }
+
       async function runGuiChecks(label, target) {
         const { win, doc, frame } = target;
         assertMainShellNoPageOverflow(label, doc);
@@ -882,6 +963,7 @@
         assertVisibleControlsClickable(label, doc);
         await assertChineseLocalization(label, win, doc);
         assertInputsAcceptText(label, win, doc);
+        await assertDialogSplitInteractions(label, win, doc);
         await assertCanvasDragResizeAndPorts(label, win, doc);
         await assertEventsInteractions(label, win, doc);
         await assertCharactersInteractions(label, win, doc);
@@ -897,6 +979,7 @@
           web.frame.remove();
 
           const plugin = await loadPluginFrame();
+          await assertPluginThemeAndFontIsolation(plugin);
           await runGuiChecks("plugin", plugin);
           plugin.win.NarrativeCanvasApp.destroy?.();
           plugin.frame.remove();

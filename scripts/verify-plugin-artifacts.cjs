@@ -203,6 +203,16 @@ if (!main.includes('class="playbook-end-condition-editor"') || !main.includes('d
 } else {
   pass("end condition uses the multiline editor artifact");
 }
+if (!main.includes('data-action="split-dialog-turns"') || !main.includes("function splitDialogTurns(index)")) {
+  fail("main.js is missing the Dialog turn split feature");
+} else {
+  pass("main.js contains the Dialog turn split feature");
+}
+if (!main.includes('DEFAULT_CONTENT_FONT_SETTING = "obsidian"') || !main.includes('.addOption("cascadia", "Cascadia Code")') || !main.includes("--nc-plugin-content-font")) {
+  fail("main.js is missing the content font setting");
+} else {
+  pass("main.js contains Obsidian, system, Cascadia Code, and serif content font options");
+}
 
 const styles = readUtf8("styles.css");
 const unscopedSelectors = styles
@@ -229,6 +239,10 @@ if (/\.narrative-canvas-plugin-host\s*\/\*/.test(styles)) {
 const requiredSelectors = [
   ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"]",
   ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"] :is(.ai-title h2, .document-header h2)",
+  ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"] :is(.hidden-node-row .palette-label, .stat-value)",
+  ".narrative-canvas-plugin-host .app-shell .document-editor-highlight span",
+  ".narrative-canvas-plugin-host .app-shell :is(input:not([type=\"checkbox\"]):not([type=\"radio\"]):not([type=\"range\"]):not([type=\"color\"]), textarea:not(.document-source-editor), select)",
+  ".narrative-canvas-plugin-host .app-shell .document-editor-input textarea.document-source-editor",
   ".narrative-canvas-plugin-host .nc-checkbox-box",
   ".narrative-canvas-plugin-host .nc-checkbox-field input[type=\"checkbox\"]:checked + .nc-checkbox-box",
   ".narrative-canvas-plugin-host .node.graph-hover-node",
@@ -256,6 +270,18 @@ if (!lightHeadingRule.includes("color: #17181b") || !lightHeadingRule.includes("
   fail("styles.css does not lock embedded light-theme headings to a readable color");
 } else {
   pass("styles.css locks embedded light-theme headings to a readable color");
+}
+const lightMutedTextRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell\.app-shell\[data-theme="light"\] :is\(\.hidden-node-row \.palette-label, \.stat-value\)\s*\{([^}]*)\}/)?.[1] || "";
+if (!lightMutedTextRule.includes("color: #30323a") || !lightMutedTextRule.includes("-webkit-text-fill-color: #30323a") || !lightMutedTextRule.includes("opacity: 1")) {
+  fail("styles.css does not lock light-theme hidden labels and project totals to a readable color");
+} else {
+  pass("styles.css locks light-theme hidden labels and project totals to a readable color");
+}
+const documentHighlightSpanRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell \.document-editor-highlight span\s*\{([^}]*)\}/)?.[1] || "";
+if (!documentHighlightSpanRule.includes("-webkit-text-fill-color: currentColor") || !documentHighlightSpanRule.includes("background: transparent") || !documentHighlightSpanRule.includes("text-shadow: none") || !documentHighlightSpanRule.includes("opacity: 1")) {
+  fail("styles.css does not isolate Document syntax text from host theme span styles");
+} else {
+  pass("styles.css isolates Document syntax text from host theme span styles");
 }
 // The custom checkbox must NOT fight the host: the native <input> is neutralized (laid transparent
 // over the field) rather than overriding Obsidian's checkbox mark with !important. Guard that the

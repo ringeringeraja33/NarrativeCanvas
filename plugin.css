@@ -11,6 +11,56 @@
   overflow: hidden;
 }
 
+/* Follow the vault's configured fonts by default; plugin settings can replace content text. */
+.narrative-canvas-plugin-host .app-shell {
+  --nc-font-interface: var(--font-interface, system-ui, "Segoe UI", sans-serif);
+  --nc-font-text: var(--nc-plugin-content-font, var(--font-text, var(--font-interface, system-ui, "Segoe UI", sans-serif)));
+  --nc-font-monospace: var(--font-monospace, "Cascadia Code", "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+/* Keep host themes from making form text and control backgrounds indistinguishable. */
+.narrative-canvas-plugin-host .app-shell :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea:not(.document-source-editor), select) {
+  color: var(--text-normal);
+  -webkit-text-fill-color: var(--text-normal);
+  background-color: var(--background-control);
+  text-shadow: none;
+  opacity: 1;
+}
+
+.narrative-canvas-plugin-host .app-shell .document-editor-input textarea.document-source-editor {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text-normal);
+  background: transparent;
+  text-shadow: none;
+  opacity: 1;
+}
+
+/* The source editor draws syntax text behind a transparent textarea. Neutralize theme span styles. */
+.narrative-canvas-plugin-host .app-shell .document-editor-highlight {
+  color: var(--text-normal);
+  -webkit-text-fill-color: var(--text-normal);
+  background: transparent;
+  text-shadow: none;
+  opacity: 1;
+}
+
+.narrative-canvas-plugin-host .app-shell .document-editor-highlight span {
+  -webkit-text-fill-color: currentColor;
+  background: transparent;
+  box-shadow: none;
+  text-shadow: none;
+  filter: none;
+  opacity: 1;
+}
+
+.narrative-canvas-plugin-host .app-shell .document-editor-gutter {
+  color: var(--text-faint);
+  -webkit-text-fill-color: var(--text-faint);
+  text-shadow: none;
+  opacity: 1;
+}
+
 .narrative-canvas-plugin-loading,
 .narrative-canvas-plugin-error {
   padding: 16px;
@@ -92,6 +142,22 @@
   color: #17181b;
   -webkit-text-fill-color: #17181b;
   opacity: 1;
+}
+
+/* Keep labels and project totals readable when the host adds muted text opacity. */
+.narrative-canvas-plugin-host .app-shell.app-shell[data-theme="light"] :is(.hidden-node-row .palette-label, .stat-value) {
+  color: #30323a;
+  -webkit-text-fill-color: #30323a;
+  opacity: 1;
+}
+
+/* Obsidian applies a rectangular focus ring to SVG elements with role=button. */
+.narrative-canvas-plugin-host .app-shell .canvas-radial-menu .radial-button:focus,
+.narrative-canvas-plugin-host .app-shell .canvas-radial-menu .radial-button:focus-visible {
+  outline: none;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 /* Keep Beta badges consistent; Obsidian's --text-accent can differ by context. */

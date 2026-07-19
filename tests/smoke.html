@@ -350,6 +350,12 @@
         if (!addButton) return;
         click(addButton);
         await waitFor(`${label}: radial Add expands Node Library`, () => !radialMenu.querySelector(".radial-add-list")?.hidden);
+        const addFocusStyle = win.getComputedStyle(addButton);
+        assert(`${label}: radial Add avoids a rectangular host focus box`, addFocusStyle.outlineStyle === "none" && addFocusStyle.boxShadow === "none", `outline=${addFocusStyle.outlineStyle} shadow=${addFocusStyle.boxShadow}`);
+        click(addButton);
+        await waitFor(`${label}: radial Add collapses Node Library`, () => radialMenu.querySelector(".radial-add-list")?.hidden);
+        click(addButton);
+        await waitFor(`${label}: radial Add can reopen Node Library`, () => !radialMenu.querySelector(".radial-add-list")?.hidden);
         const addList = radialMenu.querySelector(".radial-add-list");
         assert(`${label}: radial add list is labelled as Node Library`, addList?.getAttribute("aria-label") === "Node Library");
         const markerItem = addList?.querySelector("[data-action='add-node'][data-type='Marker']")
