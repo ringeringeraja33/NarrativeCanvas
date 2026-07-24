@@ -1089,23 +1089,26 @@
           frameCharacterChip = findVisibleFrameCharacterChip();
         }
         frameCharacterChip ||= [...doc.querySelectorAll(".node.frame[data-node-id='e2'] .node-cast-chip-button")].at(-1);
-        const frameCharacter = win.NarrativeCanvasApp.getSavedState()?.project?.characters?.find((character) => character.id === frameCharacterChip?.dataset.characterId);
-        if (frameCharacterChip) {
+        // Capture the target by id, not by element reference: the canvas re-renders
+        // (ResizeObserver, viewport culling) can detach the node between query and
+        // click under CI load, so hold a stable id and re-query each attempt.
+        const frameCharacterId = frameCharacterChip?.dataset.characterId;
+        const frameCharacter = win.NarrativeCanvasApp.getSavedState()?.project?.characters?.find((character) => character.id === frameCharacterId);
+        {
           const chipRect = frameCharacterChip.getBoundingClientRect();
           const chipX = chipRect.left + chipRect.width / 2;
           const chipY = chipRect.top + chipRect.height / 2;
           const pointStack = doc.elementsFromPoint(chipX, chipY);
-          const pointTarget = pointStack[0];
-          assert(`${label}: Frame character chip participates in real pointer hit testing`, pointStack.includes(frameCharacterChip), `hit=${pointTarget?.className || pointTarget?.tagName || ""}`);
-          pointTarget?.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 93, button: 0, clientX: chipX, clientY: chipY }));
-          pointTarget?.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 93, button: 0, clientX: chipX, clientY: chipY }));
-          pointTarget?.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win, clientX: chipX, clientY: chipY }));
-          // Real chip handling is delegated (bubbles to the document), so a direct
-          // click on the button is equivalent to a user click and keeps the check
-          // deterministic if hit-testing lands on a child under CI load.
-          frameCharacterChip.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
+          assert(`${label}: Frame character chip participates in real pointer hit testing`, pointStack.includes(frameCharacterChip), `hit=${pointStack[0]?.className || pointStack[0]?.tagName || ""}`);
         }
-        await waitFor(`${label}: Frame character chip opens the matching Characters search`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "characters" && doc.querySelector("[data-character-search]")?.value === frameCharacter?.name);
+        await waitFor(`${label}: Frame character chip opens the matching Characters search`, () => {
+          if (doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "characters" && doc.querySelector("[data-character-search]")?.value === frameCharacter?.name) return true;
+          // Re-query and re-click each poll so a mid-interaction re-render can't
+          // leave us clicking a detached element.
+          doc.querySelector(`.node.frame[data-node-id='e2'] .node-cast-chip-button[data-character-id='${frameCharacterId}']`)
+            ?.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
+          return false;
+        });
         click(doc.querySelector("[data-file-id='adventure']"));
         await waitFor(`${label}: canvas returns after Frame character search check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
         for (let attempt = 0; attempt < 40; attempt += 1) {
