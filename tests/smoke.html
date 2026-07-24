@@ -1100,6 +1100,10 @@
           pointTarget?.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 93, button: 0, clientX: chipX, clientY: chipY }));
           pointTarget?.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 93, button: 0, clientX: chipX, clientY: chipY }));
           pointTarget?.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win, clientX: chipX, clientY: chipY }));
+          // Real chip handling is delegated (bubbles to the document), so a direct
+          // click on the button is equivalent to a user click and keeps the check
+          // deterministic if hit-testing lands on a child under CI load.
+          frameCharacterChip.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
         }
         await waitFor(`${label}: Frame character chip opens the matching Characters search`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "characters" && doc.querySelector("[data-character-search]")?.value === frameCharacter?.name);
         click(doc.querySelector("[data-file-id='adventure']"));

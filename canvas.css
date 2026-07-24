@@ -4501,6 +4501,12 @@ select:focus {
   gap: 6px;
 }
 
+/* The button is the single interactive surface; children never intercept the
+   pointer, so hit-testing and synthetic clicks always land on the chip itself. */
+.node-cast-chip-button > * {
+  pointer-events: none;
+}
+
 .node-cast-chip-text {
   display: grid;
   min-width: 0;
