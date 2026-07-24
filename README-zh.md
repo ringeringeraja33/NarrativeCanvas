@@ -2,7 +2,7 @@
 
 [![插件验证](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg?branch=main)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml?query=branch%3Amain)
 
-English version: [README.md](Projects/NarrativeCanvas/README.md)
+English version: [README.md](https://github.com/ringeringeraja33/NarrativeCanvas/blob/main/README.md)
 
 当前版本：[1.3.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.3.0) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 

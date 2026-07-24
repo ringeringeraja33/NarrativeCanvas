@@ -6,7 +6,7 @@ Current release: [1.3.0](https://github.com/ringeringeraja33/NarrativeCanvas/rel
 
 Obsidian Community Plugins: [Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
-[中文版本](README-zh.md)
+[中文版本](https://github.com/ringeringeraja33/NarrativeCanvas/blob/main/README-zh.md)
 
 <video src="https://github.com/ringeringeraja33/NarrativeCanvas/raw/main/assets/videos/runtime.mp4" controls width="800" muted></video>
 
