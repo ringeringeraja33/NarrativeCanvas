@@ -204,6 +204,10 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 
 网页端点开**连接设置**，填入任意 OpenAI 兼容接口（endpoint、API key、模型），配置仅保存在本地浏览器。插件端在插件设置中填写相同字段，API key 保存在插件本地 `data.json`，请求通过 Obsidian 的 `requestUrl` 发送。该功能为实验性，标记为 **Beta**。
 
+任意 OpenAI 兼容服务均可使用。例如 Google **Gemini** 提供 OpenAI 兼容端点——填入 `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`、Gemini API key（来自 Google AI Studio）以及 `gemini-2.0-flash` 之类的模型即可。
+
+在 Obsidian 插件中，AI 悬浮按钮只有在 endpoint、API key 和模型三项都配置后才会出现，不用 AI 时不会碍事；独立网页版则始终显示按钮，因为配置表单就在按钮后面。
+
 ## 许可证
 
 © 2026 ringeringeraja33。基于 [GNU Affero 通用公共许可证 v3.0](LICENSE)(AGPL-3.0)授权。

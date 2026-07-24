@@ -207,6 +207,10 @@ The **AI** button at the bottom-left of the canvas opens an experimental copilot
 
 In the web app, open **Connection settings** and point it at any OpenAI-compatible endpoint (endpoint URL, API key, model); that config is stored only in your browser. In the Obsidian plugin, configure the same fields in plugin settings; the API key is stored in the plugin's local `data.json`, and requests use Obsidian's `requestUrl`. The feature is experimental and marked **Beta**.
 
+Any OpenAI-compatible provider works. For example, Google **Gemini** exposes an OpenAI-compatible endpoint — use `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` with a Gemini API key (from Google AI Studio) and a model such as `gemini-2.0-flash`.
+
+In the Obsidian plugin, the floating AI button appears only once the endpoint, API key, and model are all set, so it stays out of the way if you don't use the copilot. In the standalone web app the button is always available because its configuration form lives behind it.
+
 ## License
 
 © 2026 ringeringeraja33. Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).

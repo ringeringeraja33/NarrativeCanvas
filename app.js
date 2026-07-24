@@ -1293,6 +1293,8 @@ const uiTranslations = {
     "Category {name} still has {count} entries. Move or remove them first.": "分类 {name} 下还有 {count} 个条目，请先移动或删除它们。",
     "Move or remove its entries first.": "请先移动或删除该分类下的条目。",
     "Summary": "简介",
+    "Open large editor": "打开大编辑器",
+    "Edit text": "编辑文本",
     "New field name": "新字段名",
     "Remove template field: {key}": "移除模板字段：{key}",
     "Remove from template. Entry values are kept.": "从模板移除。条目中的已有值会保留。",
@@ -2393,6 +2395,7 @@ function createInitialRuntimeState() {
   visionBoardDrag: null,
   visionBoardLayerMenu: null,
   visionBoardLayerMenuDismiss: null,
+  expandEditor: null,
   choiceOptionExpandedIds: new Set(),
   choiceOptionConditionExpandedIds: new Set(),
   nodeSectionExpandedIds: new Set(["dialogTurns"]),
@@ -2502,6 +2505,7 @@ window.NarrativeCanvasApp = {
   loadVaultProject: loadCurrentVaultProject,
   reloadCodexFiles,
   refreshCodexCanvasPreviews,
+  refreshAiLauncher,
   importStoryMarkdownText,
   importStoryLayoutText,
   importStateSchemaText
@@ -2728,6 +2732,9 @@ function bindDom(scopeOverride = null) {
   dom.genericConfirmButton = dom.scope.querySelector("#genericConfirmButton");
   dom.genericConfirmSecondaryButton = dom.scope.querySelector("#genericConfirmSecondaryButton");
   dom.genericTextDialog = dom.scope.querySelector("#genericTextDialog");
+  dom.expandEditorDialog = dom.scope.querySelector("#expandEditorDialog");
+  dom.expandEditorTitle = dom.scope.querySelector("#expandEditorTitle");
+  dom.expandEditorInput = dom.scope.querySelector("#expandEditorInput");
   dom.genericTextKicker = dom.scope.querySelector("#genericTextKicker");
   dom.genericTextTitle = dom.scope.querySelector("#genericTextTitle");
   dom.genericTextLabel = dom.scope.querySelector("#genericTextLabel");
@@ -2925,6 +2932,10 @@ function bindEvents() {
     if (event.target === dom.genericConfirmDialog) dom.genericConfirmDialog.close("cancel");
   }, { signal });
   dom.genericTextDialog.addEventListener("close", handleGenericTextClose, { signal });
+  dom.expandEditorDialog?.addEventListener("close", handleExpandEditorClose, { signal });
+  dom.expandEditorDialog?.addEventListener("click", (event) => {
+    if (event.target === dom.expandEditorDialog) closeExpandEditor();
+  }, { signal });
   dom.genericTextDialog.addEventListener("click", (event) => {
     if (event.target === dom.genericTextDialog) dom.genericTextDialog.close("cancel");
   }, { signal });
@@ -11179,13 +11190,73 @@ function stopAiMessage({ silent = false } = {}) {
   renderAiPanel();
 }
 
+// Large centered editor for a node text field (issue #10). The dialog's textarea
+// carries the same data-node-field/data-node-id, so existing input handlers route
+// edits straight to the node; closing re-renders the inspector to sync the field.
+function openExpandEditor(nodeId, field, title) {
+  const node = getNode(nodeId);
+  if (!node || !dom.expandEditorDialog?.showModal) return;
+  state.expandEditor = { nodeId, field };
+  if (dom.expandEditorTitle) dom.expandEditorTitle.textContent = title || t("Edit text");
+  if (dom.expandEditorInput) {
+    dom.expandEditorInput.value = String(node[field] ?? "");
+    dom.expandEditorInput.dataset.nodeField = field;
+    dom.expandEditorInput.dataset.nodeId = nodeId;
+  }
+  dom.expandEditorDialog.showModal();
+  runAfterRender(() => {
+    dom.expandEditorInput?.focus?.();
+    const length = dom.expandEditorInput?.value.length || 0;
+    dom.expandEditorInput?.setSelectionRange?.(length, length);
+  });
+}
+
+function closeExpandEditor() {
+  if (dom.expandEditorDialog?.open) dom.expandEditorDialog.close();
+}
+
+function handleExpandEditorClose() {
+  state.expandEditor = null;
+  // Clear the routing attributes so the closed modal's textarea is not a stray
+  // duplicate of the inspector field.
+  if (dom.expandEditorInput) {
+    delete dom.expandEditorInput.dataset.nodeField;
+    delete dom.expandEditorInput.dataset.nodeId;
+    dom.expandEditorInput.value = "";
+  }
+  if (isCanvasFileActive()) {
+    renderNodes();
+    renderLinks();
+    markCanvasSurfaceRendered();
+  }
+  renderInspector();
+}
+
+// The in-canvas AI launcher is hidden inside Obsidian until endpoint, key, and model
+// are configured (issue #9). In the standalone web app the config form lives behind
+// the button, so it stays visible there.
+function isAiLauncherVisible() {
+  const host = window.NarrativeCanvasHost;
+  if (host) return typeof host.hasAiConfig === "function" ? Boolean(host.hasAiConfig()) : true;
+  return true;
+}
+
 function renderAiFloatingState() {
+  const launcherVisible = isAiLauncherVisible();
+  if (!launcherVisible && state.aiOpen) state.aiOpen = false;
   if (dom.aiFloatingWindow) dom.aiFloatingWindow.hidden = !state.aiOpen;
   if (dom.aiFloatingButton) {
+    dom.aiFloatingButton.hidden = !launcherVisible;
     dom.aiFloatingButton.setAttribute("aria-expanded", state.aiOpen ? "true" : "false");
     dom.aiFloatingButton.classList.toggle("active", state.aiOpen);
   }
   renderFloatingWindowPinState("ai");
+}
+
+// Called by the plugin after AI settings change so the launcher appears or hides
+// without reopening the view.
+function refreshAiLauncher() {
+  renderAiFloatingState();
 }
 
 function toggleAiWindow(force = null) {
@@ -11664,9 +11735,12 @@ function getNodeBodyLabel(node) {
 
 function renderNodeBodyField(node) {
   return `
-    <label class="field">
+    <label class="field field-with-expand">
       <span>${escapeHtml(getNodeBodyLabel(node))}</span>
-      <textarea data-node-field="body">${escapeHtml(node.body || "")}</textarea>
+      <div class="field-expand-wrap">
+        <textarea data-node-field="body">${escapeHtml(node.body || "")}</textarea>
+        <button class="icon-button field-expand-button" type="button" data-action="expand-node-field" data-node-id="${escapeAttr(node.id)}" data-expand-field="body" data-expand-title="${escapeAttr(getNodeBodyLabel(node))}" title="${escapeAttr(t("Open large editor"))}" aria-label="${escapeAttr(t("Open large editor"))}">⤢</button>
+      </div>
     </label>
   `;
 }
@@ -13522,6 +13596,8 @@ function handleAction(target) {
   if (action === "close-codex-image-picker") { closeCodexImagePicker(target.dataset.characterId); return; }
   if (action === "open-vision-board") { openVisionBoard(target.dataset.visionBoardKind, target.dataset.visionBoardId); return; }
   if (action === "close-vision-board") { closeVisionBoard(); return; }
+  if (action === "expand-node-field") { openExpandEditor(target.dataset.nodeId, target.dataset.expandField, target.dataset.expandTitle); return; }
+  if (action === "close-expand-editor") { closeExpandEditor(); return; }
   if (action === "open-codex-reference") { void openCodexReference(target.dataset.vaultFileReference); return; }
   if (action === "remove-codex-image") { removeCodexImage(target.dataset.characterId, Number(target.dataset.codexImageIndex)); return; }
   if (action === "remove-codex-vault-file") { removeCodexVaultFile(target.dataset.characterId, Number(target.dataset.codexVaultFileIndex)); return; }
@@ -15763,6 +15839,7 @@ function isNarrativeCanvasTarget(target) {
     || dom.eventColumnsResetDialog?.contains(target)
     || dom.genericConfirmDialog?.contains(target)
     || dom.genericTextDialog?.contains(target)
+    || dom.expandEditorDialog?.contains(target)
     || dom.playbookHelpDialog?.contains(target)
     || dom.playRuleDialog?.contains(target)
     || dom.nodeRequiredDialog?.contains(target)

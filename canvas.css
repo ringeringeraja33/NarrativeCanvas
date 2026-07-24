@@ -1529,6 +1529,87 @@ button {
   min-height: 30px;
 }
 
+/* Large centered text editor (issue #10). */
+.expand-editor-dialog {
+  width: min(920px, 92vw);
+  max-width: 92vw;
+  height: min(80vh, 900px);
+  padding: 0;
+  border: 1px solid var(--background-modifier-border-hover);
+  border-radius: var(--radius-l);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.expand-editor-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.expand-editor-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.expand-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.expand-editor-header h2 {
+  margin: 2px 0 0;
+  font-size: 18px;
+}
+
+.expand-editor-input {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 18px 20px;
+  border: 0;
+  border-radius: 0;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--nc-font-text);
+  font-size: 16px;
+  line-height: 1.7;
+  resize: none;
+}
+
+/* Expand affordance on multi-line inspector fields. */
+.field-expand-wrap {
+  position: relative;
+  display: block;
+}
+
+.field-expand-button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.5;
+}
+
+.field-expand-wrap:hover .field-expand-button,
+.field-expand-button:focus-visible {
+  opacity: 1;
+}
+
+.field-expand-wrap textarea {
+  width: 100%;
+  padding-right: 34px;
+}
+
 /* Corner grip for resizing focused vision-board tiles. */
 .vision-board-tile-resize {
   position: absolute;

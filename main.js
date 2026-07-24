@@ -383,6 +383,16 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     new Notice(`${pluginText(this, name)} failed.`);
   }
 
+  // True only when endpoint, API key, and model are all set. Drives whether the
+  // in-canvas AI launcher appears (issue #9).
+  hasAiConfig() {
+    return Boolean(
+      String(this.settings.aiEndpoint || "").trim()
+      && String(this.settings.aiApiKey || "").trim()
+      && String(this.settings.aiModel || "").trim()
+    );
+  }
+
   async requestAi(payload) {
     const endpoint = String(this.settings.aiEndpoint || "").trim();
     const apiKey = String(this.settings.aiApiKey || "").trim();
@@ -1419,6 +1429,7 @@ class NarrativeCanvasView extends ItemView {
         getLanguage: () => this.plugin.getEffectiveLanguage(),
         aiChat: (payload) => this.plugin.requestAi(payload),
         aiChatStream: (payload, onDelta, signal) => this.plugin.requestAiStream(payload, onDelta, signal),
+        hasAiConfig: () => this.plugin.hasAiConfig(),
         ensureProjectFile: (savedStateJson, options) => this.plugin.ensureProjectFile(savedStateJson, options),
         createProjectFile: (savedStateJson, options) => this.plugin.createProjectFile(savedStateJson, options),
         previewNewProjectFile: (savedStateJson, options) => this.plugin.previewNewProjectFile(savedStateJson, options),
@@ -1675,9 +1686,12 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
       });
 
     containerEl.createEl("h3", { text: "AI" });
-    new Setting(containerEl).setName("API endpoint").setDesc("OpenAI-compatible chat completions endpoint.").addText((input) => input.setPlaceholder("https://api.example.com/v1/chat/completions").setValue(this.plugin.settings.aiEndpoint || "").onChange(async (value) => { this.plugin.settings.aiEndpoint = String(value || "").trim(); await this.plugin.savePluginData(); }));
-    new Setting(containerEl).setName("API key").setDesc("Stored in this plugin's local data.json.").addText((input) => { input.inputEl.type = "password"; input.setValue(this.plugin.settings.aiApiKey || "").onChange(async (value) => { this.plugin.settings.aiApiKey = String(value || "").trim(); await this.plugin.savePluginData(); }); });
-    new Setting(containerEl).setName("Model").addText((input) => input.setPlaceholder("model-name").setValue(this.plugin.settings.aiModel || "").onChange(async (value) => { this.plugin.settings.aiModel = String(value || "").trim(); await this.plugin.savePluginData(); }));
+    // The AI launcher is hidden in the canvas until all three fields are set;
+    // refresh it live so it appears/hides as the user edits these settings.
+    const refreshLauncher = () => window.NarrativeCanvasApp?.refreshAiLauncher?.();
+    new Setting(containerEl).setName("API endpoint").setDesc("OpenAI-compatible chat completions endpoint. Gemini works via https://generativelanguage.googleapis.com/v1beta/openai/chat/completions.").addText((input) => input.setPlaceholder("https://api.example.com/v1/chat/completions").setValue(this.plugin.settings.aiEndpoint || "").onChange(async (value) => { this.plugin.settings.aiEndpoint = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
+    new Setting(containerEl).setName("API key").setDesc("Stored in this plugin's local data.json.").addText((input) => { input.inputEl.type = "password"; input.setValue(this.plugin.settings.aiApiKey || "").onChange(async (value) => { this.plugin.settings.aiApiKey = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }); });
+    new Setting(containerEl).setName("Model").setDesc("For Gemini, e.g. gemini-2.0-flash.").addText((input) => input.setPlaceholder("model-name").setValue(this.plugin.settings.aiModel || "").onChange(async (value) => { this.plugin.settings.aiModel = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
 
   }
 }
@@ -3596,6 +3610,87 @@ const CANVAS_STYLE_CSS = [
   "",
   ".node-vault-file-input-row .vault-drag-handle {",
   "  min-height: 30px;",
+  "}",
+  "",
+  "/* Large centered text editor (issue #10). */",
+  ".expand-editor-dialog {",
+  "  width: min(920px, 92vw);",
+  "  max-width: 92vw;",
+  "  height: min(80vh, 900px);",
+  "  padding: 0;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-l);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".expand-editor-dialog::backdrop {",
+  "  background: rgba(0, 0, 0, 0.45);",
+  "}",
+  "",
+  ".expand-editor-shell {",
+  "  display: grid;",
+  "  grid-template-rows: auto minmax(0, 1fr);",
+  "  width: 100%;",
+  "  height: 100%;",
+  "}",
+  "",
+  ".expand-editor-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  padding: 14px 16px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".expand-editor-header h2 {",
+  "  margin: 2px 0 0;",
+  "  font-size: 18px;",
+  "}",
+  "",
+  ".expand-editor-input {",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  margin: 0;",
+  "  padding: 18px 20px;",
+  "  border: 0;",
+  "  border-radius: 0;",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "  font-family: var(--nc-font-text);",
+  "  font-size: 16px;",
+  "  line-height: 1.7;",
+  "  resize: none;",
+  "}",
+  "",
+  "/* Expand affordance on multi-line inspector fields. */",
+  ".field-expand-wrap {",
+  "  position: relative;",
+  "  display: block;",
+  "}",
+  "",
+  ".field-expand-button {",
+  "  position: absolute;",
+  "  top: 4px;",
+  "  right: 4px;",
+  "  width: 26px;",
+  "  min-width: 26px;",
+  "  height: 26px;",
+  "  padding: 0;",
+  "  font-size: 14px;",
+  "  line-height: 1;",
+  "  opacity: 0.5;",
+  "}",
+  "",
+  ".field-expand-wrap:hover .field-expand-button,",
+  ".field-expand-button:focus-visible {",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".field-expand-wrap textarea {",
+  "  width: 100%;",
+  "  padding-right: 34px;",
   "}",
   "",
   "/* Corner grip for resizing focused vision-board tiles. */",
@@ -12361,7 +12456,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003clink rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"./assets/icons/favicon-32x32.png\"\u003e",
   "    \u003clink rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"./assets/icons/apple-touch-icon.png\"\u003e",
   "    \u003clink rel=\"manifest\" href=\"./site.webmanifest\"\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.0-53b58d56\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.1-a96dd595\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -12772,6 +12867,19 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/form\u003e",
   "    \u003c/dialog\u003e",
   "",
+  "    \u003cdialog id=\"expandEditorDialog\" class=\"expand-editor-dialog\" aria-label=\"Expanded editor\"\u003e",
+  "      \u003cdiv class=\"expand-editor-shell\"\u003e",
+  "        \u003cheader class=\"expand-editor-header\"\u003e",
+  "          \u003cdiv\u003e",
+  "            \u003cspan class=\"pane-kicker\"\u003eEditor\u003c/span\u003e",
+  "            \u003ch2 id=\"expandEditorTitle\"\u003eEdit text\u003c/h2\u003e",
+  "          \u003c/div\u003e",
+  "          \u003cbutton class=\"icon-button\" type=\"button\" data-action=\"close-expand-editor\" aria-label=\"Close editor\" title=\"Close editor\"\u003ex\u003c/button\u003e",
+  "        \u003c/header\u003e",
+  "        \u003ctextarea id=\"expandEditorInput\" class=\"expand-editor-input\" spellcheck=\"false\" aria-label=\"Expanded text editor\"\u003e\u003c/textarea\u003e",
+  "      \u003c/div\u003e",
+  "    \u003c/dialog\u003e",
+  "",
   "    \u003cdialog id=\"playbookHelpDialog\" class=\"nc-notice-dialog playbook-help-dialog\" aria-label=\"Playbook help\"\u003e",
   "      \u003cform method=\"dialog\" class=\"notice-shell playbook-help-shell\"\u003e",
   "        \u003cheader\u003e",
@@ -12914,7 +13022,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=1.3.0-53b58d56\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=1.3.1-a96dd595\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -14215,6 +14323,8 @@ function installNarrativeCanvasApp() {
       "Category {name} still has {count} entries. Move or remove them first.": "分类 {name} 下还有 {count} 个条目，请先移动或删除它们。",
       "Move or remove its entries first.": "请先移动或删除该分类下的条目。",
       "Summary": "简介",
+      "Open large editor": "打开大编辑器",
+      "Edit text": "编辑文本",
       "New field name": "新字段名",
       "Remove template field: {key}": "移除模板字段：{key}",
       "Remove from template. Entry values are kept.": "从模板移除。条目中的已有值会保留。",
@@ -15315,6 +15425,7 @@ function installNarrativeCanvasApp() {
     visionBoardDrag: null,
     visionBoardLayerMenu: null,
     visionBoardLayerMenuDismiss: null,
+    expandEditor: null,
     choiceOptionExpandedIds: new Set(),
     choiceOptionConditionExpandedIds: new Set(),
     nodeSectionExpandedIds: new Set(["dialogTurns"]),
@@ -15424,6 +15535,7 @@ function installNarrativeCanvasApp() {
     loadVaultProject: loadCurrentVaultProject,
     reloadCodexFiles,
     refreshCodexCanvasPreviews,
+    refreshAiLauncher,
     importStoryMarkdownText,
     importStoryLayoutText,
     importStateSchemaText
@@ -15650,6 +15762,9 @@ function installNarrativeCanvasApp() {
     dom.genericConfirmButton = dom.scope.querySelector("#genericConfirmButton");
     dom.genericConfirmSecondaryButton = dom.scope.querySelector("#genericConfirmSecondaryButton");
     dom.genericTextDialog = dom.scope.querySelector("#genericTextDialog");
+    dom.expandEditorDialog = dom.scope.querySelector("#expandEditorDialog");
+    dom.expandEditorTitle = dom.scope.querySelector("#expandEditorTitle");
+    dom.expandEditorInput = dom.scope.querySelector("#expandEditorInput");
     dom.genericTextKicker = dom.scope.querySelector("#genericTextKicker");
     dom.genericTextTitle = dom.scope.querySelector("#genericTextTitle");
     dom.genericTextLabel = dom.scope.querySelector("#genericTextLabel");
@@ -15847,6 +15962,10 @@ function installNarrativeCanvasApp() {
       if (event.target === dom.genericConfirmDialog) dom.genericConfirmDialog.close("cancel");
     }, { signal });
     dom.genericTextDialog.addEventListener("close", handleGenericTextClose, { signal });
+    dom.expandEditorDialog?.addEventListener("close", handleExpandEditorClose, { signal });
+    dom.expandEditorDialog?.addEventListener("click", (event) => {
+      if (event.target === dom.expandEditorDialog) closeExpandEditor();
+    }, { signal });
     dom.genericTextDialog.addEventListener("click", (event) => {
       if (event.target === dom.genericTextDialog) dom.genericTextDialog.close("cancel");
     }, { signal });
@@ -24093,13 +24212,73 @@ function installNarrativeCanvasApp() {
     renderAiPanel();
   }
 
+  // Large centered editor for a node text field (issue #10). The dialog's textarea
+  // carries the same data-node-field/data-node-id, so existing input handlers route
+  // edits straight to the node; closing re-renders the inspector to sync the field.
+  function openExpandEditor(nodeId, field, title) {
+    const node = getNode(nodeId);
+    if (!node || !dom.expandEditorDialog?.showModal) return;
+    state.expandEditor = { nodeId, field };
+    if (dom.expandEditorTitle) dom.expandEditorTitle.textContent = title || t("Edit text");
+    if (dom.expandEditorInput) {
+      dom.expandEditorInput.value = String(node[field] ?? "");
+      dom.expandEditorInput.dataset.nodeField = field;
+      dom.expandEditorInput.dataset.nodeId = nodeId;
+    }
+    dom.expandEditorDialog.showModal();
+    runAfterRender(() => {
+      dom.expandEditorInput?.focus?.();
+      const length = dom.expandEditorInput?.value.length || 0;
+      dom.expandEditorInput?.setSelectionRange?.(length, length);
+    });
+  }
+
+  function closeExpandEditor() {
+    if (dom.expandEditorDialog?.open) dom.expandEditorDialog.close();
+  }
+
+  function handleExpandEditorClose() {
+    state.expandEditor = null;
+    // Clear the routing attributes so the closed modal's textarea is not a stray
+    // duplicate of the inspector field.
+    if (dom.expandEditorInput) {
+      delete dom.expandEditorInput.dataset.nodeField;
+      delete dom.expandEditorInput.dataset.nodeId;
+      dom.expandEditorInput.value = "";
+    }
+    if (isCanvasFileActive()) {
+      renderNodes();
+      renderLinks();
+      markCanvasSurfaceRendered();
+    }
+    renderInspector();
+  }
+
+  // The in-canvas AI launcher is hidden inside Obsidian until endpoint, key, and model
+  // are configured (issue #9). In the standalone web app the config form lives behind
+  // the button, so it stays visible there.
+  function isAiLauncherVisible() {
+    const host = window.NarrativeCanvasHost;
+    if (host) return typeof host.hasAiConfig === "function" ? Boolean(host.hasAiConfig()) : true;
+    return true;
+  }
+
   function renderAiFloatingState() {
+    const launcherVisible = isAiLauncherVisible();
+    if (!launcherVisible && state.aiOpen) state.aiOpen = false;
     if (dom.aiFloatingWindow) dom.aiFloatingWindow.hidden = !state.aiOpen;
     if (dom.aiFloatingButton) {
+      dom.aiFloatingButton.hidden = !launcherVisible;
       dom.aiFloatingButton.setAttribute("aria-expanded", state.aiOpen ? "true" : "false");
       dom.aiFloatingButton.classList.toggle("active", state.aiOpen);
     }
     renderFloatingWindowPinState("ai");
+  }
+
+  // Called by the plugin after AI settings change so the launcher appears or hides
+  // without reopening the view.
+  function refreshAiLauncher() {
+    renderAiFloatingState();
   }
 
   function toggleAiWindow(force = null) {
@@ -24573,9 +24752,12 @@ function installNarrativeCanvasApp() {
 
   function renderNodeBodyField(node) {
     return `
-      <label class="field">
+      <label class="field field-with-expand">
         <span>${escapeHtml(getNodeBodyLabel(node))}</span>
-        <textarea data-node-field="body">${escapeHtml(node.body || "")}</textarea>
+        <div class="field-expand-wrap">
+          <textarea data-node-field="body">${escapeHtml(node.body || "")}</textarea>
+          <button class="icon-button field-expand-button" type="button" data-action="expand-node-field" data-node-id="${escapeAttr(node.id)}" data-expand-field="body" data-expand-title="${escapeAttr(getNodeBodyLabel(node))}" title="${escapeAttr(t("Open large editor"))}" aria-label="${escapeAttr(t("Open large editor"))}">⤢</button>
+        </div>
       </label>
     `;
   }
@@ -26431,6 +26613,8 @@ function installNarrativeCanvasApp() {
     if (action === "close-codex-image-picker") { closeCodexImagePicker(target.dataset.characterId); return; }
     if (action === "open-vision-board") { openVisionBoard(target.dataset.visionBoardKind, target.dataset.visionBoardId); return; }
     if (action === "close-vision-board") { closeVisionBoard(); return; }
+    if (action === "expand-node-field") { openExpandEditor(target.dataset.nodeId, target.dataset.expandField, target.dataset.expandTitle); return; }
+    if (action === "close-expand-editor") { closeExpandEditor(); return; }
     if (action === "open-codex-reference") { void openCodexReference(target.dataset.vaultFileReference); return; }
     if (action === "remove-codex-image") { removeCodexImage(target.dataset.characterId, Number(target.dataset.codexImageIndex)); return; }
     if (action === "remove-codex-vault-file") { removeCodexVaultFile(target.dataset.characterId, Number(target.dataset.codexVaultFileIndex)); return; }
@@ -28644,6 +28828,7 @@ function installNarrativeCanvasApp() {
       || dom.eventColumnsResetDialog?.contains(target)
       || dom.genericConfirmDialog?.contains(target)
       || dom.genericTextDialog?.contains(target)
+      || dom.expandEditorDialog?.contains(target)
       || dom.playbookHelpDialog?.contains(target)
       || dom.playRuleDialog?.contains(target)
       || dom.nodeRequiredDialog?.contains(target)
