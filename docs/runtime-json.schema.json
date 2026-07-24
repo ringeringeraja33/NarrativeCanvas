@@ -53,6 +53,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/character" }
     },
+    "codex": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/codexEntry" }
+    },
     "nodes": {
       "type": "array",
       "items": { "$ref": "#/$defs/node" }
@@ -106,6 +110,20 @@
         "name": { "type": "string" },
         "role": { "type": "string" },
         "voice": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "codexEntry": {
+      "type": "object",
+      "required": ["id", "name", "kind", "role", "voice", "tags", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "kind": { "enum": ["Character", "Location", "Item", "Lore"] },
+        "role": { "type": "string" },
+        "voice": { "type": "string" },
+        "tags": { "type": "string" },
         "notes": { "type": "string" }
       }
     },
@@ -215,8 +233,10 @@
       "required": ["characterId", "name", "role"],
       "additionalProperties": false,
       "properties": {
+        "codexId": { "type": "string" },
         "characterId": { "type": "string" },
         "name": { "type": "string" },
+        "kind": { "enum": ["Character", "Location", "Item", "Lore"] },
         "role": { "type": "string" }
       }
     },

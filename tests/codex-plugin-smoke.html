@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Codex plugin smoke</title>
+  </head>
+  <body data-codex-smoke-status="running">
+    <pre id="codex-smoke-report">running</pre>
+    <script>
+      const report = [];
+      const record = (message) => report.push(message);
+      const assert = (message, value) => {
+        if (!value) throw new Error(message);
+        record(`[ok] ${message}`);
+      };
+      const waitFor = async (message, test, timeout = 3000) => {
+        const started = performance.now();
+        while (performance.now() - started < timeout) {
+          if (test()) return;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        throw new Error(message);
+      };
+      const click = (element) => element?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      const extractBody = (html) => html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || html;
+
+      (async () => {
+        try {
+          const [html, css, appJs, fixtureText] = await Promise.all([
+            fetch(new URL("../index.html", location.href)).then((response) => response.text()),
+            fetch(new URL("../canvas.css", location.href)).then((response) => response.text()),
+            fetch(new URL("../app.js", location.href)).then((response) => response.text()),
+            fetch(new URL("fixtures/characters-cast-chips.ncanvas", location.href)).then((response) => response.text())
+          ]);
+          const frame = document.createElement("iframe");
+          document.body.append(frame);
+          const doc = frame.contentDocument;
+          const win = frame.contentWindow;
+          doc.open();
+          doc.write('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>');
+          doc.close();
+          const style = doc.createElement("style");
+          style.textContent = css;
+          doc.head.append(style);
+          const host = doc.createElement("div");
+          host.className = "narrative-canvas-plugin-host";
+          host.innerHTML = extractBody(html);
+          doc.body.append(host);
+
+          let externalName = "External Codex Name";
+          const openedVaultFiles = [];
+          win.NarrativeCanvasHost = {
+            root: host,
+            loadProject: async () => fixtureText,
+            saveProject: async () => "Project/Story.ncanvas",
+            getProjectFile: () => "Project/Story.ncanvas",
+            getLanguage: () => "en",
+            getAutoSaveIntervalMs: () => 60000,
+            loadCodexEntries: async () => [{
+              id: "c0",
+              name: externalName,
+              kind: "Character",
+              role: "Lead",
+              voice: "Quiet",
+              tags: "hero",
+              notes: "Managed Markdown body",
+              codexFile: "Project/Codex/External Codex Name.md",
+              images: [],
+              imageFile: "",
+              imagePreview: false,
+              hidden: false
+            }],
+            searchVaultFiles: async () => ["Notes/not-an-image.md", "Assets/portrait.svg", "Assets/location.svg"],
+            openVaultFile: async (path) => { openedVaultFiles.push(path); return path; },
+            importCodexImage: async (file) => `Project/Library/attachments/${file.name}`,
+            getVaultResourceUrl: () => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' fill='%237c5cff'/%3E%3C/svg%3E"
+          };
+          const script = doc.createElement("script");
+          script.textContent = appJs;
+          doc.body.append(script);
+          assert("plugin app initializes", await win.NarrativeCanvasApp.init());
+          assert("Codex command executes", win.NarrativeCanvasApp.executeCommand("open-characters"));
+          await waitFor("Codex page did not open", () => doc.querySelector(".app-shell")?.dataset.activeFile === "characters");
+          click(doc.querySelector('[data-action="clear-character-search"]'));
+          await waitFor("managed Markdown overview did not render", () => doc.querySelector('[data-action="open-codex-entry-detail"][data-character-id="c0"]')?.textContent.includes(externalName));
+          click(doc.querySelector('[data-action="open-codex-entry-detail"][data-character-id="c0"]'));
+          await waitFor("managed Markdown did not override embedded Codex data", () => doc.querySelector('[data-character-card-id="c0"] [data-character-field="name"]')?.value === externalName);
+          let card = doc.querySelector('[data-character-card-id="c0"]');
+          assert("managed Markdown overrides embedded Codex data", Boolean(card));
+          assert("managed Markdown path is visible", card?.textContent.includes("Project/Codex/External Codex Name.md"));
+          assert("stored tags render as removable tokens", card?.querySelector(".codex-tag-chip")?.textContent.includes("hero"));
+          click(card?.querySelector('[data-action="choose-codex-image-file"]'));
+          await waitFor("image suggestion did not open", () => Boolean(doc.querySelector('[data-vault-file-path="Assets/portrait.svg"]')));
+          assert("non-image suggestions are excluded", !doc.querySelector('[data-vault-file-path="Notes/not-an-image.md"]'));
+          click(doc.querySelector('[data-vault-file-path="Assets/portrait.svg"]'));
+          await waitFor("image board did not render", () => Boolean(doc.querySelector('.vision-board-tile[title="Assets/portrait.svg"] img')));
+          click(doc.querySelector('[data-action="choose-codex-image-file"]'));
+          await waitFor("second image suggestion did not open", () => Boolean(doc.querySelector('[data-vault-file-path="Assets/location.svg"]')));
+          assert("local import is offered inside the compact picker", Boolean(doc.querySelector('[data-codex-image-picker] [data-action="import-local-codex-images"]')));
+          click(doc.querySelector('[data-vault-file-path="Assets/location.svg"]'));
+          await waitFor("multiple images did not render in the embedded board", () => doc.querySelectorAll(".vision-board-canvas.is-embedded .vision-board-tile").length === 2);
+          assert("large image drop target is replaced by one compact add action", !doc.querySelector(".codex-image-target") && doc.querySelectorAll('[data-character-card-id="c0"] > .codex-plugin-files [data-action="choose-codex-image-file"]').length === 1);
+          assert("local import uses a multiple image input", Boolean(doc.querySelector("[data-codex-local-image-input][multiple]")));
+          click(doc.querySelector('[data-action="open-vision-board"]'));
+          await waitFor("focused vision board did not open", () => doc.querySelector("#visionBoardDialog")?.open && doc.querySelectorAll("#visionBoardCanvas .vision-board-tile").length === 2);
+          const focusedOpen = doc.querySelector('#visionBoardCanvas [data-vault-file-reference="Assets/portrait.svg"]');
+          click(focusedOpen);
+          await waitFor("vision board image did not open in the vault", () => openedVaultFiles.includes("Assets/portrait.svg"));
+          click(doc.querySelector('[data-action="close-vision-board"]'));
+          assert("raw image path input is removed", !doc.querySelector("[data-character-image-file]"));
+          let tagInput = doc.querySelector("[data-character-tag-input]");
+          tagInput.value = "investigator, archive";
+          tagInput.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: "," }));
+          await waitFor("comma did not create a tag token", () => [...doc.querySelectorAll(".codex-tag-chip")].some((chip) => chip.textContent.includes("investigator")));
+          await waitFor("text after the comma did not stay in the tag draft", () => {
+            tagInput = doc.querySelector("[data-character-tag-input]");
+            return tagInput?.value === " archive" || tagInput?.value === "archive";
+          });
+          tagInput.dispatchEvent(new win.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+          await waitFor("Enter did not create a tag token", () => [...doc.querySelectorAll(".codex-tag-chip")].some((chip) => chip.textContent.includes("archive")));
+          const investigatorTag = [...doc.querySelectorAll(".codex-tag-chip")].find((chip) => chip.textContent.includes("investigator"));
+          click(investigatorTag);
+          await waitFor("tag remove control did not remove one token", () => ![...doc.querySelectorAll(".codex-tag-chip")].some((chip) => chip.textContent.includes("investigator")));
+          assert("tag tokens retain other values after one removal", [...doc.querySelectorAll(".codex-tag-chip")].some((chip) => chip.textContent.includes("archive")));
+          externalName = "Renamed in Markdown";
+          assert("live Codex reload detects external edits", await win.NarrativeCanvasApp.reloadCodexFiles());
+          card = doc.querySelector('[data-character-card-id="c0"]');
+          assert("live Codex reload refreshes the card", card?.querySelector('[data-character-field="name"]')?.value === externalName);
+          win.NarrativeCanvasApp.destroy();
+          document.body.dataset.codexSmokeStatus = "pass";
+        } catch (error) {
+          record(`[fail] ${error.message || error}`);
+          document.body.dataset.codexSmokeStatus = "fail";
+        } finally {
+          document.querySelector("#codex-smoke-report").textContent = report.join("\n");
+        }
+      })();
+    </script>
+  </body>
+</html>

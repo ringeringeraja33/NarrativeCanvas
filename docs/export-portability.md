@@ -95,7 +95,7 @@ Exports should follow the same runtime semantics as Play preview wherever the ta
 
 ### Runtime JSON
 
-Runtime JSON is the source of truth for portable consumers. It strips canvas layout fields and keeps the runtime graph, variables, characters, conditions, effects, routing, play rules, and export report.
+Runtime JSON is the source of truth for portable consumers. It strips canvas layout fields and keeps the runtime graph, variables, Narrative Library entries, the compatibility-only Character list, conditions, effects, routing, play rules, and export report. Node references include `codexId` and `kind`; `characterId` remains as a compatibility alias.
 
 Schema: [`runtime-json.schema.json`](runtime-json.schema.json)
 

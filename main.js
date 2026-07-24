@@ -1,10 +1,13 @@
-const { AbstractInputSuggest, ItemView, Notice, Plugin, PluginSettingTab, Setting, SuggestModal, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
+const { AbstractInputSuggest, ItemView, MarkdownRenderer, Notice, Plugin, PluginSettingTab, Setting, SuggestModal, TFile, TFolder, normalizePath, parseYaml, requestUrl } = require("obsidian");
 
 const VIEW_TYPE = "narrative-canvas-view";
 const PLUGIN_ID = "narrative-canvas";
 const PROJECT_EXTENSIONS = ["ncanvas", "narrativecanvas"];
 const LEGACY_JSON_EXTENSION = "json";
 const DEFAULT_PROJECT_EXTENSION = "ncanvas";
+const DEFAULT_LIBRARY_FOLDER_NAME = "Library";
+const LEGACY_CODEX_FOLDER_NAME = "Codex";
+const DEFAULT_CODEX_ASSET_FOLDER_NAME = "Assets";
 const SAVED_STATE_VERSION = 1;
 const DEFAULT_FILENAME_TEMPLATE = "{{project title}}-{{YYYY-MM-DD HHmmss}}.ncanvas";
 const DEFAULT_AUTO_SAVE_INTERVAL_SECONDS = 0;
@@ -58,12 +61,12 @@ const PLUGIN_TEXT = {
     "Open sample": "打开示例",
     "Open Narrative Canvas": "打开 Narrative Canvas",
     "Open sample Narrative Canvas project": "打开 Narrative Canvas 示例项目",
-    "Project save folder": "项目保存文件夹",
+    "New project root folder": "新项目主路径",
     "Reset": "重置",
     "Sample project": "示例项目",
     "Save project file to vault": "保存项目文件到库",
     "Seconds between automatic Narrative Canvas saves. Leave empty to use the default interval ({value}).": "Narrative Canvas 自动保存的间隔秒数。留空则使用默认间隔（{value}）。",
-    "Vault-relative folder for Narrative Canvas project files. Leave empty to save in the vault root.": "Narrative Canvas 项目文件相对于库的保存文件夹。留空则保存到库根目录。",
+    "Each new project gets its own folder here, containing the .ncanvas file and a Library folder. Leave empty to use the vault root.": "每个新项目会在此路径下创建独立文件夹，其中包含 .ncanvas 文件和 Library 资料库文件夹。留空则使用库根目录。",
     "Available placeholders: ": "可用占位符："
   }
 };
@@ -82,7 +85,7 @@ const CANVAS_COMMAND_DEFINITIONS = [
   { id: "fit-canvas-to-view", name: "Fit canvas to view" },
   { id: "focus-selected-node", name: "Focus selected node" },
   { id: "focus-workspace-search", name: "Focus workspace search" },
-  { id: "open-characters", name: "Open Characters" },
+  { id: "open-characters", name: "Open Narrative Library" },
   { id: "open-events", name: "Open Events Sheet" },
   { id: "open-playbook", name: "Open Playbook" },
   { id: "open-document", name: "Open Document" },
@@ -92,8 +95,188 @@ const CANVAS_COMMAND_DEFINITIONS = [
 const LEGACY_PROJECT_FILE = "NarrativeCanvas/project.json";
 const STATE_FILE = "data.json";
 
+function normalizeCodexMarkdownKind(value) {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  if (normalized === "character") return "Character";
+  if (normalized === "location") return "Location";
+  if (normalized === "item") return "Item";
+  if (normalized === "lore") return "Lore";
+  // Custom categories round-trip by name; only an empty value falls back.
+  return raw || "Character";
+}
+
+function normalizeCodexMarkdownTags(value) {
+  if (Array.isArray(value)) return value.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ");
+  return String(value || "").trim();
+}
+
+function normalizeCodexMarkdownImages(value, legacyReference = "") {
+  const source = Array.isArray(value) ? value : [];
+  const images = [];
+  source.forEach((entry, index) => {
+    const path = normalizeVaultLinkReference(typeof entry === "string" ? entry : entry?.path || entry?.image || entry?.reference);
+    if (!path || images.some((image) => image.path === path)) return;
+    const column = index % 3;
+    const row = Math.floor(index / 3) % 3;
+    const fallback = { x: 4 + column * 31, y: 5 + row * 30, w: 28 };
+    const clamp = (input, fallbackValue, min, max) => {
+      const number = Number(input);
+      return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallbackValue;
+    };
+    images.push({
+      path,
+      x: clamp(entry?.x, fallback.x, 0, 90),
+      y: clamp(entry?.y, fallback.y, 0, 88),
+      w: clamp(entry?.w, fallback.w, 10, 90)
+    });
+  });
+  const legacyPath = normalizeVaultLinkReference(legacyReference);
+  if (legacyPath && !images.some((image) => image.path === legacyPath)) {
+    images.unshift({ path: legacyPath, x: 4, y: 5, w: 28 });
+  }
+  return images;
+}
+
+// Frontmatter keys managed by the built-in fields; custom fields may not shadow them.
+const CODEX_RESERVED_FRONTMATTER_KEYS = new Set([
+  "narrative_canvas_codex", "id", "name", "category", "kind", "role", "voice",
+  "tags", "notes", "images", "image", "image_preview", "hidden", "files", "canvas", "icon"
+]);
+
+function normalizeCodexMarkdownVaultFiles(value) {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  return source
+    .map((entry) => normalizeVaultLinkReference(typeof entry === "string" ? entry : entry?.path || ""))
+    .filter((path) => {
+      if (!path || seen.has(path)) return false;
+      seen.add(path);
+      return true;
+    });
+}
+
+function normalizeCodexMarkdownExtraFields(value) {
+  const source = Array.isArray(value)
+    ? value
+    : (value && typeof value === "object" ? Object.entries(value).map(([key, entry]) => ({ key, value: entry })) : []);
+  const seen = new Set();
+  const normalized = [];
+  source.forEach((entry) => {
+    const key = String(entry?.key ?? "").trim();
+    if (!key || CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase()) || seen.has(key)) return;
+    seen.add(key);
+    const raw = entry?.value;
+    normalized.push({ key, value: raw == null ? "" : (typeof raw === "object" ? JSON.stringify(raw) : String(raw)) });
+  });
+  return normalized;
+}
+
+function normalizeCodexEntryForMarkdown(entry, index = 0) {
+  const source = entry && typeof entry === "object" ? entry : {};
+  const images = normalizeCodexMarkdownImages(source.images, source.imageFile || source.image || "");
+  return {
+    id: String(source.id || `c${index}`).trim() || `c${index}`,
+    name: String(source.name || `Library Entry ${index + 1}`).trim() || `Library Entry ${index + 1}`,
+    kind: normalizeCodexMarkdownKind(source.kind || source.category),
+    role: String(source.role || ""),
+    voice: String(source.voice || ""),
+    tags: normalizeCodexMarkdownTags(source.tags),
+    notes: String(source.notes || ""),
+    extraFields: normalizeCodexMarkdownExtraFields(source.extraFields),
+    vaultFiles: normalizeCodexMarkdownVaultFiles(source.vaultFiles ?? source.files),
+    canvasFile: normalizeVaultPath(source.canvasFile ?? source.canvas ?? ""),
+    icon: normalizeVaultPath(source.icon ?? ""),
+    markdownBody: String(source.markdownBody || ""),
+    hidden: Boolean(source.hidden),
+    codexFile: normalizeVaultPath(source.codexFile),
+    images,
+    imageFile: images[0]?.path || "",
+    imagePreview: images.length ? Boolean(source.imagePreview ?? true) : false
+  };
+}
+
+function buildCodexMarkdown(entry) {
+  const tags = entry.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+  const extraFields = normalizeCodexMarkdownExtraFields(entry.extraFields);
+  const rows = [
+    "---",
+    "narrative_canvas_codex: true",
+    `id: ${JSON.stringify(entry.id)}`,
+    `name: ${JSON.stringify(entry.name)}`,
+    `category: ${JSON.stringify(entry.kind)}`,
+    `role: ${JSON.stringify(entry.role)}`,
+    `voice: ${JSON.stringify(entry.voice)}`,
+    `tags: ${JSON.stringify(tags)}`,
+    `notes: ${JSON.stringify(entry.notes)}`,
+    // Custom fields round-trip as plain frontmatter keys so they stay editable in Obsidian.
+    ...extraFields.map((field) => `${JSON.stringify(field.key)}: ${JSON.stringify(field.value)}`),
+    `files: ${JSON.stringify(normalizeCodexMarkdownVaultFiles(entry.vaultFiles))}`,
+    `canvas: ${JSON.stringify(entry.canvasFile || "")}`,
+    `icon: ${JSON.stringify(entry.icon || "")}`,
+    `images: ${JSON.stringify(entry.images)}`,
+    `image: ${JSON.stringify(entry.imageFile)}`,
+    `image_preview: ${entry.imagePreview ? "true" : "false"}`,
+    `hidden: ${entry.hidden ? "true" : "false"}`,
+    "---",
+    "",
+    entry.markdownBody.trimEnd(),
+    ""
+  ];
+  return rows.join("\n");
+}
+
+function parseCodexMarkdownFile(path, text) {
+  const source = String(text || "").replace(/\r\n/g, "\n");
+  const match = source.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
+  if (!match) return null;
+  let data;
+  try {
+    data = parseYaml(match[1]) || {};
+  } catch (_error) {
+    return null;
+  }
+  if (!data.narrative_canvas_codex) return null;
+  const body = source.slice(match[0].length).replace(/^\n/, "").replace(/\n$/, "");
+  const hasFrontmatterNotes = Object.prototype.hasOwnProperty.call(data, "notes");
+  // Any frontmatter key that is not one of the managed fields becomes a custom field.
+  const extraFields = Object.entries(data)
+    .filter(([key]) => !CODEX_RESERVED_FRONTMATTER_KEYS.has(String(key).trim().toLowerCase()))
+    .map(([key, value]) => ({ key, value }));
+  return normalizeCodexEntryForMarkdown({
+    id: data.id || `codex-${stableCodexPathHash(path)}`,
+    name: data.name || String(path || "").split("/").pop()?.replace(/\.md$/i, ""),
+    category: data.category,
+    role: data.role,
+    voice: data.voice,
+    tags: data.tags,
+    notes: hasFrontmatterNotes ? data.notes : body,
+    extraFields,
+    vaultFiles: data.files,
+    canvasFile: data.canvas,
+    icon: data.icon,
+    markdownBody: hasFrontmatterNotes ? body : "",
+    hidden: data.hidden,
+    codexFile: path,
+    images: data.images,
+    imageFile: data.image,
+    imagePreview: data.image_preview
+  });
+}
+
+function stableCodexPathHash(value) {
+  let hash = 2166136261;
+  for (const char of String(value || "")) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 module.exports = class NarrativeCanvasPlugin extends Plugin {
   async onload() {
+    this.codexReloadTimer = null;
+    this.codexSyncSuppressUntil = 0;
     await this.loadPluginData();
     this.registerView(VIEW_TYPE, (leaf) => new NarrativeCanvasView(leaf, this));
     try {
@@ -132,12 +315,29 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     // for dedup; active-leaf-change keeps the singleton aligned with the visible tab.
 
     this.registerEvent(this.app.vault.on("delete", (file) => {
+      this.scheduleCodexReloadForFile(file);
       this.handleVaultFileDelete(file).catch((error) => console.error(error));
     }));
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      this.scheduleCodexReloadForFile(file, oldPath);
       this.handleVaultFileRename(file, oldPath).catch((error) => console.error(error));
     }));
+
+    this.registerEvent(this.app.vault.on("create", (file) => {
+      this.scheduleCodexReloadForFile(file);
+    }));
+
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      this.scheduleCodexReloadForFile(file);
+    }));
+
+    this.register(() => {
+      if (this.codexReloadTimer) window.clearTimeout(this.codexReloadTimer);
+      this.codexReloadTimer = null;
+      if (this.codexCanvasRefreshTimer) window.clearTimeout(this.codexCanvasRefreshTimer);
+      this.codexCanvasRefreshTimer = null;
+    });
 
     // When the user switches between Narrative Canvas tabs, the singleton canvas app may be
     // pointed at a different file. Reload to match the newly-active leaf so the visible
@@ -273,6 +473,27 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
   }
 
   async openCanvas() {
+    // Ribbon behavior: with several .ncanvas projects in the vault, ask which one to open;
+    // with exactly one, open it directly; with none, fall back to creating a default project.
+    const files = await this.findNarrativeCanvasProjectFiles({ anyFolder: true });
+    if (files.length > 1) {
+      const current = normalizeVaultPath(this.settings.currentProjectPath);
+      const ordered = current
+        ? [...files.filter((file) => normalizeVaultPath(file.path) === current), ...files.filter((file) => normalizeVaultPath(file.path) !== current)]
+        : files;
+      await new Promise((resolve) => {
+        const modal = new NarrativeCanvasProjectSuggestModal(this.app, ordered, async (file) => {
+          await this.openProjectFile(file.path);
+          resolve(file.path);
+        }, () => resolve(""));
+        modal.open();
+      });
+      return;
+    }
+    if (files.length === 1) {
+      await this.openProjectFile(files[0].path);
+      return;
+    }
     const path = await this.prepareProjectForOpen({ createIfMissing: true });
     await this.activateView(true, path ? this.getProjectLeafForPath(path) : null);
     if (window.NarrativeCanvasApp?.loadVaultProject) {
@@ -513,6 +734,7 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
   async saveProjectFile(savedStateJson) {
     const path = await this.ensureWritableProjectPath(savedStateJson, { forceNew: false });
     await writeVaultText(this.app, path, savedStateJson);
+    await this.syncCodexFiles(savedStateJson, path);
     await this.setCurrentProjectPath(path);
     return path;
   }
@@ -528,9 +750,11 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
       if (!normalizedExisting || normalizedExisting === normalizedPreferred || isGeneratedSampleProjectPath(existing)) {
         if (!vaultFileExists(this.app, preferredPath)) {
           await writeVaultText(this.app, preferredPath, savedStateJson);
+          await this.syncCodexFiles(savedStateJson, preferredPath);
           await this.setCurrentProjectPath(preferredPath);
           return preferredPath;
         }
+        await this.syncCodexFiles(savedStateJson, preferredPath);
         await this.setCurrentProjectPath(preferredPath);
         return "";
       }
@@ -541,6 +765,7 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     }
     const path = await this.ensureWritableProjectPath(savedStateJson, { ...options, forceNew: true });
     await writeVaultText(this.app, path, savedStateJson);
+    await this.syncCodexFiles(savedStateJson, path);
     await this.setCurrentProjectPath(path);
     return path;
   }
@@ -548,14 +773,13 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
   async createProjectFile(savedStateJson, options = {}) {
     const path = await this.ensureWritableProjectPath(savedStateJson, { ...options, forceNew: true });
     await writeVaultText(this.app, path, savedStateJson);
+    await this.syncCodexFiles(savedStateJson, path);
     await this.setCurrentProjectPath(path);
     return path;
   }
 
   async previewNewProjectFile(savedStateJson, options = {}) {
-    const folder = normalizeSaveFolder(this.settings.saveFolder);
-    const desiredPath = joinVaultPath(folder, this.renderProjectFilename(savedStateJson, options));
-    return this.uniqueProjectPath(desiredPath);
+    return this.getNewProjectLayout(savedStateJson, options).projectPath;
   }
 
   async chooseProjectFile() {
@@ -576,13 +800,268 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     });
   }
 
-  async findNarrativeCanvasProjectFiles() {
-    const folder = normalizeSaveFolder(this.settings.saveFolder);
-    const container = folder ? getVaultFolder(this.app, folder) : this.app.vault.getRoot?.();
-    const candidates = (container?.children || [])
+  searchVaultFiles(query, limit = 40, options = {}) {
+    const needle = normalizeVaultSuggestionQuery(query).toLowerCase();
+    const maxResults = Math.max(1, Math.min(100, Number(limit) || 40));
+    const imageOnly = Boolean(options?.imageOnly);
+    return this.app.vault.getFiles()
+      .filter((file) => !(file.path || "").startsWith(".obsidian/"))
+      .filter((file) => !imageOnly || /^(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(String(file.extension || "")))
+      .filter((file) => !needle || file.path.toLowerCase().includes(needle))
+      .sort((a, b) => {
+        const aMarkdown = a.extension === "md" ? 0 : 1;
+        const bMarkdown = b.extension === "md" ? 0 : 1;
+        if (aMarkdown !== bMarkdown) return aMarkdown - bMarkdown;
+        const aPath = a.path.toLowerCase();
+        const bPath = b.path.toLowerCase();
+        const aStarts = needle && a.basename.toLowerCase().startsWith(needle) ? 0 : 1;
+        const bStarts = needle && b.basename.toLowerCase().startsWith(needle) ? 0 : 1;
+        return aStarts - bStarts || aPath.localeCompare(bPath);
+      })
+      .slice(0, maxResults)
+      .map((file) => file.path);
+  }
+
+  async openVaultFile(reference) {
+    const linkpath = normalizeVaultLinkReference(reference);
+    if (!linkpath) throw new Error("No vault file is linked to this node.");
+    const sourcePath = this.getCurrentProjectPath() || "";
+    const file = getVaultFile(this.app, linkpath)
+      || this.app.metadataCache?.getFirstLinkpathDest?.(linkpath, sourcePath);
+    if (!(file instanceof TFile)) throw new Error(`Vault file not found: ${linkpath}`);
+    const leaf = this.app.workspace.getLeaf("tab") || this.app.workspace.getLeaf(true);
+    await leaf.openFile(file);
+    return file.path;
+  }
+
+  async readVaultFile(reference) {
+    const linkpath = normalizeVaultLinkReference(reference);
+    if (!linkpath) throw new Error("No vault file is linked to this node.");
+    const sourcePath = this.getCurrentProjectPath() || "";
+    const file = getVaultFile(this.app, linkpath)
+      || this.app.metadataCache?.getFirstLinkpathDest?.(linkpath, sourcePath);
+    if (!(file instanceof TFile)) throw new Error(`Vault file not found: ${linkpath}`);
+    const text = typeof this.app.vault.cachedRead === "function"
+      ? await this.app.vault.cachedRead(file)
+      : await this.app.vault.read(file);
+    return { path: file.path, text, isMarkdown: ["md", "markdown"].includes(String(file.extension || "").toLowerCase()) };
+  }
+
+  getVaultResourceUrl(reference) {
+    const linkpath = normalizeVaultLinkReference(reference);
+    if (!linkpath) return "";
+    const sourcePath = this.getCurrentProjectPath() || "";
+    const file = getVaultFile(this.app, linkpath)
+      || this.app.metadataCache?.getFirstLinkpathDest?.(linkpath, sourcePath);
+    return file instanceof TFile ? String(this.app.vault.getResourcePath(file) || "") : "";
+  }
+
+  async importCodexImage(file, entryName = "") {
+    if (!file || typeof file.arrayBuffer !== "function") throw new Error("No image file was provided.");
+    const originalName = String(file.name || "").trim();
+    const originalExtension = getVaultPathExtension(originalName).toLowerCase();
+    const mimeExtension = {
+      "image/avif": "avif",
+      "image/bmp": "bmp",
+      "image/gif": "gif",
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/svg+xml": "svg",
+      "image/webp": "webp"
+    }[String(file.type || "").toLowerCase()] || "";
+    const extension = /^(avif|bmp|gif|jpe?g|png|svg|webp)$/.test(originalExtension) ? originalExtension : mimeExtension;
+    if (!extension) throw new Error("Only image files can be imported.");
+    const codexFolder = this.getCodexFolderForProject();
+    if (!codexFolder) throw new Error("Open or save the Narrative Canvas project before importing an image.");
+    const configuredAttachmentFolder = String(this.app.vault.getConfig?.("attachmentFolderPath") || "").trim();
+    const attachmentSubpath = configuredAttachmentFolder
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/^\/+|\/+$/g, "")
+      .split("/")
+      .filter((part) => part && part !== "." && part !== "..")
+      .join("/");
+    const assetFolder = attachmentSubpath
+      ? joinVaultPath(codexFolder, attachmentSubpath)
+      : codexFolder;
+    await ensureVaultFolder(this.app, assetFolder);
+    const originalBase = originalName.replace(/\.[^.]+$/, "");
+    const baseName = sanitizeFileName(originalBase || entryName || "Library image") || "Library image";
+    const targetPath = await this.uniqueProjectPath(joinVaultPath(assetFolder, `${baseName}.${extension}`));
+    const bytes = await file.arrayBuffer();
+    await this.app.vault.createBinary(targetPath, bytes);
+    return targetPath;
+  }
+
+  getCodexFolderForProject(projectPath = this.getCurrentProjectPath()) {
+    const normalized = normalizeVaultPath(projectPath);
+    if (!normalized) return "";
+    const parent = normalized.includes("/") ? normalized.split("/").slice(0, -1).join("/") : "";
+    const libraryFolder = joinVaultPath(parent, DEFAULT_LIBRARY_FOLDER_NAME);
+    const legacyFolder = joinVaultPath(parent, LEGACY_CODEX_FOLDER_NAME);
+    if (getVaultFolder(this.app, libraryFolder)) return libraryFolder;
+    if (getVaultFolder(this.app, legacyFolder)) return legacyFolder;
+    return libraryFolder;
+  }
+
+  async loadCodexEntries(projectPath = this.getCurrentProjectPath()) {
+    const folderPath = this.getCodexFolderForProject(projectPath);
+    const folder = getVaultFolder(this.app, folderPath);
+    if (!folder) return [];
+    const entries = [];
+    for (const file of folder.children || []) {
+      if (!(file instanceof TFile) || String(file.extension || "").toLowerCase() !== "md") continue;
+      try {
+        const text = typeof this.app.vault.cachedRead === "function"
+          ? await this.app.vault.cachedRead(file)
+          : await this.app.vault.read(file);
+        const entry = parseCodexMarkdownFile(file.path, text);
+        if (entry) entries.push(entry);
+      } catch (error) {
+        console.error(`Could not read Codex file ${file.path}.`, error);
+      }
+    }
+    return entries.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // The file currently being dragged from Obsidian's own UI (file explorer, search),
+  // so canvas drops can link it without parsing DataTransfer formats.
+  getDraggedVaultFile() {
+    const draggable = this.app.dragManager?.draggable;
+    if (!draggable) return "";
+    const file = draggable.file || (Array.isArray(draggable.files) ? draggable.files[0] : null);
+    if ((draggable.type === "file" || draggable.type === "files") && file?.path) return file.path;
+    return "";
+  }
+
+  // Creates a native Obsidian .canvas board for a library entry, seeded with the
+  // entry's current preview images and linked files, and embeds it at the end of
+  // the entry's markdown body.
+  async createCodexCanvas(entry) {
+    const name = String(entry?.name || "Board").trim() || "Board";
+    const codexFile = normalizeVaultPath(entry?.codexFile);
+    const folder = codexFile.includes("/")
+      ? codexFile.split("/").slice(0, -1).join("/")
+      : this.getCodexFolderForProject();
+    if (folder) await ensureVaultFolder(this.app, folder);
+    const canvasPath = await this.uniqueProjectPath(joinVaultPath(folder, `${sanitizeFileName(name) || "Board"}.canvas`));
+    const nodes = [];
+    let nodeId = 0;
+    const scale = 14;
+    (Array.isArray(entry?.images) ? entry.images : []).forEach((image) => {
+      const path = normalizeVaultPath(typeof image === "string" ? image : image?.path);
+      if (!path) return;
+      const width = Math.round((Number(image?.w) || 28) * scale);
+      nodes.push({
+        id: `n${nodeId += 1}`,
+        type: "file",
+        file: path,
+        x: Math.round((Number(image?.x) || 4) * scale),
+        y: Math.round((Number(image?.y) || 5) * scale),
+        width,
+        height: Math.round(width * 0.75)
+      });
+    });
+    (Array.isArray(entry?.files) ? entry.files : []).forEach((file, index) => {
+      const path = normalizeVaultPath(typeof file === "string" ? file : file?.path);
+      if (!path) return;
+      nodes.push({
+        id: `n${nodeId += 1}`,
+        type: "file",
+        file: path,
+        x: 60 + (index % 2) * 460,
+        y: 1240 + Math.floor(index / 2) * 420,
+        width: 420,
+        height: 380
+      });
+    });
+    await writeVaultText(this.app, canvasPath, JSON.stringify({ nodes, edges: [] }, null, "\t"));
+    const mdFile = getVaultFile(this.app, codexFile);
+    if (mdFile instanceof TFile) {
+      this.codexSyncSuppressUntil = Date.now() + 1000;
+      const embed = (text) => (text.includes(`![[${canvasPath}]]`) ? text : `${text.trimEnd()}\n\n![[${canvasPath}]]\n`);
+      if (typeof this.app.vault.process === "function") {
+        await this.app.vault.process(mdFile, embed);
+      } else {
+        await this.app.vault.modify(mdFile, embed(await this.app.vault.read(mdFile)));
+      }
+    }
+    return canvasPath;
+  }
+
+  async syncCodexFiles(savedStateJson, projectPath = this.getCurrentProjectPath()) {
+    let payload;
+    try {
+      payload = typeof savedStateJson === "string" ? JSON.parse(savedStateJson) : savedStateJson;
+    } catch (_error) {
+      return [];
+    }
+    const characters = Array.isArray(payload?.project?.characters) ? payload.project.characters : [];
+    const folderPath = this.getCodexFolderForProject(projectPath);
+    if (!folderPath) return [];
+    await ensureVaultFolder(this.app, folderPath);
+    const existingEntries = await this.loadCodexEntries(projectPath);
+    const existingById = new Map(existingEntries.map((entry) => [String(entry.id || ""), entry]));
+    const targetIds = new Set(characters.map((entry, index) => normalizeCodexEntryForMarkdown(entry, index).id));
+    const written = [];
+    this.codexSyncSuppressUntil = Date.now() + 1000;
+    for (let index = 0; index < characters.length; index += 1) {
+      const entry = normalizeCodexEntryForMarkdown(characters[index], index);
+      const existing = existingById.get(entry.id);
+      let targetPath = normalizeVaultPath(existing?.codexFile);
+      if (!targetPath || !targetPath.startsWith(`${folderPath}/`) || !vaultFileExists(this.app, targetPath)) {
+        const fileName = `${sanitizeFileName(entry.name) || `Library Entry ${index + 1}`}.md`;
+        targetPath = await this.uniqueProjectPath(joinVaultPath(folderPath, fileName));
+      }
+      const markdown = buildCodexMarkdown({
+        ...entry,
+        markdownBody: existing?.markdownBody || ""
+      });
+      const current = vaultFileExists(this.app, targetPath) ? await readVaultText(this.app, targetPath) : null;
+      if (current !== markdown) await writeVaultText(this.app, targetPath, markdown);
+      written.push({ ...entry, codexFile: targetPath });
+    }
+    for (const orphan of existingEntries.filter((entry) => !targetIds.has(entry.id))) {
+      const file = getVaultFile(this.app, orphan.codexFile);
+      if (file instanceof TFile) await this.app.vault.trash(file, false);
+    }
+    this.codexSyncSuppressUntil = Date.now() + 1000;
+    return written;
+  }
+
+  scheduleCodexReloadForFile(file, oldPath = "") {
+    // Board previews re-render when their .canvas file changes on disk.
+    if (file instanceof TFile && String(file.extension || "").toLowerCase() === "canvas") {
+      if (this.codexCanvasRefreshTimer) window.clearTimeout(this.codexCanvasRefreshTimer);
+      this.codexCanvasRefreshTimer = window.setTimeout(() => {
+        this.codexCanvasRefreshTimer = null;
+        window.NarrativeCanvasApp?.refreshCodexCanvasPreviews?.(file.path);
+      }, 300);
+      return;
+    }
+    if (Date.now() < Number(this.codexSyncSuppressUntil || 0)) return;
+    const folderPath = this.getCodexFolderForProject();
+    if (!folderPath) return;
+    const paths = [file?.path, oldPath].map(normalizeVaultPath).filter(Boolean);
+    if (!paths.some((path) => path === folderPath || path.startsWith(`${folderPath}/`))) return;
+    if (file instanceof TFile && String(file.extension || "").toLowerCase() !== "md"
+      && !String(oldPath || "").toLowerCase().endsWith(".md")) return;
+    if (this.codexReloadTimer) window.clearTimeout(this.codexReloadTimer);
+    this.codexReloadTimer = window.setTimeout(() => {
+      this.codexReloadTimer = null;
+      Promise.resolve(window.NarrativeCanvasApp?.reloadCodexFiles?.())
+        .catch((error) => console.error("Could not reload library files.", error));
+    }, 250);
+  }
+
+  async findNarrativeCanvasProjectFiles(options = {}) {
+    const folder = options.anyFolder ? "" : normalizeSaveFolder(this.settings.saveFolder);
+    const prefix = folder ? `${folder}/` : "";
+    const candidates = this.app.vault.getFiles()
       .filter((file) => file instanceof TFile)
       .filter((file) => isProjectFileExtension(file.extension))
-      .filter((file) => isVaultPathInProjectSaveFolder(file.path, folder))
+      .filter((file) => !normalizeVaultPath(file.path).startsWith(".obsidian/"))
+      .filter((file) => !folder || normalizeVaultPath(file.path).startsWith(prefix))
       .sort((a, b) => a.path.localeCompare(b.path));
     const checked = await Promise.all(candidates.map(async (file) => ({
       file,
@@ -601,8 +1080,10 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
       return current;
     }
 
-    const desiredPath = joinVaultPath(folder, this.renderProjectFilename(savedStateJson, options));
-    return this.uniqueProjectPath(desiredPath);
+    const layout = this.getNewProjectLayout(savedStateJson, options);
+    await this.ensureFolder(layout.projectFolder);
+    await this.ensureFolder(layout.codexFolder);
+    return layout.projectPath;
   }
 
   async resolveProjectPathForSave() {
@@ -647,6 +1128,31 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     if (filenameOverride) return ensureProjectExtension(filenameOverride);
     const rendered = renderFilenameTemplate(this.settings.filenameTemplate, savedStateJson, new Date(), options);
     return ensureProjectExtension(sanitizeFileName(rendered));
+  }
+
+  getNewProjectLayout(savedStateJson, options = {}) {
+    const rootFolder = normalizeSaveFolder(this.settings.saveFolder);
+    const filename = this.renderProjectFilename(savedStateJson, options);
+    const baseFolderName = sanitizeFileName(filename.replace(/\.(ncanvas|narrativecanvas)$/i, "")) || "Untitled";
+    const desiredFolder = joinVaultPath(rootFolder, baseFolderName);
+    const projectFolder = this.uniqueProjectFolderPath(desiredFolder);
+    return {
+      projectFolder,
+      projectPath: joinVaultPath(projectFolder, filename),
+      codexFolder: joinVaultPath(projectFolder, DEFAULT_LIBRARY_FOLDER_NAME)
+    };
+  }
+
+  uniqueProjectFolderPath(path) {
+    const normalized = normalizeVaultPath(path);
+    if (!getVaultAbstractFile(this.app, normalized)) return normalized;
+    let index = 2;
+    let candidate = `${normalized}-${index}`;
+    while (getVaultAbstractFile(this.app, candidate)) {
+      index += 1;
+      candidate = `${normalized}-${index}`;
+    }
+    return candidate;
   }
 
   async uniqueProjectPath(path, ignorePath = "") {
@@ -875,23 +1381,36 @@ class NarrativeCanvasView extends ItemView {
     }
   }
 
+  async renderVaultMarkdown(markdown, container, sourcePath) {
+    if (!container?.replaceChildren) throw new Error("Markdown preview container is unavailable.");
+    const source = normalizeVaultPath(sourcePath) || this.plugin.getCurrentProjectPath() || "";
+    container.replaceChildren();
+    if (typeof MarkdownRenderer.render === "function") {
+      await MarkdownRenderer.render(this.app, String(markdown || ""), container, source, this);
+    } else {
+      await MarkdownRenderer.renderMarkdown(String(markdown || ""), container, source, this);
+    }
+    return true;
+  }
+
   async onOpen() {
     this.contentEl.replaceChildren();
     if (this.duplicateOf || this.tryDedupNow()) return;
 
     this.contentEl.addClass("narrative-canvas-plugin-host");
     this.plugin.applyContentFontSettings(this.contentEl);
-    this.contentEl.createEl("div", {
-      cls: "narrative-canvas-plugin-loading",
-      text: "Loading Narrative Canvas..."
-    });
+    const shadow = this.contentEl.shadowRoot || this.contentEl.attachShadow({ mode: "open" });
+    const loading = document.createElement("div");
+    loading.style.cssText = "padding:24px;color:var(--text-muted,#888);font-size:14px;";
+    loading.textContent = "Loading Narrative Canvas...";
+    shadow.replaceChildren(loading);
 
     try {
       const { bodyHtml } = await this.plugin.loadCanvasAssets();
-      mountCanvasHtml(this.contentEl, bodyHtml);
+      mountCanvasShadow(shadow, bodyHtml);
       window.NarrativeCanvasHost = {
         pluginId: PLUGIN_ID,
-        root: this.contentEl,
+        root: shadow,
         loadState: () => this.plugin.loadSavedState(),
         saveState: (savedState) => this.plugin.saveSavedState(savedState),
         loadProject: () => this.plugin.loadProjectFile(),
@@ -904,6 +1423,15 @@ class NarrativeCanvasView extends ItemView {
         createProjectFile: (savedStateJson, options) => this.plugin.createProjectFile(savedStateJson, options),
         previewNewProjectFile: (savedStateJson, options) => this.plugin.previewNewProjectFile(savedStateJson, options),
         chooseProjectFile: () => this.plugin.chooseProjectFile(),
+        searchVaultFiles: (query, limit, options) => this.plugin.searchVaultFiles(query, limit, options),
+        openVaultFile: (reference) => this.plugin.openVaultFile(reference),
+        readVaultFile: (reference) => this.plugin.readVaultFile(reference),
+        getVaultResourceUrl: (reference) => this.plugin.getVaultResourceUrl(reference),
+        importCodexImage: (file, entryName) => this.plugin.importCodexImage(file, entryName),
+        loadCodexEntries: () => this.plugin.loadCodexEntries(),
+        createCodexCanvas: (entry) => this.plugin.createCodexCanvas(entry),
+        getDraggedVaultFile: () => this.plugin.getDraggedVaultFile(),
+        renderVaultMarkdown: (markdown, container, sourcePath) => this.renderVaultMarkdown(markdown, container, sourcePath),
         getProjectFile: () => this.plugin.getCurrentProjectPath(),
         showNotice: (text) => { new Notice(String(text || "")); },
         stateFile: STATE_FILE,
@@ -917,11 +1445,10 @@ class NarrativeCanvasView extends ItemView {
       if (started === false) throw new Error("Canvas app initialization failed.");
     } catch (error) {
       console.error(error);
-      this.contentEl.replaceChildren();
-      this.contentEl.createEl("div", {
-        cls: "narrative-canvas-plugin-error",
-        text: `Narrative Canvas failed to load: ${error?.message || "check the developer console for details."}`
-      });
+      const failure = document.createElement("div");
+      failure.style.cssText = "padding:24px;color:var(--text-error,#c66);font-size:14px;";
+      failure.textContent = `Narrative Canvas failed to load: ${error?.message || "check the developer console for details."}`;
+      shadow.replaceChildren(failure);
       new Notice("Narrative Canvas failed to load.");
     }
   }
@@ -942,6 +1469,7 @@ class NarrativeCanvasView extends ItemView {
       delete window.NarrativeCanvasHost;
     }
     this.contentEl.removeClass("narrative-canvas-plugin-host");
+    this.contentEl.shadowRoot?.replaceChildren();
     this.contentEl.replaceChildren();
   }
 }
@@ -1070,8 +1598,8 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName(text("Project save folder"))
-      .setDesc(text("Vault-relative folder for Narrative Canvas project files. Leave empty to save in the vault root."))
+      .setName(text("New project root folder"))
+      .setDesc(text("Each new project gets its own folder here, containing the .ncanvas file and a Library folder. Leave empty to use the vault root."))
       .addText((textInput) => {
         textInput
           .setPlaceholder("/")
@@ -1329,6 +1857,23 @@ function normalizeVaultPath(value) {
   return normalized ? normalizePath(normalized) : "";
 }
 
+function normalizeVaultLinkReference(value) {
+  let reference = String(value || "").trim();
+  const wikiMatch = reference.match(/^\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]$/);
+  if (wikiMatch) reference = wikiMatch[1];
+  return normalizeVaultPath(reference);
+}
+
+function normalizeVaultSuggestionQuery(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^\[\[/, "")
+    .replace(/^\[/, "")
+    .replace(/\]\]$/, "")
+    .split(/[|#]/, 1)[0]
+    .trim();
+}
+
 function getVaultAbstractFile(app, path) {
   const normalized = normalizeVaultPath(path);
   if (!normalized) return null;
@@ -1355,15 +1900,23 @@ async function readVaultText(app, path) {
   return app.vault.read(file);
 }
 
+// Full-content overwrite of an existing file. Prefer vault.process (atomic, Obsidian
+// 1.6+) and fall back to vault.modify so minAppVersion 1.5.0 keeps working.
+async function overwriteVaultFile(app, file, text) {
+  if (typeof app.vault.process === "function") {
+    await app.vault.process(file, () => text);
+  } else {
+    await app.vault.modify(file, text);
+  }
+  return file;
+}
+
 async function writeVaultText(app, path, text) {
   const normalized = normalizeVaultPath(path);
   if (!normalized) throw new Error("Cannot write a Narrative Canvas file without a path.");
   await ensureVaultFolder(app, getVaultParentPath(normalized));
   const file = getVaultFile(app, normalized);
-  if (file) {
-    await app.vault.process(file, () => text);
-    return file;
-  }
+  if (file) return overwriteVaultFile(app, file, text);
   return app.vault.create(normalized, text);
 }
 
@@ -1497,15 +2050,10292 @@ function extractBodyHtml(html) {
     .replace(/<link\b[^>]*rel=["']stylesheet["'][^>]*>/gi, "");
 }
 
-function mountCanvasHtml(containerEl, bodyHtml) {
+// The app mounts inside a shadow root so community themes cannot restyle it; its
+// stylesheet ships inside the shadow tree instead of the document.
+function mountCanvasShadow(shadowRoot, bodyHtml) {
   const parser = new DOMParser();
   const parsed = parser.parseFromString(`<!doctype html><html><body>${bodyHtml}</body></html>`, "text/html");
   const fragment = document.createDocumentFragment();
+  const style = document.createElement("style");
+  style.textContent = CANVAS_STYLE_CSS;
+  fragment.append(style);
   parsed.body.childNodes.forEach((node) => {
     fragment.append(document.importNode(node, true));
   });
-  containerEl.replaceChildren(fragment);
+  shadowRoot.replaceChildren(fragment);
 }
+
+// Bundled from canvas.css for the shadow root. `:root` selectors are rewritten to
+// `:host` at build time so theme attributes on the host element keep working.
+const CANVAS_STYLE_CSS = [
+  ":host {",
+  "  --nc-font-interface: system-ui, \"Segoe UI\", sans-serif;",
+  "  --nc-font-text: system-ui, \"Segoe UI\", sans-serif;",
+  "  --nc-font-monospace: \"Cascadia Code\", \"Cascadia Mono\", ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace;",
+  "  --background-primary: #1f1f1f;",
+  "  --background-primary-alt: #282828;",
+  "  --background-secondary: #252525;",
+  "  --background-secondary-alt: #2b2b2b;",
+  "  --background-canvas: #202020;",
+  "  --background-control: #1a1a1a;",
+  "  --workspace-bar-bg: #202020;",
+  "  --background-modifier-hover: #333333;",
+  "  --background-modifier-active: #3a3a3a;",
+  "  --background-modifier-border: #404040;",
+  "  --background-modifier-border-hover: #5a5a5a;",
+  "  --canvas-grid-small: rgba(255, 255, 255, 0.055);",
+  "  --canvas-grid-large: rgba(255, 255, 255, 0.09);",
+  "  --node-surface: rgba(43, 43, 43, 0.94);",
+  "  --node-border: rgba(255, 255, 255, 0.08);",
+  "  --visual-frame-surface: rgba(148, 154, 164, 0.16);",
+  "  --visual-frame-border: rgba(194, 200, 210, 0.28);",
+  "  --event-frame-surface: rgba(91, 64, 146, 0.44);",
+  "  --event-frame-border: rgba(184, 140, 255, 0.46);",
+  "  --frame-header-bg: rgba(255, 255, 255, 0.045);",
+  "  --subtle-button-border: rgba(255, 255, 255, 0.035);",
+  "  --subtle-button-bg: rgba(255, 255, 255, 0.025);",
+  "  --node-header-border: rgba(255, 255, 255, 0.065);",
+  "  --node-header-bg: rgba(255, 255, 255, 0.055);",
+  "  --overlay-bg: rgba(31, 31, 31, 0.9);",
+  "  --minimap-bg: rgba(25, 25, 25, 0.88);",
+  "  --scrollbar-track: rgba(255, 255, 255, 0.045);",
+  "  --scrollbar-thumb: rgba(255, 255, 255, 0.28);",
+  "  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.38);",
+  "  --link-color: rgba(220, 221, 222, 0.72);",
+  "  --text-normal: #dcddde;",
+  "  --text-muted: #a8a8a8;",
+  "  --text-faint: #7a7a7a;",
+  "  --text-on-accent: #ffffff;",
+  "  --interactive-accent: #7f6df2;",
+  "  --interactive-accent-hover: #9586ff;",
+  "  --text-accent: var(--interactive-accent);",
+  "  --accent-red: #e06c75;",
+  "  --focus-accent: var(--accent-red);",
+  "  --accent-orange: #d19a66;",
+  "  --accent-green: #98c379;",
+  "  --accent-cyan: #56b6c2;",
+  "  --accent-blue: #61afef;",
+  "  --graph-hover-color: #a78bfa;",
+  "  --radius-s: 4px;",
+  "  --radius-m: 6px;",
+  "  --shadow-soft: 0 16px 40px rgba(0, 0, 0, 0.32);",
+  "  color-scheme: dark;",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]),",
+  ".app-shell[data-theme=\"light\"] {",
+  "  --background-primary: #f7f7f8;",
+  "  --background-primary-alt: #ffffff;",
+  "  --background-secondary: #eeeeef;",
+  "  --background-secondary-alt: #e4e4e7;",
+  "  --background-canvas: #f2f2f3;",
+  "  --background-control: #ffffff;",
+  "  --workspace-bar-bg: #ededee;",
+  "  --background-modifier-hover: #e1e1e4;",
+  "  --background-modifier-active: #d8d7dc;",
+  "  --background-modifier-border: #d0d0d4;",
+  "  --background-modifier-border-hover: #aaaab2;",
+  "  --canvas-grid-small: rgba(40, 40, 45, 0.065);",
+  "  --canvas-grid-large: rgba(40, 40, 45, 0.115);",
+  "  --node-surface: rgba(255, 255, 255, 0.97);",
+  "  --node-border: rgba(38, 38, 43, 0.14);",
+  "  --visual-frame-surface: rgba(65, 65, 72, 0.065);",
+  "  --visual-frame-border: rgba(65, 65, 72, 0.2);",
+  "  --event-frame-surface: rgba(127, 109, 242, 0.12);",
+  "  --event-frame-border: rgba(111, 86, 218, 0.34);",
+  "  --frame-header-bg: rgba(35, 35, 40, 0.035);",
+  "  --subtle-button-border: rgba(35, 35, 40, 0.08);",
+  "  --subtle-button-bg: rgba(35, 35, 40, 0.03);",
+  "  --node-header-border: rgba(35, 35, 40, 0.09);",
+  "  --node-header-bg: rgba(35, 35, 40, 0.04);",
+  "  --overlay-bg: rgba(255, 255, 255, 0.92);",
+  "  --minimap-bg: rgba(255, 255, 255, 0.86);",
+  "  --scrollbar-track: rgba(35, 35, 40, 0.06);",
+  "  --scrollbar-thumb: rgba(35, 35, 40, 0.26);",
+  "  --scrollbar-thumb-hover: rgba(35, 35, 40, 0.38);",
+  "  --link-color: rgba(55, 55, 62, 0.62);",
+  "  --text-normal: #202124;",
+  "  --text-muted: #5f6368;",
+  "  --text-faint: #85888d;",
+  "  --text-on-accent: #ffffff;",
+  "  --interactive-accent: #6f55d9;",
+  "  --interactive-accent-hover: #5d43c2;",
+  "  --focus-accent: #7f6df2;",
+  "  --graph-hover-color: #8f70ff;",
+  "  --shadow-soft: 0 16px 36px rgba(30, 30, 36, 0.14);",
+  "  color-scheme: light;",
+  "}",
+  "",
+  "* {",
+  "  box-sizing: border-box;",
+  "}",
+  "",
+  "*::-webkit-scrollbar {",
+  "  width: 10px;",
+  "  height: 10px;",
+  "}",
+  "",
+  "*::-webkit-scrollbar-track {",
+  "  background: var(--scrollbar-track);",
+  "}",
+  "",
+  "*::-webkit-scrollbar-thumb {",
+  "  border: 2px solid transparent;",
+  "  border-radius: 999px;",
+  "  background: var(--scrollbar-thumb);",
+  "  background-clip: padding-box;",
+  "}",
+  "",
+  "*::-webkit-scrollbar-thumb:hover {",
+  "  background: var(--scrollbar-thumb-hover);",
+  "  background-clip: padding-box;",
+  "}",
+  "",
+  ":host {",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  margin: 0;",
+  "}",
+  "",
+  ":host {",
+  "  position: relative;",
+  "  overflow: hidden;",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 14px;",
+  "}",
+  "",
+  ".startup-error {",
+  "  display: grid;",
+  "  align-content: center;",
+  "  gap: 10px;",
+  "  width: min(680px, calc(100vw - 32px));",
+  "  min-height: 100vh;",
+  "  margin: 0 auto;",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".startup-error h1 {",
+  "  margin: 0;",
+  "  font-size: 22px;",
+  "}",
+  "",
+  ".startup-error p {",
+  "  margin: 0;",
+  "  color: var(--text-muted);",
+  "  line-height: 1.5;",
+  "}",
+  "",
+  "button,",
+  "input,",
+  "textarea,",
+  "select {",
+  "  font: inherit;",
+  "}",
+  "",
+  "button {",
+  "  color: inherit;",
+  "}",
+  "",
+  ".app-shell {",
+  "  position: relative;",
+  "  --sidebar-left-width: 280px;",
+  "  --sidebar-right-width: 340px;",
+  "  --play-panel-width: clamp(300px, 27vw, 420px);",
+  "  --play-panel-track: 0px;",
+  "  --sidebar-left-track: var(--sidebar-left-width);",
+  "  --sidebar-right-track: var(--sidebar-right-width);",
+  "  --sidebar-left-resizer-width: 6px;",
+  "  --sidebar-right-resizer-width: 6px;",
+  "  --sidebar-collapsed-width: 36px;",
+  "  --workspace-min-width: 420px;",
+  "  display: grid;",
+  "  grid-template-columns:",
+  "    var(--sidebar-left-track)",
+  "    var(--sidebar-left-resizer-width)",
+  "    minmax(var(--workspace-min-width), 1fr)",
+  "    var(--play-panel-track)",
+  "    var(--sidebar-right-resizer-width)",
+  "    var(--sidebar-right-track);",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  min-height: 0;",
+  "  overflow: hidden;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] {",
+  "  --sidebar-left-track: var(--sidebar-collapsed-width);",
+  "  --sidebar-left-resizer-width: 0px;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-right=\"collapsed\"] {",
+  "  --sidebar-right-track: var(--sidebar-collapsed-width);",
+  "  --sidebar-right-resizer-width: 0px;",
+  "}",
+  "",
+  ".app-shell[data-play-panel=\"open\"] {",
+  "  --play-panel-track: var(--play-panel-width);",
+  "}",
+  "",
+  ".app-shell[data-immersive=\"true\"] {",
+  "  width: 100vw;",
+  "  height: 100vh;",
+  "}",
+  "",
+  ".app-shell.sidebar-resizing {",
+  "  cursor: col-resize;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".app-shell.sidebar-resizing * {",
+  "  cursor: col-resize;",
+  "}",
+  "",
+  ".icon-button,",
+  ".toolbar-button,",
+  ".inspector-tab,",
+  ".nc-file-item,",
+  ".palette-item,",
+  ".play-action,",
+  ".small-button {",
+  "  border: 1px solid transparent;",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  cursor: pointer;",
+  "  transition: 140ms ease;",
+  "}",
+  "",
+  ".toolbar-button:hover,",
+  ".icon-button:hover,",
+  ".small-button:hover,",
+  ".inspector-tab:hover {",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".sidebar {",
+  "  position: relative;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  overflow: auto;",
+  "  padding-bottom: 16px;",
+  "  border-right: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".sidebar-left {",
+  "  grid-column: 1;",
+  "}",
+  "",
+  ".sidebar-resizer-left {",
+  "  grid-column: 2;",
+  "}",
+  "",
+  ".canvas-workspace {",
+  "  grid-column: 3;",
+  "}",
+  "",
+  ".sidebar-resizer-right {",
+  "  grid-column: 5;",
+  "}",
+  "",
+  ".sidebar-right {",
+  "  grid-column: 6;",
+  "}",
+  "",
+  ".sidebar-resizer {",
+  "  position: relative;",
+  "  z-index: 20;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  cursor: col-resize;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".sidebar-resizer::before {",
+  "  content: \"\";",
+  "  position: absolute;",
+  "  top: 0;",
+  "  bottom: 0;",
+  "  left: 50%;",
+  "  width: 1px;",
+  "  background: var(--background-modifier-border);",
+  "  transform: translateX(-50%);",
+  "  transition: background 140ms ease, width 140ms ease;",
+  "}",
+  "",
+  ".sidebar-resizer:hover::before,",
+  ".app-shell[data-sidebar-resizing=\"left\"] .sidebar-resizer-left::before,",
+  ".app-shell[data-sidebar-resizing=\"right\"] .sidebar-resizer-right::before {",
+  "  width: 2px;",
+  "  background: var(--interactive-accent);",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-resizer-left,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-resizer-right {",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".sidebar-right {",
+  "  display: grid;",
+  "  grid-template-rows: auto auto minmax(0, 1fr);",
+  "  overflow: hidden;",
+  "  border-right: 0;",
+  "  border-left: 1px solid var(--background-modifier-border);",
+  "  padding-bottom: 0;",
+  "}",
+  "",
+  ".sidebar-right .pane-title {",
+  "  flex: 1 1 auto;",
+  "}",
+  "",
+  ".sidebar-right .header-actions {",
+  "  margin-left: 0;",
+  "}",
+  "",
+  ".pane-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 10px;",
+  "  height: 58px;",
+  "  padding: 10px 12px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".pane-header \u003e div:first-child {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".pane-title {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".header-actions {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: flex-end;",
+  "  flex: 0 0 auto;",
+  "  margin-left: auto;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".header-actions .icon-button {",
+  "  width: auto;",
+  "  min-width: 28px;",
+  "  padding: 0 8px;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".project-history {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 4px;",
+  "  flex: 0 0 auto;",
+  "}",
+  "",
+  ".history-button.icon-button {",
+  "  width: 30px;",
+  "  min-width: 30px;",
+  "  padding: 0;",
+  "  font-size: 18px;",
+  "  font-weight: 750;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".history-button .history-icon {",
+  "  width: 16px;",
+  "  height: 16px;",
+  "  fill: none;",
+  "  stroke: currentColor;",
+  "  stroke-linecap: round;",
+  "  stroke-linejoin: round;",
+  "  stroke-width: 2.2;",
+  "}",
+  "",
+  ".immersive-toggle-button[aria-pressed=\"true\"] {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary-alt));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".history-button:disabled {",
+  "  cursor: default;",
+  "  opacity: 0.42;",
+  "}",
+  "",
+  ".history-button:disabled:hover {",
+  "  border-color: var(--background-modifier-border);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".sidebar-toggle-button {",
+  "  width: 28px;",
+  "  padding: 0;",
+  "}",
+  "",
+  ".sidebar-toggle-icon {",
+  "  position: relative;",
+  "  display: block;",
+  "  width: 18px;",
+  "  height: 18px;",
+  "  color: currentColor;",
+  "  opacity: 0.82;",
+  "}",
+  "",
+  ".sidebar-toggle-icon::before,",
+  ".sidebar-toggle-icon::after {",
+  "  content: \"\";",
+  "  position: absolute;",
+  "  top: 5px;",
+  "  width: 6px;",
+  "  height: 6px;",
+  "  border-top: 2px solid currentColor;",
+  "  border-right: 2px solid currentColor;",
+  "  border-radius: 1px;",
+  "  opacity: 0.72;",
+  "  transition: transform 140ms ease, opacity 140ms ease;",
+  "}",
+  "",
+  ".sidebar-toggle-icon::before {",
+  "  left: 4px;",
+  "}",
+  "",
+  ".sidebar-toggle-icon::after {",
+  "  left: 9px;",
+  "}",
+  "",
+  ".sidebar-toggle-icon-left::before,",
+  ".sidebar-toggle-icon-left::after,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-toggle-icon-right::before,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-toggle-icon-right::after {",
+  "  transform: rotate(225deg);",
+  "}",
+  "",
+  ".sidebar-toggle-icon-right::before,",
+  ".sidebar-toggle-icon-right::after,",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-toggle-icon-left::before,",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-toggle-icon-left::after {",
+  "  transform: rotate(45deg);",
+  "}",
+  "",
+  ".sidebar-toggle-icon-right::before,",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-icon-left::before {",
+  "  left: 2px;",
+  "}",
+  "",
+  ".sidebar-toggle-icon-right::after,",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-icon-left::after {",
+  "  left: 7px;",
+  "}",
+  "",
+  ".sidebar-toggle-button:hover .sidebar-toggle-icon {",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".sidebar-toggle-button:hover .sidebar-toggle-icon::before,",
+  ".sidebar-toggle-button:hover .sidebar-toggle-icon::after {",
+  "  opacity: 0.95;",
+  "}",
+  "",
+  "/* Collapsed sidebar chevrons sit on the side closer to the app center. */",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-icon::before,",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-icon::after {",
+  "  left: auto;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-icon::before {",
+  "  right: 4px;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-icon::after {",
+  "  right: 9px;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right {",
+  "  overflow: hidden;",
+  "  padding-bottom: 0;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .pane-header,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .pane-header {",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  height: 58px;",
+  "  padding: 8px 0;",
+  "  border-bottom: 0;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .pane-title,",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .nav-section,",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .header-actions .icon-button:not(.sidebar-toggle-button),",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .pane-title,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .inspector-tabs,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .inspector-panel,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .header-actions .icon-button:not(.sidebar-toggle-button) {",
+  "  display: none;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .header-actions,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .header-actions {",
+  "  justify-content: center;",
+  "  width: 100%;",
+  "  margin: 0;",
+  "  gap: 0;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-button,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .sidebar-toggle-button {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  height: 30px;",
+  "  border-width: 0;",
+  "  border-color: transparent;",
+  "  border-radius: 0;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease;",
+  "}",
+  "",
+  ".app-shell[data-sidebar-left=\"collapsed\"] .sidebar-left .sidebar-toggle-button:hover,",
+  ".app-shell[data-sidebar-right=\"collapsed\"] .sidebar-right .sidebar-toggle-button:hover {",
+  "  border-width: 0;",
+  "  border-color: transparent;",
+  "  background: color-mix(in srgb, var(--background-modifier-hover) 72%, transparent);",
+  "}",
+  "",
+  ".theme-toggle-button {",
+  "  position: relative;",
+  "  justify-content: center;",
+  "  width: 64px;",
+  "  min-width: 64px;",
+  "  padding: 0 10px;",
+  "  border-color: #a99dff;",
+  "  background: #f0edff;",
+  "  color: #201a45;",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);",
+  "}",
+  "",
+  ".theme-toggle-button::before {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".theme-toggle-button[aria-pressed=\"true\"] {",
+  "  border-color: #b8afff;",
+  "  background: #f7f5ff;",
+  "  color: #201a45;",
+  "}",
+  "",
+  ".theme-toggle-button[aria-pressed=\"true\"]::before {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".theme-toggle-button:hover {",
+  "  border-color: #c6bfff;",
+  "  background: #ffffff;",
+  "  color: #201a45;",
+  "}",
+  "",
+  ".pane-header.compact {",
+  "  height: 54px;",
+  "}",
+  "",
+  ".pane-kicker {",
+  "  display: block;",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  letter-spacing: 0;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  "/* The \"Narrative Canvas\" brand kicker stays on one line. */",
+  ".sidebar-left .pane-header .pane-kicker {",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".pane-header h1,",
+  ".play-header h2 {",
+  "  margin: 2px 0 0;",
+  "  color: var(--text-normal);",
+  "  font-size: 15px;",
+  "  font-weight: 650;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".icon-button {",
+  "  display: inline-grid;",
+  "  place-items: center;",
+  "  width: 28px;",
+  "  height: 28px;",
+  "  border-color: var(--background-modifier-border);",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".theme-toggle-button.icon-button,",
+  ".theme-toggle-button.icon-button[aria-pressed=\"true\"] {",
+  "  width: 64px;",
+  "  min-width: 64px;",
+  "  height: 30px;",
+  "  padding: 0 10px;",
+  "  border: 1px solid #a99dff;",
+  "  background: #f7f5ff;",
+  "  background-color: #f7f5ff;",
+  "  background-image: none;",
+  "  color: #201a45;",
+  "  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);",
+  "}",
+  "",
+  ".theme-toggle-button.icon-button::before,",
+  ".theme-toggle-button.icon-button[aria-pressed=\"true\"]::before {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".theme-toggle-button.icon-button:hover,",
+  ".theme-toggle-button.icon-button[aria-pressed=\"true\"]:hover {",
+  "  border-color: #c6bfff;",
+  "  background: #ffffff;",
+  "  background-color: #ffffff;",
+  "  color: #201a45;",
+  "}",
+  "",
+  ".sidebar-toggle-button[aria-expanded=\"false\"] {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  height: 30px;",
+  "  border-width: 0;",
+  "  border-color: transparent;",
+  "  border-radius: 0;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease;",
+  "}",
+  "",
+  ".sidebar-toggle-button[aria-expanded=\"false\"]:hover {",
+  "  border-width: 0;",
+  "  border-color: transparent;",
+  "  background: color-mix(in srgb, var(--background-modifier-hover) 72%, transparent);",
+  "}",
+  "",
+  ".nav-section {",
+  "  padding: 14px 10px 0;",
+  "}",
+  "",
+  ".nav-section h2 {",
+  "  margin: 0 0 8px;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "  text-transform: uppercase;",
+  "  letter-spacing: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".project-file-section {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".project-file-card {",
+  "  display: grid;",
+  "  gap: 5px;",
+  "  min-width: 0;",
+  "  padding: 9px 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".project-file-main,",
+  ".project-file-actions {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".project-file-actions {",
+  "  flex-wrap: wrap;",
+  "}",
+  "",
+  ".project-file-sample-button {",
+  "  flex: 1 1 100%;",
+  "}",
+  "",
+  "#projectFileName,",
+  "#projectFilePath {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  "#projectFileName {",
+  "  flex: 1 1 auto;",
+  "  color: var(--text-normal);",
+  "  font-size: 13px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  "#projectFilePath {",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".project-save-indicator {",
+  "  flex: 0 0 auto;",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 5px;",
+  "  padding: 2px 6px;",
+  "  border-radius: var(--radius-s);",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".project-save-indicator[data-save-state=\"saved\"] {",
+  "  border: 1px solid color-mix(in srgb, var(--accent-green) 45%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--accent-green) 12%, transparent);",
+  "  color: var(--accent-green);",
+  "}",
+  "",
+  ".project-save-indicator[data-save-state=\"unsaved\"] {",
+  "  border: 1px solid color-mix(in srgb, var(--accent-yellow) 52%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--accent-yellow) 14%, transparent);",
+  "  color: var(--accent-yellow);",
+  "}",
+  "",
+  ".project-save-indicator[data-save-state=\"saving\"] {",
+  "  border: 1px solid color-mix(in srgb, var(--focus-accent) 50%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--focus-accent) 14%, transparent);",
+  "  color: var(--focus-accent);",
+  "}",
+  "",
+  ".project-save-indicator[data-save-state=\"error\"] {",
+  "  border: 1px solid color-mix(in srgb, var(--accent-red) 58%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--accent-red) 12%, transparent);",
+  "  color: var(--accent-red);",
+  "}",
+  "",
+  ".project-save-spinner {",
+  "  display: none;",
+  "  width: 10px;",
+  "  height: 10px;",
+  "  border: 2px solid currentColor;",
+  "  border-right-color: transparent;",
+  "  border-radius: 50%;",
+  "}",
+  "",
+  ".project-save-indicator[data-save-state=\"saving\"] .project-save-spinner {",
+  "  display: inline-block;",
+  "  animation: project-save-spin 800ms linear infinite;",
+  "}",
+  "",
+  "@keyframes project-save-spin {",
+  "  to {",
+  "    transform: rotate(360deg);",
+  "  }",
+  "}",
+  "",
+  ".nc-file-item,",
+  ".palette-item {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: flex-start;",
+  "  gap: 8px;",
+  "  width: 100%;",
+  "  min-height: 30px;",
+  "  padding: 6px 8px;",
+  "  text-align: left;",
+  "  color: var(--text-muted);",
+  "  overflow: hidden;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".nc-file-item-label {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".nc-file-item:hover,",
+  ".nc-file-item.active,",
+  ".palette-item:hover {",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".file-dot {",
+  "  flex: 0 0 auto;",
+  "  width: 7px;",
+  "  height: 7px;",
+  "  border-radius: 50%;",
+  "  background: var(--interactive-accent);",
+  "}",
+  "",
+  ".file-dot.muted {",
+  "  background: var(--text-faint);",
+  "}",
+  "",
+  ".palette-list {",
+  "  display: grid;",
+  "  gap: 4px;",
+  "}",
+  "",
+  ".palette-tools {",
+  "  display: flex;",
+  "  margin-bottom: 6px;",
+  "}",
+  "",
+  ".palette-tools .small-button {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".hidden-node-types {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  margin-bottom: 6px;",
+  "  padding-bottom: 6px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".hidden-node-types summary {",
+  "  display: grid;",
+  "  grid-template-columns: auto minmax(0, 1fr) auto;",
+  "  align-items: center;",
+  "  min-height: 30px;",
+  "  padding: 0 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "  cursor: pointer;",
+  "  list-style: none;",
+  "}",
+  "",
+  ".hidden-node-types summary::-webkit-details-marker {",
+  "  display: none;",
+  "}",
+  "",
+  ".hidden-node-types summary::before {",
+  "  content: \"+\";",
+  "  margin-right: 6px;",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".hidden-node-types[open] summary::before {",
+  "  content: \"-\";",
+  "}",
+  "",
+  ".hidden-node-types[data-empty=\"true\"] summary {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".hidden-node-count {",
+  "  display: inline-grid;",
+  "  place-items: center;",
+  "  min-width: 20px;",
+  "  height: 20px;",
+  "  border-radius: 999px;",
+  "  background: var(--background-control);",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".hidden-node-list {",
+  "  display: grid;",
+  "  gap: 4px;",
+  "  padding-top: 4px;",
+  "}",
+  "",
+  ".hidden-node-row {",
+  "  display: grid;",
+  "  grid-template-columns: 24px minmax(0, 1fr) auto;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".hidden-node-badge {",
+  "  cursor: default;",
+  "}",
+  "",
+  ".restore-node-type-button {",
+  "  width: 48px;",
+  "  padding: 0;",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".palette-row {",
+  "  display: grid;",
+  "  grid-template-columns: 24px minmax(0, 1fr) 28px 28px;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".palette-label {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".palette-hide-button,",
+  ".palette-delete-button {",
+  "  width: 28px;",
+  "  height: 30px;",
+  "}",
+  "",
+  ".palette-badge {",
+  "  appearance: none;",
+  "  display: inline-grid;",
+  "  place-items: center;",
+  "  width: 24px;",
+  "  height: 24px;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--node-color);",
+  "  color: #101010;",
+  "  font-size: 12px;",
+  "  font-weight: 800;",
+  "  line-height: 1;",
+  "  overflow: hidden;",
+  "  white-space: nowrap;",
+  "  word-break: keep-all;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".palette-badge[data-icon-size=\"double\"] {",
+  "  font-size: 10px;",
+  "}",
+  "",
+  ".palette-badge[data-icon-size=\"wide\"] {",
+  "  font-size: 8px;",
+  "}",
+  "",
+  ".palette-badge:hover,",
+  ".palette-badge:focus-visible {",
+  "  outline: 1px solid var(--focus-accent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".custom-node-form {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".custom-node-form input,",
+  ".custom-node-form select {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".custom-node-form select,",
+  ".custom-node-fields {",
+  "  width: 100%;",
+  "}",
+  "",
+  ".custom-node-fields {",
+  "  min-height: 70px;",
+  "  resize: vertical;",
+  "}",
+  "",
+  ".node-type-form {",
+  "  margin-top: 10px;",
+  "  padding-top: 10px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".custom-node-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) 34px auto;",
+  "  align-items: stretch;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".custom-node-row input[type=\"color\"] {",
+  "  width: 34px;",
+  "  min-width: 34px;",
+  "  height: 100%;",
+  "  padding: 3px;",
+  "}",
+  "",
+  ".custom-node-row .small-button {",
+  "  height: auto;",
+  "  padding: 0 8px;",
+  "}",
+  "",
+  ".custom-node-empty {",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".canvas-workspace {",
+  "  position: relative;",
+  "  display: grid;",
+  "  grid-template-rows: auto auto minmax(0, 1fr) auto;",
+  "  align-content: stretch;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  overflow: hidden;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".workspace-global-bar {",
+  "  grid-row: 1;",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  min-width: 0;",
+  "  min-height: 42px;",
+  "  padding: 7px 8px;",
+  "  overflow: hidden;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  background: var(--workspace-bar-bg);",
+  "}",
+  "",
+  ".workspace-file-label {",
+  "  display: flex;",
+  "  align-items: baseline;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".workspace-file-label strong {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  color: var(--text-normal);",
+  "  font-size: 15px;",
+  "  line-height: 1.2;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".workspace-global-actions {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 4px;",
+  "  flex: 0 0 auto;",
+  "}",
+  "",
+  ".canvas-workspace-tabs {",
+  "  grid-row: 2;",
+  "  display: flex;",
+  "  flex-wrap: nowrap;",
+  "  align-items: center;",
+  "  justify-content: flex-start;",
+  "  gap: 6px;",
+  "  min-height: 46px;",
+  "  padding: 7px 8px;",
+  "  overflow: hidden;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  background: var(--workspace-bar-bg);",
+  "}",
+  "",
+  ".canvas-workspace-tabs[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".toolbar-group {",
+  "  display: flex;",
+  "  flex: 0 1 auto;",
+  "  flex-wrap: wrap;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".toolbar-group-right {",
+  "  margin-left: auto;",
+  "  justify-content: flex-end;",
+  "  flex-wrap: nowrap;",
+  "  align-self: flex-start;",
+  "  flex: 0 0 auto;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".toolbar-group {",
+  "  justify-content: flex-start;",
+  "}",
+  "",
+  ".frame-canvas-scope {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  max-width: min(460px, 46vw);",
+  "  margin-left: 4px;",
+  "  padding: 3px 4px 3px 10px;",
+  "  border: 1px solid color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".frame-canvas-scope[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".frame-canvas-label {",
+  "  flex: 0 0 auto;",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  letter-spacing: 0;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".frame-canvas-scope strong {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  font-size: 12px;",
+  "  line-height: 1.2;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".new-project-button {",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".save-project-button {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".save-project-button:hover {",
+  "  border-color: var(--interactive-accent-hover);",
+  "  background: var(--interactive-accent-hover);",
+  "  color: var(--text-on-accent);",
+  "}",
+  "",
+  ".preview-tab {",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".preview-tab:hover {",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".spacer {",
+  "  flex: 1;",
+  "  min-width: 6px;",
+  "}",
+  "",
+  ".toolbar-button,",
+  ".small-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  min-width: 28px;",
+  "  flex: 0 0 auto;",
+  "  height: 30px;",
+  "  padding: 0 10px;",
+  "  border-color: var(--background-modifier-border);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".compact-button {",
+  "  padding: 0 8px;",
+  "}",
+  "",
+  ".export-image-controls {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  flex: 0 0 auto;",
+  "  gap: 0;",
+  "  height: 30px;",
+  "  overflow: hidden;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--input-shadow);",
+  "}",
+  "",
+  ".export-image-controls[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".export-image-controls:hover,",
+  ".export-image-controls:focus-within {",
+  "  border-color: var(--interactive-accent);",
+  "}",
+  "",
+  ".export-image-scale-label {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  align-self: stretch;",
+  "  width: auto;",
+  "}",
+  "",
+  ".export-image-controls .export-image-button,",
+  ".export-image-controls .toolbar-select {",
+  "  border: 0;",
+  "  border-radius: 0;",
+  "  box-shadow: none;",
+  "  background-color: transparent;",
+  "  height: 100%;",
+  "  min-height: 0;",
+  "}",
+  "",
+  ".export-image-controls .export-image-button {",
+  "  min-width: 60px;",
+  "  padding: 0 12px;",
+  "  color: var(--text-normal);",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".export-image-controls .toolbar-select {",
+  "  appearance: none;",
+  "  min-width: 126px;",
+  "  padding: 0 12px;",
+  "  border-left: 1px solid var(--background-modifier-border);",
+  "  text-align: center;",
+  "  text-align-last: center;",
+  "  font-variant-numeric: tabular-nums;",
+  "}",
+  "",
+  ".toolbar-select {",
+  "  width: auto;",
+  "  min-width: 84px;",
+  "  height: 30px;",
+  "  padding: 4px 24px 4px 8px;",
+  "  border-color: var(--background-modifier-border);",
+  "  background-color: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".toolbar-select:hover,",
+  ".toolbar-select:focus {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".help-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  flex: 0 0 auto;",
+  "  width: 30px;",
+  "  height: 30px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: 50%;",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  font-weight: 800;",
+  "  cursor: pointer;",
+  "  transition: 140ms ease;",
+  "}",
+  "",
+  ".help-button:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".toolbar-button.primary,",
+  ".small-button.primary,",
+  ".play-action.primary {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
+  "}",
+  "",
+  ".toolbar-button.active,",
+  ".mode-toggle-button.active {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary-alt));",
+  "  color: var(--text-normal);",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".zoom-readout {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  flex: 0 0 auto;",
+  "  min-width: 50px;",
+  "  height: 30px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  color: var(--text-muted);",
+  "  background: var(--background-control);",
+  "}",
+  "",
+  ".canvas-workspace-view {",
+  "  grid-row: 3;",
+  "  grid-column: 1;",
+  "  display: block;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  overflow: auto;",
+  "  visibility: hidden;",
+  "  opacity: 0;",
+  "  pointer-events: none;",
+  "  z-index: 0;",
+  "}",
+  "",
+  ".canvas-workspace-view:not(.active) {",
+  "  contain: strict;",
+  "  content-visibility: hidden;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".canvas-workspace-view.active {",
+  "  visibility: visible;",
+  "  opacity: 1;",
+  "  pointer-events: auto;",
+  "  z-index: 1;",
+  "}",
+  "",
+  ".canvas-panel {",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  overflow: auto;",
+  "  padding: 8px;",
+  "}",
+  "",
+  ".canvas-frame {",
+  "  position: relative;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "}",
+  "",
+  ".document-panel {",
+  "  min-height: 0;",
+  "  overflow: auto;",
+  "  padding: 16px;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".document-panel.active {",
+  "  display: grid;",
+  "}",
+  "",
+  "/* Project Document: a full-bleed, VSCode-style code editor (edit strip + gutter + editor). */",
+  ".document-source-panel {",
+  "  overflow: hidden;",
+  "  padding: 0;",
+  "}",
+  "",
+  ".document-source-panel.active {",
+  "  display: block;",
+  "}",
+  "",
+  ".document-source-shell {",
+  "  display: grid;",
+  "  grid-template-rows: auto minmax(0, 1fr);",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".document-source-chrome {",
+  "  min-width: 0;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".document-project-header {",
+  "  margin: 0 16px;",
+  "  padding: 14px 0 12px;",
+  "}",
+  "",
+  ".document-project-header .document-actions {",
+  "  align-self: center;",
+  "}",
+  "",
+  ".document-editor-toolbar {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  padding: 6px 12px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".document-editor-status {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: flex-end;",
+  "  gap: 10px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".document-chrome-toggle {",
+  "  flex: 0 0 auto;",
+  "  width: 28px;",
+  "  height: 28px;",
+  "  padding: 0;",
+  "}",
+  "",
+  ".document-chrome-chevron {",
+  "  width: 17px;",
+  "  height: 17px;",
+  "  fill: none;",
+  "  stroke: currentColor;",
+  "  stroke-width: 2;",
+  "  stroke-linecap: round;",
+  "  stroke-linejoin: round;",
+  "  transition: transform 140ms ease;",
+  "}",
+  "",
+  ".document-source-shell[data-document-chrome=\"collapsed\"] .document-project-header,",
+  ".document-source-shell[data-document-chrome=\"collapsed\"] .document-format-switch {",
+  "  display: none;",
+  "}",
+  "",
+  ".document-source-shell[data-document-chrome=\"collapsed\"] .document-editor-toolbar {",
+  "  min-height: 38px;",
+  "  padding-block: 4px;",
+  "}",
+  "",
+  ".document-source-shell[data-document-chrome=\"collapsed\"] .document-chrome-chevron {",
+  "  transform: rotate(180deg);",
+  "}",
+  "",
+  ".document-editor-identity {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 12px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".document-editor-filename {",
+  "  font: 12px/1 var(--nc-font-monospace);",
+  "  color: var(--text-muted);",
+  "  white-space: nowrap;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "}",
+  "",
+  ".node-vault-file-field {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding: 10px 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: color-mix(in srgb, var(--background-secondary) 92%, transparent);",
+  "}",
+  "",
+  ".node-vault-file-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".node-vault-file-header .nc-section-count {",
+  "  min-width: 0;",
+  "  max-width: 58%;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-vault-file-content {",
+  "  display: grid;",
+  "  gap: 7px;",
+  "}",
+  "",
+  ".node-vault-file-list {",
+  "  display: grid;",
+  "  gap: 9px;",
+  "}",
+  "",
+  ".node-vault-file-item {",
+  "  position: relative;",
+  "  display: grid;",
+  "  gap: 7px;",
+  "  min-width: 0;",
+  "  padding: 9px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary-alt);",
+  "}",
+  "",
+  ".node-vault-file-input-row {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 7px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".node-vault-file-input-row .node-vault-file-input-wrap {",
+  "  flex: 1 1 auto;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".node-vault-file-input-row .vault-drag-handle {",
+  "  min-height: 30px;",
+  "}",
+  "",
+  "/* Corner grip for resizing focused vision-board tiles. */",
+  ".vision-board-tile-resize {",
+  "  position: absolute;",
+  "  right: 2px;",
+  "  bottom: 2px;",
+  "  width: 16px;",
+  "  height: 16px;",
+  "  border-right: 3px solid color-mix(in srgb, var(--text-muted) 75%, transparent);",
+  "  border-bottom: 3px solid color-mix(in srgb, var(--text-muted) 75%, transparent);",
+  "  border-bottom-right-radius: 6px;",
+  "  cursor: nwse-resize;",
+  "}",
+  "",
+  ".vision-board-layer-menu {",
+  "  position: absolute;",
+  "  z-index: 40;",
+  "  display: grid;",
+  "  min-width: 132px;",
+  "  padding: 4px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--shadow-soft);",
+  "}",
+  "",
+  ".vision-board-layer-menu button {",
+  "  margin: 0;",
+  "  padding: 7px 10px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  font-size: 13px;",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".vision-board-layer-menu button:hover {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  "/* Highlight while a vault file dragged from Obsidian hovers a valid drop zone. */",
+  ".node.vault-file-drop-ready {",
+  "  border-color: var(--interactive-accent);",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 55%, transparent);",
+  "}",
+  "",
+  ".node-vault-file-field.vault-file-drop-ready {",
+  "  outline: 2px dashed var(--interactive-accent);",
+  "  outline-offset: 2px;",
+  "  border-radius: var(--radius-s);",
+  "}",
+  "",
+  ".vault-row-icon-button {",
+  "  flex: 0 0 auto;",
+  "  width: 30px;",
+  "  min-width: 30px;",
+  "  min-height: 30px;",
+  "  padding: 0;",
+  "  font-size: 14px;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".node-vault-file-item.is-add {",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  align-items: start;",
+  "  background: transparent;",
+  "  border-style: dashed;",
+  "}",
+  "",
+  ".node-vault-file-input-wrap {",
+  "  position: relative;",
+  "}",
+  "",
+  ".node-vault-file-input-wrap \u003e input {",
+  "  width: 100%;",
+  "}",
+  "",
+  ".vault-file-suggestions {",
+  "  position: absolute;",
+  "  top: calc(100% + 4px);",
+  "  right: 0;",
+  "  left: 0;",
+  "  z-index: 30;",
+  "  display: grid;",
+  "  max-height: 240px;",
+  "  overflow-y: auto;",
+  "  overscroll-behavior: contain;",
+  "  padding: 4px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--shadow-soft);",
+  "}",
+  "",
+  ".vault-file-suggestions[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".vault-file-suggestion {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  align-items: baseline;",
+  "  gap: 8px;",
+  "  width: 100%;",
+  "  padding: 7px 9px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".vault-file-suggestion:is(:hover, .active) {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".vault-file-suggestion strong,",
+  ".vault-file-suggestion small {",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".vault-file-suggestion small {",
+  "  max-width: 160px;",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".node-vault-file-actions {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".node-vault-file-actions .icon-button {",
+  "  width: 30px;",
+  "  min-width: 30px;",
+  "  padding-inline: 0;",
+  "}",
+  "",
+  ".node-vault-preview-setting {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  min-height: 28px;",
+  "  padding: 7px 9px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".node-vault-file-field small {",
+  "  color: var(--text-faint);",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  ".vault-preview-toggle {",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  position: relative;",
+  "  display: inline-grid;",
+  "  place-items: center;",
+  "  box-sizing: border-box;",
+  "  width: 40px;",
+  "  min-width: 40px;",
+  "  height: 24px;",
+  "  min-height: 24px;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: 999px;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: inherit;",
+  "  font: inherit;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".vault-preview-toggle::before,",
+  ".vault-preview-toggle::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".vault-preview-toggle-track {",
+  "  position: absolute;",
+  "  inset: 1px;",
+  "  box-sizing: border-box;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: inherit;",
+  "  background: var(--background-primary-alt);",
+  "  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.24);",
+  "  transition: background 140ms ease, border-color 140ms ease;",
+  "}",
+  "",
+  ".vault-preview-toggle-thumb {",
+  "  position: absolute;",
+  "  top: 2px;",
+  "  left: 2px;",
+  "  width: 16px;",
+  "  height: 16px;",
+  "  border-radius: 50%;",
+  "  background: var(--text-muted);",
+  "  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.34);",
+  "  transition: transform 140ms ease, background 140ms ease;",
+  "}",
+  "",
+  ".vault-preview-toggle.is-enabled .vault-preview-toggle-track {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 72%, transparent);",
+  "  background: var(--interactive-accent);",
+  "}",
+  "",
+  ".vault-preview-toggle.is-enabled .vault-preview-toggle-thumb {",
+  "  transform: translateX(16px);",
+  "  background: var(--text-on-accent);",
+  "}",
+  "",
+  ".vault-preview-toggle:focus-visible {",
+  "  outline: 2px solid var(--focus-accent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".document-format-switch {",
+  "  display: inline-grid;",
+  "  grid-auto-flow: column;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".document-format-button {",
+  "  min-height: 26px;",
+  "  padding: 0 12px;",
+  "  border: 0;",
+  "  border-right: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-muted);",
+  "  font: 12px/1 inherit;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".document-format-button:last-child {",
+  "  border-right: 0;",
+  "}",
+  "",
+  ".document-format-button.active {",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
+  "}",
+  "",
+  ".document-sync-status {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".document-sync-status[data-status=\"pending\"] {",
+  "  color: var(--text-accent);",
+  "}",
+  "",
+  ".document-sync-status[data-status=\"error\"] {",
+  "  color: var(--text-error);",
+  "}",
+  "",
+  ".document-editor-main {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) 0;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "}",
+  "",
+  ".document-source-shell[data-document-toc=\"open\"] .document-editor-main {",
+  "  grid-template-columns: minmax(0, 1fr) clamp(180px, 22%, 280px);",
+  "}",
+  "",
+  ".document-editor-surface {",
+  "  position: relative;",
+  "  display: grid;",
+  "  grid-template-columns: auto minmax(0, 1fr);",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  overflow: hidden;",
+  "  background: var(--background-primary);",
+  "  font: 13px/1.6 var(--nc-font-monospace);",
+  "  tab-size: 2;",
+  "}",
+  "",
+  ".document-editor-gutter {",
+  "  overflow: hidden;",
+  "  padding: 12px 10px 12px 14px;",
+  "  border-right: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-faint);",
+  "  text-align: right;",
+  "  font: inherit;",
+  "  white-space: pre;",
+  "  user-select: none;",
+  "  -webkit-user-select: none;",
+  "}",
+  "",
+  ".document-editor-gutter span {",
+  "  display: block;",
+  "}",
+  "",
+  ".document-editor-input {",
+  "  position: relative;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".document-editor-highlight,",
+  ".document-editor-search-layer {",
+  "  position: absolute;",
+  "  top: 0;",
+  "  left: 0;",
+  "  min-width: 100%;",
+  "  margin: 0;",
+  "  padding: 12px 16px;",
+  "  font: inherit;",
+  "  tab-size: inherit;",
+  "  white-space: pre;",
+  "  word-break: normal;",
+  "  overflow-wrap: normal;",
+  "  pointer-events: none;",
+  "  will-change: transform;",
+  "}",
+  "",
+  ".document-editor-highlight {",
+  "  z-index: 0;",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".document-editor-search-layer {",
+  "  z-index: 1;",
+  "  color: transparent;",
+  "}",
+  "",
+  ".document-source-editor {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  z-index: 2;",
+  "  box-sizing: border-box;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  margin: 0;",
+  "  resize: none;",
+  "  border: 0;",
+  "  padding: 12px 16px;",
+  "  background: transparent;",
+  "  color: transparent;",
+  "  caret-color: var(--text-normal);",
+  "  font: inherit;",
+  "  tab-size: inherit;",
+  "  white-space: pre;",
+  "  overflow: auto;",
+  "}",
+  "",
+  "/* Beat the global input/textarea color + -webkit-text-fill-color so the syntax layer shows. */",
+  ".app-shell .document-editor-input textarea.document-source-editor,",
+  ".app-shell:not([data-theme=\"light\"]) .document-editor-input textarea.document-source-editor {",
+  "  color: transparent;",
+  "  -webkit-text-fill-color: transparent;",
+  "  caret-color: var(--text-normal);",
+  "  background: transparent;",
+  "}",
+  "",
+  ".document-source-editor::selection {",
+  "  color: transparent;",
+  "  -webkit-text-fill-color: transparent;",
+  "  background: color-mix(in srgb, var(--interactive-accent) 32%, transparent);",
+  "}",
+  "",
+  ".document-source-editor:focus {",
+  "  outline: none;",
+  "}",
+  "",
+  ".document-editor-surface:focus-within {",
+  "  box-shadow: inset 2px 0 0 var(--interactive-accent);",
+  "}",
+  "",
+  ".document-editor-highlight .tok-heading { color: var(--nc-tok-heading, #4aa3ff); font-weight: 600; }",
+  ".document-editor-highlight .tok-quote { color: var(--nc-tok-quote, #63bd88); font-style: italic; }",
+  ".document-editor-highlight .tok-comment { color: var(--nc-tok-comment, #7c8592); font-style: italic; }",
+  ".document-editor-highlight .tok-code { color: var(--nc-tok-code, #d98a3d); }",
+  ".document-editor-highlight .tok-strong { color: var(--text-normal); font-weight: 700; }",
+  ".document-editor-highlight .tok-var { color: var(--nc-tok-var, #35b6b6); }",
+  ".document-editor-highlight .tok-op { color: var(--nc-tok-op, #db5a8f); }",
+  ".document-editor-highlight .tok-key { color: var(--nc-tok-key, #a97ff0); font-weight: 600; }",
+  ".document-editor-highlight .tok-keyword { color: var(--nc-tok-op, #db5a8f); font-weight: 600; }",
+  ".document-editor-highlight .tok-choice { color: var(--nc-tok-choice, #43b676); font-weight: 600; }",
+  ".document-editor-highlight .tok-list { color: var(--nc-tok-list, #8497ab); }",
+  "",
+  ".app-shell[data-theme=\"light\"] .document-editor-highlight {",
+  "  --nc-tok-heading: #1667c9;",
+  "  --nc-tok-quote: #2f8f57;",
+  "  --nc-tok-comment: #6b7280;",
+  "  --nc-tok-code: #b45c12;",
+  "  --nc-tok-var: #0f8f8f;",
+  "  --nc-tok-op: #c02f74;",
+  "  --nc-tok-key: #7b3fd0;",
+  "  --nc-tok-choice: #2c9257;",
+  "  --nc-tok-list: #566579;",
+  "}",
+  "",
+  ".document-editor-search-layer .doc-search-hit {",
+  "  border-radius: 2px;",
+  "  background: color-mix(in srgb, #e5c07b 55%, transparent);",
+  "}",
+  "",
+  ".document-editor-search-layer .doc-search-hit.current {",
+  "  background: color-mix(in srgb, var(--interactive-accent) 55%, transparent);",
+  "  box-shadow: 0 0 0 1px var(--interactive-accent);",
+  "}",
+  "",
+  ".document-toc-panel {",
+  "  overflow: auto;",
+  "  min-width: 0;",
+  "  border-left: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".document-source-shell[data-document-toc=\"closed\"] .document-toc-panel {",
+  "  display: none;",
+  "}",
+  "",
+  ".document-toc-title {",
+  "  padding: 10px 12px 6px;",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  letter-spacing: 0.06em;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".document-toc-empty {",
+  "  padding: 4px 12px 12px;",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".document-toc-list {",
+  "  margin: 0;",
+  "  padding: 0 6px 12px;",
+  "  list-style: none;",
+  "}",
+  "",
+  ".document-toc-item {",
+  "  display: block;",
+  "  width: 100%;",
+  "  padding: 4px 8px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  color: var(--text-muted);",
+  "  font: inherit;",
+  "  font-size: 12px;",
+  "  text-align: left;",
+  "  white-space: nowrap;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".document-toc-item:hover {",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".document-toc-item[data-toc-level=\"2\"] { padding-left: 18px; }",
+  ".document-toc-item[data-toc-level=\"3\"] { padding-left: 28px; }",
+  ".document-toc-item[data-toc-level=\"4\"],",
+  ".document-toc-item[data-toc-level=\"5\"],",
+  ".document-toc-item[data-toc-level=\"6\"] { padding-left: 36px; }",
+  "",
+  ".document-shell {",
+  "  display: grid;",
+  "  align-content: start;",
+  "  gap: 16px;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "}",
+  "",
+  "/* Keep enough scroll-past-end space to center matches near the end of Advanced JSON. */",
+  ".document-shell.playbook-json-open {",
+  "  align-self: start;",
+  "  min-height: max-content;",
+  "  padding-bottom: min(44vh, 360px);",
+  "}",
+  "",
+  ".document-limit-notice {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  flex-wrap: wrap;",
+  "  gap: 10px;",
+  "  min-width: 0;",
+  "  padding: 10px 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".document-header {",
+  "  display: flex;",
+  "  align-items: flex-start;",
+  "  justify-content: space-between;",
+  "  gap: 16px;",
+  "  padding-bottom: 12px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".document-header \u003e div {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".document-header h2 {",
+  "  margin: 2px 0 4px;",
+  "  color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "  font-size: 20px;",
+  "  font-weight: 700;",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".project-file-box {",
+  "  display: grid;",
+  "  gap: 10px;",
+  "  padding: 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".project-file-box-header {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 10px;",
+  "}",
+  "",
+  ".project-file-box-title {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".project-file-box-title \u003e span:not(.project-feature-badge) {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".project-feature-badge {",
+  "  border: 1px solid color-mix(in srgb, var(--text-accent) 25%, transparent);",
+  "  background: color-mix(in srgb, var(--text-accent) 18%, transparent);",
+  "  color: var(--text-accent);",
+  "  border-radius: 999px;",
+  "  padding: 2px 7px;",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  line-height: 1.2;",
+  "  text-transform: uppercase;",
+  "  letter-spacing: 0.03em;",
+  "}",
+  "",
+  ".project-file-box-actions {",
+  "  display: inline-flex;",
+  "  flex-wrap: wrap;",
+  "  justify-content: flex-end;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".project-export-controls {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".project-control-group {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".project-control-label {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".project-control-grid {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".project-file-box .small-button {",
+  "  min-width: 0;",
+  "  border-color: var(--background-modifier-border);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".project-file-box .small-button:hover {",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".project-file-box .small-button:focus-visible {",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  outline: 2px solid color-mix(in srgb, var(--background-modifier-border-hover) 55%, transparent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".document-actions {",
+  "  display: flex;",
+  "  flex: 1 1 320px;",
+  "  flex-wrap: wrap;",
+  "  justify-content: flex-end;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".document-meta {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".document-filter-bar {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 8px;",
+  "  align-items: center;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".document-restore-bar {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  padding: 8px 10px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".document-restore-bar \u003e span {",
+  "  flex: 0 0 auto;",
+  "  font-weight: 650;",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".document-restore-bar \u003e .filter-chip {",
+  "  max-width: min(100%, 220px);",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".filter-chip {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  min-height: 28px;",
+  "  max-width: 100%;",
+  "  gap: 6px;",
+  "  padding: 4px 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".filter-chip.quiet {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".filter-chip button {",
+  "  flex: 0 0 auto;",
+  "  min-height: 20px;",
+  "  padding: 0 6px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-normal);",
+  "  cursor: pointer;",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".filter-chip button:hover {",
+  "  border-color: var(--focus-accent);",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".filter-chip-button {",
+  "  cursor: pointer;",
+  "  font: inherit;",
+  "  text-align: left;",
+  "}",
+  "",
+  ".filter-chip-button:hover {",
+  "  border-color: var(--focus-accent);",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".filter-chip-clear {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  padding: 1px 6px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-normal);",
+  "  font-size: 11px;",
+  "  line-height: 1.4;",
+  "}",
+  "",
+  ".canvas-viewport {",
+  "  position: relative;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  overflow: auto;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background-color: var(--background-canvas);",
+  "  background-image:",
+  "    linear-gradient(var(--canvas-grid-small) 1px, transparent 1px),",
+  "    linear-gradient(90deg, var(--canvas-grid-small) 1px, transparent 1px),",
+  "    linear-gradient(var(--canvas-grid-large) 1px, transparent 1px),",
+  "    linear-gradient(90deg, var(--canvas-grid-large) 1px, transparent 1px);",
+  "  background-position: 0 0;",
+  "  background-size: 16px 16px, 16px 16px, 80px 80px, 80px 80px;",
+  "  outline: none;",
+  "}",
+  "",
+  ".canvas-content {",
+  "  position: absolute;",
+  "  left: 0;",
+  "  top: 0;",
+  "  width: 4000px;",
+  "  height: 2600px;",
+  "}",
+  "",
+  ".frame-layer,",
+  ".link-layer,",
+  ".node-layer {",
+  "  position: absolute;",
+  "  left: 0;",
+  "  top: 0;",
+  "  width: 4000px;",
+  "  height: 2600px;",
+  "  transform-origin: 0 0;",
+  "}",
+  "",
+  ".frame-layer {",
+  "  pointer-events: none;",
+  "  z-index: 1;",
+  "}",
+  "",
+  ".link-layer {",
+  "  overflow: visible;",
+  "  pointer-events: none;",
+  "  z-index: 2;",
+  "}",
+  "",
+  ".node-layer {",
+  "  pointer-events: none;",
+  "  z-index: 3;",
+  "}",
+  "",
+  ".link-hitpath,",
+  ".link-path {",
+  "  fill: none;",
+  "  pointer-events: stroke;",
+  "}",
+  "",
+  ".link-hitpath {",
+  "  stroke: transparent;",
+  "  stroke-width: 18;",
+  "  stroke-linecap: round;",
+  "}",
+  "",
+  ".link-path {",
+  "  stroke: var(--link-color);",
+  "  stroke-width: 2;",
+  "  stroke-linecap: round;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".link-path.selected {",
+  "  stroke: var(--interactive-accent-hover);",
+  "  stroke-width: 3;",
+  "}",
+  "",
+  ".link-path.graph-hover-link {",
+  "  stroke: var(--graph-hover-color);",
+  "  stroke-width: 4;",
+  "  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--graph-hover-color) 86%, transparent));",
+  "}",
+  "",
+  ".link-label.graph-hover-link {",
+  "  fill: var(--text-normal);",
+  "  font-weight: 700;",
+  "  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--graph-hover-color) 70%, transparent));",
+  "}",
+  "",
+  ".link-path.pending {",
+  "  stroke: var(--interactive-accent-hover);",
+  "  stroke-dasharray: 9 7;",
+  "}",
+  "",
+  ".link-label {",
+  "  fill: var(--text-muted);",
+  "  stroke: var(--background-primary);",
+  "  stroke-width: 4;",
+  "  paint-order: stroke;",
+  "  stroke-linejoin: round;",
+  "  pointer-events: auto;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".link-label:hover {",
+  "  fill: var(--text-normal);",
+  "}",
+  "",
+  ".node-stack {",
+  "  position: absolute;",
+  "  left: 0;",
+  "  top: 0;",
+  "  width: 0;",
+  "  height: 0;",
+  "  z-index: var(--node-layer-order, 0);",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".node-stack \u003e .node,",
+  ".node-stack \u003e .port {",
+  "  pointer-events: auto;",
+  "}",
+  "",
+  ".node {",
+  "  position: absolute;",
+  "  width: 200px;",
+  "  min-width: 140px;",
+  "  min-height: 96px;",
+  "  box-sizing: border-box;",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  overflow: hidden;",
+  "  border: 1px solid var(--node-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--node-surface);",
+  "  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);",
+  "  pointer-events: auto;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".node.graph-hover-node {",
+  "  border-color: color-mix(in srgb, var(--graph-hover-color) 88%, white 12%);",
+  "  box-shadow:",
+  "    0 0 0 2px color-mix(in srgb, var(--graph-hover-color) 50%, transparent),",
+  "    0 0 20px color-mix(in srgb, var(--graph-hover-color) 38%, transparent),",
+  "    var(--shadow-soft);",
+  "}",
+  "",
+  ".node.graph-hover-origin {",
+  "  border-color: var(--graph-hover-color);",
+  "  box-shadow:",
+  "    0 0 0 2px color-mix(in srgb, var(--graph-hover-color) 68%, transparent),",
+  "    0 0 26px color-mix(in srgb, var(--graph-hover-color) 48%, transparent),",
+  "    var(--shadow-soft);",
+  "}",
+  "",
+  ".node.frame {",
+  "  width: 420px;",
+  "  min-width: 260px;",
+  "  min-height: 160px;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".node.visual-frame {",
+  "  background: color-mix(in srgb, var(--node-color) var(--node-bg-opacity, 14%), transparent);",
+  "  border-color: color-mix(in srgb, var(--node-color) 48%, var(--node-border));",
+  "}",
+  "",
+  ".node.event-frame {",
+  "  background: color-mix(in srgb, var(--node-color) var(--node-bg-opacity, 20%), transparent);",
+  "  border-color: color-mix(in srgb, var(--node-color) 54%, var(--node-border));",
+  "}",
+  "",
+  ".node.frame .node-header {",
+  "  background: color-mix(in srgb, var(--node-color) 16%, var(--frame-header-bg));",
+  "  pointer-events: auto;",
+  "}",
+  "",
+  ".node.frame .node-resize-handle {",
+  "  pointer-events: auto;",
+  "}",
+  "",
+  ".node.visual-frame .node-header {",
+  "  border-bottom-color: color-mix(in srgb, var(--node-color) 48%, var(--node-border));",
+  "}",
+  "",
+  ".node.event-frame .node-header {",
+  "  border-bottom-color: color-mix(in srgb, var(--node-color) 54%, var(--node-border));",
+  "}",
+  "",
+  ".node.selected {",
+  "  border-color: var(--focus-accent);",
+  "  box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus-accent) 55%, transparent), var(--shadow-soft);",
+  "}",
+  "",
+  ".node.multi-selected {",
+  "  border-color: var(--accent-blue);",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue) 60%, transparent), var(--shadow-soft);",
+  "}",
+  "",
+  ".marquee-layer {",
+  "  position: absolute;",
+  "  left: 0;",
+  "  top: 0;",
+  "  width: 4000px;",
+  "  height: 2600px;",
+  "  transform-origin: 0 0;",
+  "  pointer-events: none;",
+  "  z-index: 90;",
+  "}",
+  "",
+  ".marquee-rect {",
+  "  position: absolute;",
+  "  pointer-events: none;",
+  "  border: 1px solid var(--accent-blue);",
+  "  border-radius: 4px;",
+  "  background: color-mix(in srgb, var(--accent-blue) 14%, transparent);",
+  "}",
+  "",
+  ".node.character-focus-muted {",
+  "  opacity: 0.28;",
+  "}",
+  "",
+  ".node.character-focus-match {",
+  "  border-color: var(--focus-accent);",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-accent) 48%, transparent), var(--shadow-soft);",
+  "}",
+  "",
+  ".node-header {",
+  "  display: grid;",
+  "  grid-template-columns: 28px minmax(0, 1fr) auto auto auto;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  flex: 0 0 auto;",
+  "  min-width: 0;",
+  "  min-height: 34px;",
+  "  padding: 7px 9px;",
+  "  border-bottom: 1px solid var(--node-header-border);",
+  "  border-radius: var(--radius-m) var(--radius-m) 0 0;",
+  "  background: var(--node-header-bg);",
+  "  cursor: grab;",
+  "}",
+  "",
+  ".frame-collapse-button,",
+  ".frame-canvas-button,",
+  ".story-collapse-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  width: 24px;",
+  "  height: 24px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-control);",
+  "  color: var(--text-muted);",
+  "  font-size: 14px;",
+  "  font-weight: 800;",
+  "  line-height: 1;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".frame-collapse-button:hover,",
+  ".frame-canvas-button:hover,",
+  ".story-collapse-button:hover {",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".node.frame.collapsed {",
+  "  min-height: 46px;",
+  "}",
+  "",
+  ".node.frame.collapsed .node-body,",
+  ".node.frame.collapsed .node-resize-handle {",
+  "  display: none;",
+  "}",
+  "",
+  ".node:active .node-header {",
+  "  cursor: grabbing;",
+  "}",
+  "",
+  ".node-icon {",
+  "  appearance: none;",
+  "  display: inline-grid;",
+  "  place-items: center;",
+  "  width: 22px;",
+  "  height: 22px;",
+  "  min-width: 22px;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--node-color);",
+  "  color: #101010;",
+  "  font-family: inherit;",
+  "  font-size: 12px;",
+  "  font-weight: 800;",
+  "  line-height: 1;",
+  "  overflow: hidden;",
+  "  white-space: nowrap;",
+  "  word-break: keep-all;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".node-icon[data-icon-size=\"double\"] {",
+  "  font-size: 10px;",
+  "}",
+  "",
+  ".node-icon[data-icon-size=\"wide\"] {",
+  "  font-size: 8px;",
+  "}",
+  "",
+  ".node-icon:hover,",
+  ".node-icon:focus-visible {",
+  "  outline: 1px solid var(--focus-accent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".node:active .node-icon {",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".node-type {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-id {",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-body {",
+  "  display: flex;",
+  "  flex: 1 1 auto;",
+  "  flex-direction: column;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  padding: 12px 14px 14px;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".node-title {",
+  "  display: -webkit-box;",
+  "  flex: 0 0 auto;",
+  "  overflow: hidden;",
+  "  margin-bottom: 8px;",
+  "  color: var(--text-normal);",
+  "  font-weight: 700;",
+  "  line-height: 1.25;",
+  "  overflow-wrap: anywhere;",
+  "  -webkit-box-orient: vertical;",
+  "  -webkit-line-clamp: 2;",
+  "}",
+  "",
+  ".node-choice-followup {",
+  "  display: flex;",
+  "  flex: 0 0 auto;",
+  "  flex-wrap: wrap;",
+  "  gap: 4px 6px;",
+  "  margin: -2px 0 7px;",
+  "}",
+  "",
+  ".node-choice-followup-button {",
+  "  appearance: none;",
+  "  max-width: 100%;",
+  "  padding: 2px 8px;",
+  "  overflow: hidden;",
+  "  border: 1px solid color-mix(in srgb, var(--interactive-accent) 58%, transparent);",
+  "  border-radius: 999px;",
+  "  background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);",
+  "  box-shadow: 0 0 7px color-mix(in srgb, var(--interactive-accent) 42%, transparent), inset 0 0 8px color-mix(in srgb, var(--interactive-accent) 12%, transparent);",
+  "  color: color-mix(in srgb, var(--interactive-accent) 82%, white);",
+  "  cursor: pointer;",
+  "  font-family: inherit;",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  line-height: 1.35;",
+  "  text-align: left;",
+  "  text-overflow: ellipsis;",
+  "  text-shadow: 0 0 7px color-mix(in srgb, var(--interactive-accent) 72%, transparent);",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-choice-followup-button:hover {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 82%, white 18%);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 24%, transparent);",
+  "  box-shadow: 0 0 10px color-mix(in srgb, var(--interactive-accent) 60%, transparent), inset 0 0 9px color-mix(in srgb, var(--interactive-accent) 18%, transparent);",
+  "}",
+  "",
+  ".node-choice-followup-button:focus-visible {",
+  "  outline: 2px solid color-mix(in srgb, var(--interactive-accent) 82%, white 18%);",
+  "  outline-offset: 1px;",
+  "}",
+  "",
+  ".app-shell[data-theme=\"light\"] .node-choice-followup-button {",
+  "  background: color-mix(in srgb, var(--interactive-accent) 10%, white);",
+  "  box-shadow: 0 0 6px color-mix(in srgb, var(--interactive-accent) 24%, transparent), inset 0 0 7px color-mix(in srgb, var(--interactive-accent) 8%, transparent);",
+  "  color: color-mix(in srgb, var(--interactive-accent) 78%, #24173a);",
+  "  text-shadow: 0 0 5px color-mix(in srgb, var(--interactive-accent) 34%, transparent);",
+  "}",
+  "",
+  ".node-text {",
+  "  display: -webkit-box;",
+  "  flex: 1 1 auto;",
+  "  min-height: 0;",
+  "  overflow: hidden;",
+  "  color: var(--text-normal);",
+  "  line-height: 1.45;",
+  "  overflow-wrap: anywhere;",
+  "  white-space: pre-wrap;",
+  "  -webkit-box-orient: vertical;",
+  "  -webkit-line-clamp: 6;",
+  "}",
+  "",
+  ".node-text-summary {",
+  "  flex: 0 1 auto;",
+  "  max-height: 4.35em;",
+  "  margin-bottom: 8px;",
+  "  -webkit-line-clamp: 3;",
+  "}",
+  "",
+  ".node-vault-links {",
+  "  /* Shrinks and scrolls only when the node box is smaller than its content;",
+  "     otherwise the section shows everything. */",
+  "  flex: 0 1 auto;",
+  "  min-height: 0;",
+  "  min-width: 0;",
+  "  margin-top: 9px;",
+  "  padding-top: 8px;",
+  "  padding-right: 2px;",
+  "  overflow-y: auto;",
+  "  overscroll-behavior: contain;",
+  "  border-top: 1px solid var(--node-header-border);",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".node-vault-link {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".node-vault-link + .node-vault-link {",
+  "  padding-top: 8px;",
+  "  border-top: 1px solid var(--node-header-border);",
+  "}",
+  "",
+  ".node-vault-link-row {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".node-vault-open {",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  display: flex;",
+  "  align-items: center;",
+  "  /* Explicit so the Obsidian host's `button { justify-content: center }` cannot",
+  "     center the icon + file title inside the stretched button. */",
+  "  justify-content: flex-start;",
+  "  gap: 7px;",
+  "  min-width: 0;",
+  "  flex: 1 1 auto;",
+  "  margin: 0;",
+  "  padding: 3px 4px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".node-vault-open::before,",
+  ".node-vault-open::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".node-vault-open:hover {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".node-vault-open:focus-visible {",
+  "  outline: 2px solid var(--focus-accent);",
+  "  outline-offset: 1px;",
+  "}",
+  "",
+  ".node-vault-open-icon {",
+  "  flex: 0 0 auto;",
+  "  color: var(--interactive-accent);",
+  "  font-size: 13px;",
+  "  font-weight: 800;",
+  "}",
+  "",
+  ".node-vault-open-text {",
+  "  display: grid;",
+  "  min-width: 0;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".node-vault-open-text strong,",
+  ".node-vault-open-text small {",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-vault-open-text strong {",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".node-vault-open-text small {",
+  "  margin-top: 2px;",
+  "  color: var(--text-muted);",
+  "  font-size: 10px;",
+  "}",
+  "",
+  ".node-vault-link .vault-preview-toggle {",
+  "  width: 36px;",
+  "  min-width: 36px;",
+  "  height: 22px;",
+  "  min-height: 22px;",
+  "}",
+  "",
+  ".node-vault-link .vault-preview-toggle-thumb {",
+  "  width: 14px;",
+  "  height: 14px;",
+  "}",
+  "",
+  ".node-vault-link .vault-preview-toggle.is-enabled .vault-preview-toggle-thumb {",
+  "  transform: translateX(14px);",
+  "}",
+  "",
+  ".node-vault-preview.is-image {",
+  "  padding: 4px;",
+  "  max-height: calc(var(--vault-preview-h, 132px) + 8px);",
+  "}",
+  "",
+  ".node-vault-preview.is-image img {",
+  "  display: block;",
+  "  max-width: 100%;",
+  "  max-height: var(--vault-preview-h, 132px);",
+  "  margin: 0 auto;",
+  "  border-radius: var(--radius-s);",
+  "  object-fit: contain;",
+  "}",
+  "",
+  "/* Inline preview-size slider on the card row. */",
+  ".node-vault-size-slider {",
+  "  flex: 0 0 auto;",
+  "  width: 64px;",
+  "  min-width: 0;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  accent-color: var(--interactive-accent);",
+  "  cursor: ew-resize;",
+  "}",
+  "",
+  ".node-vault-preview {",
+  "  max-height: 126px;",
+  "  margin-top: 7px;",
+  "  padding: 8px 9px;",
+  "  overflow: auto;",
+  "  overscroll-behavior: contain;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary-alt);",
+  "  color: var(--text-normal);",
+  "  font-size: 11px;",
+  "  line-height: 1.45;",
+  "  overflow-wrap: anywhere;",
+  "  white-space: pre-wrap;",
+  "  user-select: text;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown {",
+  "  white-space: normal;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown \u003e :first-child {",
+  "  margin-top: 0;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown \u003e :last-child {",
+  "  margin-bottom: 0;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown :is(h1, h2, h3, h4, h5, h6) {",
+  "  margin: 0.65em 0 0.3em;",
+  "  color: var(--text-normal);",
+  "  font-size: 1em;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown :is(p, ul, ol, blockquote, pre, table) {",
+  "  margin: 0.45em 0;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown :is(ul, ol) {",
+  "  padding-inline-start: 1.5em;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown a {",
+  "  color: var(--text-accent);",
+  "  text-decoration: underline;",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown :is(code, pre) {",
+  "  font-family: var(--font-monospace, ui-monospace, monospace);",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown pre {",
+  "  padding: 0.45em 0.55em;",
+  "  overflow: auto;",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--code-background, var(--background-secondary));",
+  "}",
+  "",
+  ".node-vault-preview.is-markdown img {",
+  "  display: block;",
+  "  max-width: 100%;",
+  "  height: auto;",
+  "}",
+  "",
+  ".node-vault-preview.is-loading {",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".node-vault-preview.is-error {",
+  "  color: var(--text-error);",
+  "}",
+  "",
+  ".node-choice-preview {",
+  "  flex: 1 1 auto;",
+  "  min-height: 0;",
+  "  margin: 0;",
+  "  padding: 7px 0 0;",
+  "  overflow-x: hidden;",
+  "  overflow-y: auto;",
+  "  overscroll-behavior: contain;",
+  "  scrollbar-gutter: stable;",
+  "  border-top: 1px solid var(--node-header-border);",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  line-height: 1.55;",
+  "}",
+  "",
+  ".node-choice-preview li {",
+  "  display: grid;",
+  "  grid-template-columns: 20px minmax(0, 1fr);",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  overflow: hidden;",
+  "  list-style: none;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-choice-index {",
+  "  appearance: none;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 18px;",
+  "  height: 18px;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  border: 1px solid var(--node-header-border);",
+  "  border-radius: 50%;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  cursor: pointer;",
+  "  font-family: inherit;",
+  "  font-size: 10px;",
+  "  font-variant-numeric: tabular-nums;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".node-choice-index:hover:not(:disabled),",
+  ".node-choice-index:focus-visible,",
+  ".node-choice-index.graph-hover-choice-option {",
+  "  border-color: var(--accent-purple);",
+  "  background: color-mix(in srgb, var(--accent-purple) 18%, transparent);",
+  "  color: var(--text-normal);",
+  "  outline: none;",
+  "  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-purple) 62%, transparent);",
+  "}",
+  "",
+  ".node-choice-index:disabled {",
+  "  cursor: default;",
+  "  opacity: 0.48;",
+  "}",
+  "",
+  ".node .node-choice-label-input {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  height: 24px;",
+  "  padding: 2px 5px;",
+  "  overflow: hidden;",
+  "  border: 1px solid transparent;",
+  "  border-radius: 5px;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  line-height: 1.4;",
+  "  text-overflow: ellipsis;",
+  "}",
+  "",
+  ".node .node-choice-label-input:hover {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 30%, transparent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);",
+  "}",
+  "",
+  ".node .node-choice-label-input.graph-hover-choice-option {",
+  "  border-color: var(--accent-purple);",
+  "  background: color-mix(in srgb, var(--accent-purple) 12%, transparent);",
+  "  box-shadow:",
+  "    0 0 0 1px color-mix(in srgb, var(--accent-purple) 34%, transparent),",
+  "    0 0 10px color-mix(in srgb, var(--accent-purple) 38%, transparent);",
+  "}",
+  "",
+  ".node .node-choice-label-input:focus,",
+  ".node .node-choice-label-input:focus-visible {",
+  "  border-color: var(--interactive-accent);",
+  "  outline: none;",
+  "  background: var(--background-control);",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);",
+  "}",
+  "",
+  ".node-dialog-preview {",
+  "  flex: 1 1 auto;",
+  "  min-height: 0;",
+  "  max-height: 100%;",
+  "  overflow-x: hidden;",
+  "  overflow-y: auto;",
+  "  overscroll-behavior: contain;",
+  "  scrollbar-gutter: stable;",
+  "  padding: 7px 8px;",
+  "  border: 1px solid var(--node-header-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--background-primary) 72%, transparent);",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".node-choice-preview:focus-visible,",
+  ".node-dialog-preview:focus-visible {",
+  "  outline: 2px solid var(--focus-accent);",
+  "  outline-offset: -2px;",
+  "}",
+  "",
+  ".node-dialog-line {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(42px, var(--dialog-speaker-ratio, 34%)) 14px minmax(0, 1fr);",
+  "  align-items: start;",
+  "  gap: 2px;",
+  "}",
+  "",
+  ".node .node-dialog-speaker-input,",
+  ".node .node-dialog-line-input {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 24px;",
+  "  margin: 0;",
+  "  padding: 2px 4px;",
+  "  border: 1px solid transparent;",
+  "  border-radius: 5px;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  line-height: 1.4;",
+  "}",
+  "",
+  ".node .node-dialog-speaker-input {",
+  "  height: 24px;",
+  "  color: var(--text-accent);",
+  "  font-weight: 650;",
+  "  text-overflow: ellipsis;",
+  "}",
+  "",
+  ".node .node-dialog-line-input {",
+  "  resize: none;",
+  "  field-sizing: content;",
+  "  max-height: 84px;",
+  "  overflow-y: auto;",
+  "  white-space: pre-wrap;",
+  "}",
+  "",
+  ".node-dialog-separator {",
+  "  display: grid;",
+  "  place-items: start center;",
+  "  align-self: stretch;",
+  "  min-height: 24px;",
+  "  padding-top: 3px;",
+  "  border-radius: 4px;",
+  "  color: var(--text-muted);",
+  "  cursor: col-resize;",
+  "  touch-action: none;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".node-dialog-separator:hover {",
+  "  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);",
+  "  color: var(--interactive-accent-hover);",
+  "}",
+  "",
+  ".dialog-column-resizing,",
+  ".dialog-column-resizing * {",
+  "  cursor: col-resize;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".node .node-dialog-speaker-input:hover,",
+  ".node .node-dialog-line-input:hover {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 30%, transparent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);",
+  "}",
+  "",
+  ".node .node-dialog-speaker-input:focus,",
+  ".node .node-dialog-line-input:focus,",
+  ".node .node-dialog-speaker-input:focus-visible,",
+  ".node .node-dialog-line-input:focus-visible {",
+  "  border-color: var(--interactive-accent);",
+  "  outline: none;",
+  "  background: var(--background-control);",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);",
+  "}",
+  "",
+  ".node-dialog-line + .node-dialog-line {",
+  "  margin-top: 5px;",
+  "  padding-top: 5px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".node-dialog-line strong {",
+  "  color: var(--text-accent);",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".node-inline-editor {",
+  "  width: 100%;",
+  "  box-sizing: border-box;",
+  "  border: 1px solid color-mix(in srgb, var(--focus-accent) 42%, var(--node-border));",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  line-height: 1.4;",
+  "  pointer-events: auto;",
+  "  user-select: text;",
+  "  -webkit-user-select: text;",
+  "}",
+  "",
+  ".node-inline-editor:focus {",
+  "  outline: 2px solid color-mix(in srgb, var(--focus-accent) 70%, transparent);",
+  "  outline-offset: 1px;",
+  "}",
+  "",
+  ".node-inline-title {",
+  "  flex: 0 0 auto;",
+  "  min-height: 30px;",
+  "  margin: 0 0 8px;",
+  "  padding: 5px 7px;",
+  "  font-weight: 700;",
+  "  line-height: 1.25;",
+  "}",
+  "",
+  ".node-inline-text {",
+  "  flex: 1 1 auto;",
+  "  min-height: 74px;",
+  "  padding: 7px 8px;",
+  "  resize: none;",
+  "  white-space: pre-wrap;",
+  "}",
+  "",
+  ".node-meta {",
+  "  flex: 0 0 auto;",
+  "  overflow: hidden;",
+  "  margin-top: 10px;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-cast-chips {",
+  "  display: flex;",
+  "  flex: 0 0 auto;",
+  "  flex-wrap: wrap;",
+  "  gap: 4px;",
+  "  max-height: 58px;",
+  "  overflow: hidden;",
+  "  margin: -2px 0 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".node-cast-chips-all {",
+  "  max-height: none;",
+  "  overflow: visible;",
+  "}",
+  "",
+  ".node-cast-chip {",
+  "  display: inline-grid;",
+  "  align-items: center;",
+  "  max-width: 100%;",
+  "  min-height: 20px;",
+  "  padding: 2px 6px;",
+  "  border: 1px solid color-mix(in srgb, var(--node-color) 40%, var(--background-modifier-border));",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--node-color) 14%, var(--background-secondary-alt));",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  font-weight: 650;",
+  "  line-height: 1.2;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-cast-chip \u003e span,",
+  ".node-cast-chip \u003e small {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-cast-chip \u003e small {",
+  "  color: var(--text-faint);",
+  "  font-size: 9px;",
+  "  font-weight: 550;",
+  "}",
+  "",
+  ".node-cast-chip[data-codex-kind=\"Character\"],",
+  ".mention-option-kind[data-codex-kind=\"Character\"] {",
+  "  --codex-kind-color: #8b7cf6;",
+  "}",
+  "",
+  ".node-cast-chip[data-codex-kind=\"Location\"],",
+  ".mention-option-kind[data-codex-kind=\"Location\"] {",
+  "  --codex-kind-color: #43a596;",
+  "}",
+  "",
+  ".node-cast-chip[data-codex-kind=\"Item\"],",
+  ".mention-option-kind[data-codex-kind=\"Item\"] {",
+  "  --codex-kind-color: #c48a3a;",
+  "}",
+  "",
+  ".node-cast-chip[data-codex-kind=\"Lore\"],",
+  ".mention-option-kind[data-codex-kind=\"Lore\"] {",
+  "  --codex-kind-color: #5689c9;",
+  "}",
+  "",
+  ".node-cast-chip[data-codex-kind] {",
+  "  border-color: color-mix(in srgb, var(--codex-kind-color) 55%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--codex-kind-color) 13%, var(--background-secondary-alt));",
+  "}",
+  "",
+  ".node-cast-chip-button {",
+  "  appearance: none;",
+  "  cursor: pointer;",
+  "  font-family: inherit;",
+  "  pointer-events: auto;",
+  "  text-align: left;",
+  "}",
+  "",
+  ".node-cast-chip-button:hover {",
+  "  border-color: color-mix(in srgb, var(--node-color) 72%, var(--interactive-accent));",
+  "  background: color-mix(in srgb, var(--node-color) 24%, var(--background-secondary-alt));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".node-cast-chip-button:focus-visible {",
+  "  outline: 2px solid color-mix(in srgb, var(--node-color) 68%, var(--interactive-accent));",
+  "  outline-offset: 1px;",
+  "}",
+  "",
+  ".node-cast-chip.more {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".node-resize-handle {",
+  "  position: absolute;",
+  "  border: 0;",
+  "  padding: 0;",
+  "  background: transparent;",
+  "}",
+  "",
+  ".node-resize-handle.right {",
+  "  top: 22px;",
+  "  right: -5px;",
+  "  bottom: 18px;",
+  "  width: 10px;",
+  "  cursor: ew-resize;",
+  "}",
+  "",
+  ".node-resize-handle.bottom {",
+  "  right: 18px;",
+  "  bottom: -5px;",
+  "  left: 18px;",
+  "  height: 10px;",
+  "  cursor: ns-resize;",
+  "}",
+  "",
+  ".node-resize-handle.corner {",
+  "  right: -1px;",
+  "  bottom: -1px;",
+  "  width: 18px;",
+  "  height: 18px;",
+  "  border-radius: var(--radius-s) 0 var(--radius-m) 0;",
+  "  background:",
+  "    linear-gradient(135deg, transparent 0 50%, rgba(220, 221, 222, 0.55) 50% 58%, transparent 58%),",
+  "    linear-gradient(135deg, transparent 0 66%, rgba(220, 221, 222, 0.4) 66% 73%, transparent 73%);",
+  "  cursor: nwse-resize;",
+  "}",
+  "",
+  ".node.selected .node-resize-handle.corner,",
+  ".node:hover .node-resize-handle.corner {",
+  "  background-color: rgba(127, 109, 242, 0.18);",
+  "}",
+  "",
+  ".port {",
+  "  position: absolute;",
+  "  top: 50%;",
+  "  width: 22px;",
+  "  height: 22px;",
+  "  border: 0;",
+  "  border-radius: 50%;",
+  "  background: transparent;",
+  "  transform: translate(-50%, -50%);",
+  "  cursor: crosshair;",
+  "  pointer-events: auto;",
+  "  z-index: 120;",
+  "}",
+  "",
+  ".port::before {",
+  "  content: \"\";",
+  "  position: absolute;",
+  "  left: 50%;",
+  "  top: 50%;",
+  "  width: 12px;",
+  "  height: 12px;",
+  "  border: 2px solid var(--port-color, var(--node-color));",
+  "  border-radius: 50%;",
+  "  background: var(--port-fill, var(--background-primary));",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--background-primary) 88%, transparent);",
+  "  transform: translate(-50%, -50%);",
+  "}",
+  "",
+  ".port.input {",
+  "  --port-color: color-mix(in srgb, var(--node-color) 42%, #ffffff);",
+  "  --port-fill: color-mix(in srgb, var(--node-color) 16%, var(--background-primary));",
+  "}",
+  "",
+  ".port.output {",
+  "  --port-color: color-mix(in srgb, var(--node-color) 78%, #000000);",
+  "  --port-fill: color-mix(in srgb, var(--node-color) 52%, var(--background-primary));",
+  "}",
+  "",
+  ".port:hover::before,",
+  ".port.active::before {",
+  "  border-color: var(--interactive-accent-hover);",
+  "  background: var(--interactive-accent-hover);",
+  "  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent-hover) 32%, transparent);",
+  "}",
+  "",
+  ".selection-hint {",
+  "  position: absolute;",
+  "  left: 16px;",
+  "  bottom: 16px;",
+  "  max-width: 420px;",
+  "  padding: 8px 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--overlay-bg);",
+  "  color: var(--text-muted);",
+  "  opacity: 0;",
+  "  pointer-events: none;",
+  "  transition: opacity 160ms ease;",
+  "}",
+  "",
+  ".selection-hint.show {",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".minimap {",
+  "  position: absolute;",
+  "  right: 16px;",
+  "  bottom: 16px;",
+  "  z-index: 5;",
+  "  width: 180px;",
+  "  height: 118px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--minimap-bg);",
+  "  overflow: hidden;",
+  "  cursor: crosshair;",
+  "  transition: border-color 140ms ease;",
+  "}",
+  "",
+  ".minimap:hover {",
+  "  border-color: var(--focus-accent);",
+  "}",
+  "",
+  ".minimap-node {",
+  "  position: absolute;",
+  "  width: 14px;",
+  "  height: 8px;",
+  "  border-radius: 2px;",
+  "  background: var(--node-color);",
+  "  opacity: 0.85;",
+  "}",
+  "",
+  ".canvas-radial-menu {",
+  "  position: absolute;",
+  "  z-index: 230;",
+  "  width: 0;",
+  "  height: 0;",
+  "  overflow: visible;",
+  "}",
+  "",
+  ".canvas-radial-menu[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-hub {",
+  "  position: absolute;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 30px;",
+  "  height: 30px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: 50%;",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--shadow-soft);",
+  "  color: var(--text-muted);",
+  "  font-size: 14px;",
+  "  line-height: 1;",
+  "  cursor: pointer;",
+  "  transform: translate(-50%, -50%);",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-hub:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-button {",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-wedge {",
+  "  fill: var(--background-secondary-alt);",
+  "  stroke: var(--background-modifier-border-hover);",
+  "  stroke-width: 1;",
+  "  transition: fill 120ms ease, stroke 120ms ease;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-button:hover .radial-wedge {",
+  "  fill: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary-alt));",
+  "  stroke: var(--interactive-accent);",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-button:focus,",
+  ".canvas-radial-menu .radial-button:focus-visible {",
+  "  outline: none;",
+  "  border: 0;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-button:focus-visible .radial-wedge {",
+  "  stroke: var(--interactive-accent);",
+  "  stroke-width: 2;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-button.is-disabled {",
+  "  cursor: default;",
+  "  opacity: 0.42;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-arc {",
+  "  position: absolute;",
+  "  left: -90px;",
+  "  top: -90px;",
+  "  width: 180px;",
+  "  height: 180px;",
+  "  overflow: visible;",
+  "  filter: drop-shadow(0 9px 18px rgba(0, 0, 0, 0.34));",
+  "  animation: radial-pop 120ms ease-out;",
+  "}",
+  "",
+  "/* Right-half ring around the cursor: four straight-edged wedges (SVG polygons)",
+  "   running from 12 o'clock through 3 o'clock down to 6 o'clock. */",
+  ".canvas-radial-menu .radial-icon {",
+  "  fill: var(--text-normal);",
+  "  font-size: 15px;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-label {",
+  "  fill: var(--text-muted);",
+  "  font-size: 9px;",
+  "  font-weight: 650;",
+  "  letter-spacing: 0.02em;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  "@keyframes radial-pop {",
+  "  from {",
+  "    opacity: 0;",
+  "    scale: 0.72;",
+  "  }",
+  "",
+  "  to {",
+  "    opacity: 1;",
+  "    scale: 1;",
+  "  }",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-add-list {",
+  "  position: absolute;",
+  "  top: -90px;",
+  "  left: 102px;",
+  "  display: grid;",
+  "  min-width: 176px;",
+  "  max-width: 240px;",
+  "  max-height: 264px;",
+  "  padding: 5px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--shadow-soft);",
+  "  overflow-y: auto;",
+  "  align-content: start;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-add-list[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-add-item {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  min-height: 30px;",
+  "  padding: 0 8px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-add-item:hover {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-add-badge {",
+  "  display: inline-grid;",
+  "  place-items: center;",
+  "  width: 20px;",
+  "  min-width: 20px;",
+  "  height: 20px;",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--node-color, var(--interactive-accent)) 28%, var(--background-secondary));",
+  "  color: var(--text-normal);",
+  "  font-size: 11px;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-add-label {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  font-size: 12.5px;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".canvas-radial-menu .radial-add-empty {",
+  "  padding: 8px 10px;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".node-context-menu {",
+  "  position: absolute;",
+  "  z-index: 240;",
+  "  display: grid;",
+  "  min-width: 168px;",
+  "  max-width: 280px;",
+  "  padding: 5px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--shadow-soft);",
+  "}",
+  "",
+  ".node-context-menu[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".node-context-menu .context-menu-label {",
+  "  padding: 4px 10px 6px;",
+  "  margin-bottom: 2px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 600;",
+  "}",
+  "",
+  ".node-context-menu button {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: flex-start;",
+  "  gap: 8px;",
+  "  min-height: 30px;",
+  "  padding: 0 10px;",
+  "  border: 0;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".node-context-menu button[aria-current=\"true\"] {",
+  "  color: var(--text-accent);",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".context-menu-check {",
+  "  display: inline-grid;",
+  "  place-items: center;",
+  "  width: 12px;",
+  "  min-width: 12px;",
+  "  color: var(--text-accent);",
+  "}",
+  "",
+  ".node-context-menu button span:last-child {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".node-context-menu button:hover {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".node-context-menu button:last-child {",
+  "  border-bottom: 0;",
+  "}",
+  "",
+  ".node-context-menu .context-menu-danger {",
+  "  margin-top: 4px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "  color: var(--accent-red);",
+  "}",
+  "",
+  ".node-context-menu .context-menu-danger:hover {",
+  "  background: color-mix(in srgb, var(--accent-red) 18%, transparent);",
+  "}",
+  "",
+  ".mention-popover {",
+  "  position: fixed;",
+  "  z-index: 200;",
+  "  display: grid;",
+  "  box-sizing: border-box;",
+  "  min-width: 180px;",
+  "  max-width: min(320px, calc(100vw - 16px));",
+  "  max-height: 260px;",
+  "  overflow-x: hidden;",
+  "  overflow-y: auto;",
+  "  scrollbar-gutter: stable;",
+  "  overscroll-behavior: contain;",
+  "  padding: 4px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--shadow-soft);",
+  "}",
+  "",
+  ".mention-popover[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".mention-option {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  align-items: baseline;",
+  "  gap: 8px;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  padding: 6px 10px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".mention-option strong {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  font-weight: 600;",
+  "}",
+  "",
+  ".mention-option-main {",
+  "  display: grid;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".mention-option small {",
+  "  min-width: 0;",
+  "  max-width: 120px;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".mention-option-kind {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  min-height: 20px;",
+  "  padding: 1px 6px;",
+  "  border: 1px solid color-mix(in srgb, var(--codex-kind-color) 55%, var(--background-modifier-border));",
+  "  border-radius: 999px;",
+  "  background: color-mix(in srgb, var(--codex-kind-color) 14%, var(--background-secondary));",
+  "  color: var(--text-muted);",
+  "  font-size: 10px;",
+  "  font-weight: 700;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".mention-option:hover,",
+  ".mention-option.active {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".status-bar {",
+  "  grid-row: 4;",
+  "  position: relative;",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  width: 100%;",
+  "  min-height: 40px;",
+  "  min-width: 0;",
+  "  padding: 5px 8px;",
+  "  overflow: hidden;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "  background: var(--workspace-bar-bg);",
+  "  color: var(--text-muted);",
+  "  text-align: left;",
+  "  z-index: 1;",
+  "}",
+  "",
+  "#statusText {",
+  "  flex: 1 1 auto;",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  text-align: left;",
+  "}",
+  "",
+  ".nc-workspace-search-controls {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: flex-end;",
+  "  flex: 0 1 min(660px, 58%);",
+  "  min-width: min(320px, 100%);",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".nc-workspace-search-controls[hidden],",
+  ".nc-workspace-search-controls [hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".workspace-search-box {",
+  "  display: grid;",
+  "  grid-template-columns: auto minmax(0, 1fr);",
+  "  align-items: center;",
+  "  flex: 1 1 420px;",
+  "  max-width: 560px;",
+  "  min-width: min(260px, 100%);",
+  "  gap: 8px;",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "}",
+  "",
+  ".workspace-search-box input {",
+  "  background: var(--background-secondary-alt);",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "}",
+  "",
+  ".workspace-search-box input:focus {",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "}",
+  "",
+  "#matchCount {",
+  "  flex: 0 0 auto;",
+  "  white-space: nowrap;",
+  "  font-variant-numeric: tabular-nums;",
+  "  color: var(--text-muted);",
+  "  min-width: 3.5em;",
+  "  text-align: right;",
+  "}",
+  "",
+  "input,",
+  "textarea,",
+  "select {",
+  "  width: 100%;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-control);",
+  "  background-color: var(--background-control);",
+  "  color: var(--text-normal);",
+  "  caret-color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "}",
+  "",
+  "input:focus,",
+  "textarea:focus,",
+  "select:focus,",
+  "input:focus-visible,",
+  "textarea:focus-visible,",
+  "select:focus-visible {",
+  "  border-color: var(--focus-accent);",
+  "  outline: 2px solid color-mix(in srgb, var(--focus-accent) 24%, transparent);",
+  "  outline-offset: 0;",
+  "  background: var(--background-control);",
+  "  background-color: var(--background-control);",
+  "  color: var(--text-normal);",
+  "  caret-color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "  box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus-accent) 38%, transparent);",
+  "}",
+  "",
+  "input::placeholder,",
+  "textarea::placeholder {",
+  "  color: var(--text-faint);",
+  "  -webkit-text-fill-color: var(--text-faint);",
+  "  opacity: 1;",
+  "}",
+  "",
+  "input::selection,",
+  "textarea::selection {",
+  "  background: color-mix(in srgb, var(--interactive-accent) 56%, transparent);",
+  "  color: var(--text-on-accent);",
+  "  -webkit-text-fill-color: var(--text-on-accent);",
+  "}",
+  "",
+  "input,",
+  "select {",
+  "  min-height: 30px;",
+  "  padding: 4px 8px;",
+  "}",
+  "",
+  "/* Custom checkbox WITHOUT fighting the host. The native \u003cinput\u003e stays for interaction and",
+  "   accessibility but is laid transparently over the whole field (see .nc-checkbox-field); the visible",
+  "   box and checkmark live on a sibling \u003cspan class=\"nc-checkbox-box\"\u003e that Obsidian never targets.",
+  "   Because the host's checkbox styles land on the invisible input, nothing needs to override them —",
+  "   so there are no priority overrides or geometry resets fighting the host CSS. */",
+  ".nc-checkbox-box {",
+  "  box-sizing: border-box;",
+  "  flex: 0 0 auto;",
+  "  display: inline-grid;",
+  "  place-content: center;",
+  "  width: 18px;",
+  "  height: 18px;",
+  "  border: 2px solid var(--text-muted);",
+  "  border-radius: 3px;",
+  "  background: var(--background-control);",
+  "}",
+  "",
+  ".nc-checkbox-box::before {",
+  "  content: \"\";",
+  "  box-sizing: border-box;",
+  "  width: 5px;",
+  "  height: 9px;",
+  "  border-right: 2px solid var(--text-on-accent);",
+  "  border-bottom: 2px solid var(--text-on-accent);",
+  "  transform: translateY(-1px) rotate(45deg);",
+  "  opacity: 0;",
+  "}",
+  "",
+  ".nc-checkbox-field input[type=\"checkbox\"]:checked + .nc-checkbox-box {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--interactive-accent);",
+  "}",
+  "",
+  ".nc-checkbox-field input[type=\"checkbox\"]:checked + .nc-checkbox-box::before {",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".nc-checkbox-field input[type=\"checkbox\"]:focus-visible + .nc-checkbox-box {",
+  "  outline: 2px solid color-mix(in srgb, var(--focus-accent) 70%, transparent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  "input[type=\"radio\"] {",
+  "  accent-color: var(--interactive-accent);",
+  "}",
+  "",
+  "textarea {",
+  "  min-height: 128px;",
+  "  padding: 8px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  "input:focus,",
+  "textarea:focus,",
+  "select:focus {",
+  "  border-color: var(--focus-accent);",
+  "  outline: 2px solid color-mix(in srgb, var(--focus-accent) 24%, transparent);",
+  "  outline-offset: 0;",
+  "  background: var(--background-control);",
+  "  background-color: var(--background-control);",
+  "  color: var(--text-normal);",
+  "  caret-color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "  box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus-accent) 38%, transparent);",
+  "}",
+  "",
+  ".app-shell:not([data-theme=\"light\"]) input,",
+  ".app-shell:not([data-theme=\"light\"]) textarea,",
+  ".app-shell:not([data-theme=\"light\"]) select,",
+  ".app-shell:not([data-theme=\"light\"]) input:focus,",
+  ".app-shell:not([data-theme=\"light\"]) textarea:focus,",
+  ".app-shell:not([data-theme=\"light\"]) select:focus,",
+  ".app-shell:not([data-theme=\"light\"]) input:focus-visible,",
+  ".app-shell:not([data-theme=\"light\"]) textarea:focus-visible,",
+  ".app-shell:not([data-theme=\"light\"]) select:focus-visible {",
+  "  background: var(--background-control);",
+  "  background-color: var(--background-control);",
+  "  color: var(--text-normal);",
+  "  caret-color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "  color-scheme: dark;",
+  "}",
+  "",
+  ".app-shell:not([data-theme=\"light\"]) input:-webkit-autofill,",
+  ".app-shell:not([data-theme=\"light\"]) input:-webkit-autofill:hover,",
+  ".app-shell:not([data-theme=\"light\"]) input:-webkit-autofill:focus {",
+  "  -webkit-box-shadow: 0 0 0 1000px var(--background-control) inset;",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "  caret-color: var(--text-normal);",
+  "}",
+  "",
+  ".inspector-tabs {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(3, 1fr);",
+  "  gap: 4px;",
+  "  padding: 8px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".inspector-tab-group {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) 26px;",
+  "  min-width: 0;",
+  "  border: 1px solid transparent;",
+  "  border-radius: var(--radius-s);",
+  "}",
+  "",
+  ".inspector-tab {",
+  "  width: 100%;",
+  "  height: 30px;",
+  "  color: var(--text-muted);",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".inspector-float-button {",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 26px;",
+  "  min-width: 26px;",
+  "  height: 30px;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-left: 1px solid var(--background-modifier-border);",
+  "  border-radius: 0 var(--radius-s) var(--radius-s) 0;",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".inspector-float-button:hover {",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".inspector-float-button svg {",
+  "  width: 14px;",
+  "  height: 14px;",
+  "  fill: none;",
+  "  stroke: currentColor;",
+  "  stroke-linecap: round;",
+  "  stroke-linejoin: round;",
+  "  stroke-width: 2;",
+  "}",
+  "",
+  ".inspector-panels {",
+  "  min-height: 0;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".inspector-panels .inspector-panel.active {",
+  "  height: 100%;",
+  "  box-sizing: border-box;",
+  "}",
+  "",
+  ".inspector-tab.active {",
+  "  background: var(--background-modifier-active);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".inspector-tab:disabled {",
+  "  color: var(--text-faint);",
+  "  cursor: default;",
+  "  opacity: 0.55;",
+  "}",
+  "",
+  ".inspector-panel {",
+  "  display: none;",
+  "  container-type: inline-size;",
+  "  min-height: 0;",
+  "  overflow: auto;",
+  "  padding: 12px 12px 40px;",
+  "}",
+  "",
+  ".inspector-panel.active {",
+  "  display: block;",
+  "}",
+  "",
+  ".inspector-float-overlay {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  z-index: 330;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  padding: 28px;",
+  "  /* This transparent layer must receive every pointer event. Otherwise gaps inside",
+  "     the floating inspector can target canvas nodes behind it. */",
+  "  background: transparent;",
+  "  pointer-events: auto;",
+  "}",
+  "",
+  ".inspector-float-overlay[data-pinned=\"true\"] {",
+  "  z-index: 340;",
+  "}",
+  "",
+  ".inspector-float-overlay[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".inspector-float-window {",
+  "  position: absolute;",
+  "  left: 50%;",
+  "  top: 50%;",
+  "  transform: translate(-50%, -50%);",
+  "  display: grid;",
+  "  grid-template-rows: auto minmax(0, 1fr);",
+  "  width: min(880px, calc(100% - 32px));",
+  "  height: min(78vh, 820px);",
+  "  min-width: 0;",
+  "  min-height: 320px;",
+  "  overflow: hidden;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-primary);",
+  "  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);",
+  "  pointer-events: auto;",
+  "}",
+  "",
+  ".inspector-float-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 16px;",
+  "  min-height: 58px;",
+  "  padding: 10px 14px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  cursor: grab;",
+  "  touch-action: none;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".floating-window-header-actions {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 4px;",
+  "}",
+  "",
+  ".floating-window-pin-button svg {",
+  "  width: 16px;",
+  "  height: 16px;",
+  "  fill: none;",
+  "  stroke: currentColor;",
+  "  stroke-width: 1.9;",
+  "  stroke-linecap: round;",
+  "  stroke-linejoin: round;",
+  "}",
+  "",
+  ".floating-window-pin-button[aria-pressed=\"true\"] {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
+  "}",
+  "",
+  ".floating-window-pin-button[aria-pressed=\"true\"] svg {",
+  "  stroke: var(--text-on-accent);",
+  "  transform: rotate(-32deg);",
+  "}",
+  "",
+  ".inspector-float-window.is-moving .inspector-float-header,",
+  ".play-dialog.is-moving .play-header {",
+  "  cursor: grabbing;",
+  "}",
+  "",
+  ".inspector-float-header h2 {",
+  "  margin: 2px 0 0;",
+  "  font-size: 18px;",
+  "}",
+  "",
+  ".inspector-float-body {",
+  "  min-height: 0;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".inspector-float-body .inspector-panel.active {",
+  "  height: 100%;",
+  "  box-sizing: border-box;",
+  "  padding: 18px 20px 48px;",
+  "}",
+  "",
+  ".form-stack {",
+  "  display: grid;",
+  "  gap: 12px;",
+  "}",
+  "",
+  ".field {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".field span,",
+  ".stat-label {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".field-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".button-row {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".button-row .small-button {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".stat-grid {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(2, minmax(0, 1fr));",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".stat-card {",
+  "  min-height: 64px;",
+  "  padding: 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".stat-value {",
+  "  margin-top: 8px;",
+  "  font-size: 24px;",
+  "  font-weight: 750;",
+  "}",
+  "",
+  ".story-list {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".story-root-list,",
+  ".story-nested-list {",
+  "  min-height: 34px;",
+  "}",
+  "",
+  ".story-nested-list {",
+  "  margin: 6px 0 4px 12px;",
+  "  padding-left: 10px;",
+  "  border-left: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".story-panel-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  margin-bottom: 8px;",
+  "}",
+  "",
+  ".story-panel-actions {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  flex-wrap: wrap;",
+  "  justify-content: flex-end;",
+  "}",
+  "",
+  ".story-entry,",
+  ".story-frame {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".story-frame summary {",
+  "  list-style: none;",
+  "}",
+  "",
+  ".story-frame summary::-webkit-details-marker {",
+  "  display: none;",
+  "}",
+  "",
+  ".story-item {",
+  "  display: grid;",
+  "  grid-template-columns: 16px minmax(0, 1fr) auto auto;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  width: 100%;",
+  "  min-height: 54px;",
+  "  padding: 8px 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "  line-height: 1.25;",
+  "}",
+  "",
+  ".story-frame-item {",
+  "  border-color: color-mix(in srgb, var(--node-color) 46%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--node-color) 12%, var(--background-secondary-alt));",
+  "}",
+  "",
+  ".story-event-frame-item {",
+  "  border-color: color-mix(in srgb, var(--node-color) 58%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--node-color) 16%, var(--background-secondary-alt));",
+  "  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--node-color) 72%, transparent);",
+  "}",
+  "",
+  ".story-item.selected {",
+  "  border-color: var(--focus-accent);",
+  "  box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus-accent) 46%, transparent);",
+  "}",
+  "",
+  ".story-item.character-focus-muted {",
+  "  opacity: 0.42;",
+  "}",
+  "",
+  ".story-item.character-focus-match {",
+  "  border-color: var(--focus-accent);",
+  "  box-shadow: inset 3px 0 0 var(--focus-accent);",
+  "}",
+  "",
+  ".story-item.dragging {",
+  "  opacity: 0.52;",
+  "}",
+  "",
+  ".story-item.story-drop-before {",
+  "  border-top-color: var(--interactive-accent);",
+  "  box-shadow: inset 0 2px 0 var(--interactive-accent);",
+  "}",
+  "",
+  ".story-item.story-drop-after {",
+  "  border-bottom-color: var(--interactive-accent);",
+  "  box-shadow: inset 0 -2px 0 var(--interactive-accent);",
+  "}",
+  "",
+  ".story-item.story-drop-inside,",
+  ".story-list.story-drop-inside {",
+  "  outline: 1px dashed var(--interactive-accent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".story-drag-handle {",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "  line-height: 1;",
+  "  cursor: grab;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".story-item-main {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".story-item-title {",
+  "  display: block;",
+  "  width: 100%;",
+  "  font-weight: 700;",
+  "  font-size: 14px;",
+  "}",
+  "",
+  ".story-item-meta {",
+  "  display: block;",
+  "  width: 100%;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".story-focus-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  min-width: 56px;",
+  "  height: 28px;",
+  "  padding: 0 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-muted);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".story-focus-button:hover {",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".story-empty-drop {",
+  "  min-height: 32px;",
+  "  padding: 8px 10px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".character-grid {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(var(--codex-masonry-columns, 1), minmax(0, 1fr));",
+  "  align-items: start;",
+  "  width: 100%;",
+  "  gap: 16px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".character-column {",
+  "  display: grid;",
+  "  width: 100%;",
+  "  align-content: start;",
+  "  gap: 16px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-overview-card {",
+  "  position: static;",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  /* Explicit: the Obsidian host styles buttons with a fixed input height, which",
+  "     would crush the card into a thin strip and clip the name row. */",
+  "  height: auto;",
+  "  min-height: 236px;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  overflow: hidden;",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "  contain: layout paint;",
+  "}",
+  "",
+  ".codex-overview-card::before,",
+  ".codex-overview-card::after {",
+  "  display: none;",
+  "  content: none;",
+  "}",
+  "",
+  ".codex-overview-card:hover,",
+  ".codex-overview-card:focus-visible {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 24%, transparent);",
+  "  transform: translateY(-1px);",
+  "}",
+  "",
+  "/* Card-box style: every card gets the same fixed cover height, so the grid reads",
+  "   like a box of index cards and never deforms with the window. */",
+  ".codex-overview-image {",
+  "  position: relative;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  flex: none;",
+  "  width: 100%;",
+  "  height: 150px;",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  background:",
+  "    linear-gradient(145deg, color-mix(in srgb, var(--interactive-accent) 11%, transparent), transparent 62%),",
+  "    var(--background-primary);",
+  "}",
+  "",
+  ".codex-overview-avatar {",
+  "  width: 84px;",
+  "  height: 84px;",
+  "  border-radius: 50%;",
+  "  object-fit: cover;",
+  "  border: 2px solid color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));",
+  "}",
+  "",
+  "/* Preview-image board snapshot as the card cover: images keep their board layout. */",
+  ".codex-overview-board {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  overflow: hidden;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".codex-overview-board img {",
+  "  position: absolute;",
+  "  display: block;",
+  "  border-radius: 4px;",
+  "  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);",
+  "}",
+  "",
+  "/* Board snapshot as the card cover; clicks fall through to the card button. */",
+  ".codex-overview-canvas {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  display: grid;",
+  "  align-content: center;",
+  "  overflow: hidden;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".codex-overview-canvas .canvas-preview-viewport {",
+  "  margin: 0 auto;",
+  "  width: 100%;",
+  "}",
+  "",
+  "/* Entry icon (avatar) in the detail header and pickers. */",
+  ".codex-icon-avatar {",
+  "  width: 44px;",
+  "  height: 44px;",
+  "  flex: 0 0 auto;",
+  "  border-radius: 50%;",
+  "  object-fit: cover;",
+  "  border: 2px solid color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));",
+  "}",
+  "",
+  ".codex-icon-row {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 7px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-icon-input-wrap {",
+  "  flex: 1 1 auto;",
+  "}",
+  "",
+  "/* Avatar inside node card cast chips. */",
+  ".node-cast-chip-avatar {",
+  "  width: 22px;",
+  "  height: 22px;",
+  "  flex: 0 0 auto;",
+  "  border-radius: 50%;",
+  "  object-fit: cover;",
+  "}",
+  "",
+  ".node-cast-chip-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".node-cast-chip-text {",
+  "  display: grid;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-overview-image \u003e img {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  display: block;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  object-fit: cover;",
+  "}",
+  "",
+  ".codex-overview-placeholder {",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 70px;",
+  "  height: 70px;",
+  "  border: 1px solid color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));",
+  "  border-radius: 50%;",
+  "  background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-secondary));",
+  "  color: var(--text-muted);",
+  "  font-size: 30px;",
+  "  font-weight: 750;",
+  "}",
+  "",
+  ".codex-overview-kind {",
+  "  position: absolute;",
+  "  top: 10px;",
+  "  left: 10px;",
+  "  padding: 4px 8px;",
+  "  border: 1px solid color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border));",
+  "  border-radius: 999px;",
+  "  background: color-mix(in srgb, var(--background-primary) 88%, transparent);",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  backdrop-filter: blur(8px);",
+  "}",
+  "",
+  "/* Focused entries stay recognizable from the overview. */",
+  ".codex-overview-card.focused {",
+  "  border-color: var(--interactive-accent);",
+  "  box-shadow: 0 0 0 1px var(--interactive-accent);",
+  "}",
+  "",
+  ".codex-overview-focus-badge {",
+  "  position: absolute;",
+  "  top: 10px;",
+  "  right: 10px;",
+  "  padding: 4px 8px;",
+  "  border: 1px solid var(--interactive-accent);",
+  "  border-radius: 999px;",
+  "  background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));",
+  "  color: var(--text-normal);",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  backdrop-filter: blur(8px);",
+  "}",
+  "",
+  ".codex-overview-body {",
+  "  display: grid;",
+  "  align-content: start;",
+  "  gap: 7px;",
+  "  min-width: 0;",
+  "  padding: 13px 14px 14px;",
+  "}",
+  "",
+  ".codex-overview-name {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  color: var(--text-normal);",
+  "  font-size: 17px;",
+  "  line-height: 1.3;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".codex-overview-summary {",
+  "  display: -webkit-box;",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.45;",
+  "  -webkit-box-orient: vertical;",
+  "  -webkit-line-clamp: 2;",
+  "}",
+  "",
+  ".codex-overview-tags {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 5px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-overview-tags \u003e span,",
+  ".codex-overview-tags \u003e small {",
+  "  max-width: 100%;",
+  "  padding: 2px 6px;",
+  "  overflow: hidden;",
+  "  border-radius: 999px;",
+  "  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));",
+  "  color: var(--text-muted);",
+  "  font-size: 10px;",
+  "  line-height: 1.35;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".codex-overview-meta {",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".codex-detail-shell {",
+  "  max-width: 1180px;",
+  "  margin: 0 auto;",
+  "}",
+  "",
+  ".codex-detail-header {",
+  "  padding-bottom: 14px;",
+  "}",
+  "",
+  ".codex-detail-back {",
+  "  position: static;",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 7px;",
+  "  min-height: 32px;",
+  "  margin: 0 0 14px;",
+  "  padding: 4px 9px;",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  font: inherit;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".codex-detail-back::before,",
+  ".codex-detail-back::after {",
+  "  display: none;",
+  "  content: none;",
+  "}",
+  "",
+  ".codex-detail-back:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".codex-detail-editor,",
+  ".codex-detail-editor .character-card {",
+  "  width: 100%;",
+  "  max-width: none;",
+  "}",
+  "",
+  "/* Entry detail: referenced nodes on the left, frontmatter fields on the right. */",
+  ".codex-detail-columns {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);",
+  "  gap: 20px;",
+  "  align-items: start;",
+  "}",
+  "",
+  "/* One field per row in the entry detail. */",
+  ".codex-detail-main .field-row {",
+  "  grid-template-columns: minmax(0, 1fr);",
+  "}",
+  "",
+  ".codex-detail-main {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-detail-references {",
+  "  min-width: 0;",
+  "  position: sticky;",
+  "  top: 0;",
+  "  padding: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".codex-detail-references-title {",
+  "  display: flex;",
+  "  align-items: baseline;",
+  "  gap: 8px;",
+  "  margin: 0 0 10px;",
+  "  font-size: 14px;",
+  "}",
+  "",
+  ".codex-detail-references-title small {",
+  "  color: var(--text-muted);",
+  "  font-weight: 500;",
+  "}",
+  "",
+  ".codex-detail-references .character-backlink-section {",
+  "  margin-top: 0;",
+  "}",
+  "",
+  "@media (max-width: 900px) {",
+  "  .codex-detail-columns {",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "",
+  "  .codex-detail-references {",
+  "    position: static;",
+  "  }",
+  "}",
+  "",
+  ".codex-template-editor {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".codex-template-editor:empty,",
+  ".codex-tag-filters:empty,",
+  ".document-filter-bar:empty {",
+  "  display: none;",
+  "}",
+  "",
+  ".codex-template-chip {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  padding: 3px 9px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: 999px;",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".codex-template-chip:hover {",
+  "  border-color: var(--interactive-accent);",
+  "}",
+  "",
+  ".codex-template-input {",
+  "  width: 150px;",
+  "  min-height: 28px;",
+  "  padding: 2px 9px;",
+  "  font-size: 12px;",
+  "}",
+  "",
+  "/* Native canvas board embedded in the entry detail. */",
+  ".codex-canvas-section {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding-top: 8px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".codex-canvas-embed {",
+  "  min-height: 120px;",
+  "  max-height: 540px;",
+  "  overflow: hidden;",
+  "  padding: 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-faint);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".codex-canvas-embed:hover {",
+  "  border-color: var(--interactive-accent);",
+  "}",
+  "",
+  ".canvas-preview-viewport {",
+  "  position: relative;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".canvas-preview-inner {",
+  "  position: absolute;",
+  "  top: 0;",
+  "  left: 0;",
+  "  transform-origin: 0 0;",
+  "}",
+  "",
+  ".canvas-preview-edges {",
+  "  position: absolute;",
+  "  top: 0;",
+  "  left: 0;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".canvas-preview-edges line {",
+  "  stroke: color-mix(in srgb, var(--text-muted) 55%, transparent);",
+  "  stroke-width: 4;",
+  "}",
+  "",
+  ".canvas-preview-card {",
+  "  position: absolute;",
+  "  overflow: hidden;",
+  "  border: 2px solid color-mix(in srgb, var(--canvas-card-color, var(--background-modifier-border-hover)) 70%, transparent);",
+  "  border-radius: 10px;",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".canvas-preview-card.is-image {",
+  "  background: var(--background-primary-alt);",
+  "}",
+  "",
+  ".canvas-preview-card.is-image img {",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  object-fit: cover;",
+  "  display: block;",
+  "}",
+  "",
+  ".canvas-preview-card-title {",
+  "  padding: 10px 14px 4px;",
+  "  font-size: 16px;",
+  "  font-weight: 700;",
+  "  white-space: nowrap;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "}",
+  "",
+  ".canvas-preview-card-body {",
+  "  padding: 6px 14px 12px;",
+  "  font-size: 14px;",
+  "  line-height: 1.5;",
+  "  color: var(--text-muted);",
+  "  white-space: pre-wrap;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".canvas-preview-card.is-text .canvas-preview-card-body {",
+  "  padding-top: 12px;",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".canvas-preview-group {",
+  "  position: absolute;",
+  "  border: 2px dashed color-mix(in srgb, var(--canvas-card-color, var(--text-faint)) 55%, transparent);",
+  "  border-radius: 12px;",
+  "  background: color-mix(in srgb, var(--canvas-card-color, var(--text-faint)) 6%, transparent);",
+  "}",
+  "",
+  ".canvas-preview-group span {",
+  "  position: absolute;",
+  "  top: -26px;",
+  "  left: 4px;",
+  "  color: var(--text-muted);",
+  "  font-size: 15px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".codex-canvas-create-row {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 10px;",
+  "  padding: 8px 10px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  "/* Vault files linked to a library entry. */",
+  ".codex-vault-files {",
+  "  display: grid;",
+  "  gap: 7px;",
+  "  padding-top: 8px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".codex-vault-files-header {",
+  "  display: flex;",
+  "  align-items: baseline;",
+  "  gap: 6px;",
+  "  color: var(--text-muted);",
+  "  font-size: 13px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".codex-vault-files-header small {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".codex-vault-file-row {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-vault-file-input-wrap {",
+  "  position: relative;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-vault-file-input-wrap \u003e input {",
+  "  width: 100%;",
+  "}",
+  "",
+  ".codex-extra-fields {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding-top: 10px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".codex-extra-fields-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  color: var(--text-muted);",
+  "  font-size: 13px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".codex-extra-field-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(90px, 180px) minmax(0, 1fr) auto;",
+  "  gap: 8px;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".codex-extra-fields-empty {",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".character-card {",
+  "  display: grid;",
+  "  width: 100%;",
+  "  gap: 12px;",
+  "  min-width: 0;",
+  "  max-width: 720px;",
+  "  overflow: hidden;",
+  "  contain: layout paint;",
+  "  padding: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".codex-category-tabs,",
+  ".codex-tag-filters {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".codex-category-tabs {",
+  "  padding-bottom: 12px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".codex-category-tab-wrap {",
+  "  position: relative;",
+  "  display: inline-flex;",
+  "}",
+  "",
+  ".codex-category-remove {",
+  "  position: absolute;",
+  "  top: -6px;",
+  "  right: -6px;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 18px;",
+  "  height: 18px;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: 50%;",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: var(--background-secondary);",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1;",
+  "  cursor: pointer;",
+  "  opacity: 0;",
+  "}",
+  "",
+  ".codex-category-tab-wrap:hover .codex-category-remove,",
+  ".codex-category-remove:focus-visible {",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".codex-category-remove:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".codex-category-remove[aria-disabled=\"true\"] {",
+  "  opacity: 0;",
+  "  cursor: not-allowed;",
+  "}",
+  "",
+  ".codex-category-tab-wrap:hover .codex-category-remove[aria-disabled=\"true\"] {",
+  "  opacity: 0.4;",
+  "}",
+  "",
+  ".codex-category-remove[aria-disabled=\"true\"]:hover {",
+  "  border-color: var(--background-modifier-border);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".codex-category-add {",
+  "  min-width: 40px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".codex-tag-filters {",
+  "  min-height: 32px;",
+  "}",
+  "",
+  ".codex-filter-label {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "  letter-spacing: 0.04em;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".codex-category-tab,",
+  ".codex-tag-filter {",
+  "  position: static;",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  margin: 0;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: var(--background-secondary);",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".codex-category-tab {",
+  "  min-height: 38px;",
+  "  padding: 7px 12px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".codex-tag-filter {",
+  "  min-height: 30px;",
+  "  padding: 4px 9px;",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".codex-category-tab::before,",
+  ".codex-category-tab::after,",
+  ".codex-tag-filter::before,",
+  ".codex-tag-filter::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".codex-category-tab small,",
+  ".codex-tag-filter small {",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".codex-category-tab:hover,",
+  ".codex-tag-filter:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".codex-category-tab.active,",
+  ".codex-tag-filter.active {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-secondary));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".character-card input,",
+  ".character-card textarea {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-tag-editor {",
+  "  position: relative;",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 40px;",
+  "  padding: 5px 7px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  box-shadow: none;",
+  "  cursor: text;",
+  "}",
+  "",
+  ".codex-tag-editor:focus-within {",
+  "  border-color: var(--interactive-accent);",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 24%, transparent);",
+  "}",
+  "",
+  ".codex-tag-chip {",
+  "  position: static;",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 5px;",
+  "  max-width: min(100%, 260px);",
+  "  min-height: 26px;",
+  "  margin: 0;",
+  "  padding: 3px 7px 3px 9px;",
+  "  border: 1px solid color-mix(in srgb, var(--interactive-accent) 26%, var(--background-modifier-border));",
+  "  border-radius: 999px;",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  font: 600 12px/1.2 var(--font-interface);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".codex-tag-chip::before,",
+  ".codex-tag-chip::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".codex-tag-chip \u003e span:first-child {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".codex-tag-chip:hover,",
+  ".codex-tag-chip:focus-visible {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 17%, var(--background-secondary));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".codex-tag-remove {",
+  "  flex: 0 0 auto;",
+  "  color: var(--text-faint);",
+  "  font-size: 15px;",
+  "  font-weight: 500;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".codex-tag-input,",
+  ".character-card .codex-tag-input {",
+  "  flex: 1 1 120px;",
+  "  width: auto;",
+  "  min-width: 90px;",
+  "  min-height: 26px;",
+  "  padding: 2px 3px;",
+  "  border: 0;",
+  "  border-radius: 0;",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  -webkit-text-fill-color: currentColor;",
+  "  font: inherit;",
+  "  outline: 0;",
+  "}",
+  "",
+  ".codex-tag-input:focus,",
+  ".character-card .codex-tag-input:focus {",
+  "  border: 0;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  outline: 0;",
+  "}",
+  "",
+  ".codex-tag-suggestions {",
+  "  position: absolute;",
+  "  top: calc(100% + 5px);",
+  "  right: 0;",
+  "  left: 0;",
+  "  z-index: 40;",
+  "  display: grid;",
+  "  max-height: 220px;",
+  "  padding: 5px;",
+  "  overflow: auto;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  box-shadow: var(--shadow-soft);",
+  "}",
+  "",
+  ".codex-tag-suggestions[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".codex-tag-suggestion {",
+  "  position: static;",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  align-items: center;",
+  "  gap: 10px;",
+  "  width: 100%;",
+  "  min-height: 32px;",
+  "  margin: 0;",
+  "  padding: 5px 8px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".codex-tag-suggestion::before,",
+  ".codex-tag-suggestion::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".codex-tag-suggestion \u003e span {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".codex-tag-suggestion \u003e small {",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".codex-tag-suggestion:hover,",
+  ".codex-tag-suggestion.active {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".character-search-box:not(.workspace-search-box) {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  flex: 0 1 220px;",
+  "  min-width: 160px;",
+  "}",
+  "",
+  ".character-search-box:not(.workspace-search-box) input {",
+  "  width: 100%;",
+  "}",
+  "",
+  ".visually-hidden {",
+  "  position: absolute;",
+  "  width: 1px;",
+  "  height: 1px;",
+  "  margin: -1px;",
+  "  padding: 0;",
+  "  overflow: hidden;",
+  "  clip: rect(0 0 0 0);",
+  "  white-space: nowrap;",
+  "  border: 0;",
+  "}",
+  "",
+  ".character-card.focused {",
+  "  border-color: color-mix(in srgb, var(--focus-accent) 68%, var(--background-modifier-border));",
+  "  box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus-accent) 42%, transparent);",
+  "}",
+  "",
+  ".character-card-header {",
+  "  display: flex;",
+  "  align-items: flex-end;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".character-card-header \u003e .field {",
+  "  flex: 1 1 auto;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".character-card-header .character-card-actions {",
+  "  flex: 0 0 auto;",
+  "}",
+  "",
+  ".character-card-header .codex-icon-avatar {",
+  "  margin-bottom: 2px;",
+  "}",
+  "",
+  ".character-card-actions {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  justify-content: flex-end;",
+  "  gap: 6px;",
+  "  align-items: end;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-plugin-files {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  padding: 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--background-primary) 48%, transparent);",
+  "}",
+  "",
+  ".codex-managed-file-row {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-managed-file-row \u003e span {",
+  "  display: grid;",
+  "  min-width: 0;",
+  "  gap: 2px;",
+  "}",
+  "",
+  ".codex-managed-file-row small {",
+  "  overflow: hidden;",
+  "  color: var(--text-muted);",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".codex-image-editor {",
+  "  position: relative;",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".vision-board-toolbar {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".vision-board-toolbar \u003e div {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  justify-content: flex-end;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".vision-board-toolbar strong {",
+  "  min-width: 0;",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".vision-board-toolbar small {",
+  "  color: var(--text-muted);",
+  "  font-weight: 600;",
+  "}",
+  "",
+  ".vision-board-canvas {",
+  "  position: relative;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background-color: var(--background-primary);",
+  "  background-image:",
+  "    linear-gradient(color-mix(in srgb, var(--text-faint) 14%, transparent) 1px, transparent 1px),",
+  "    linear-gradient(90deg, color-mix(in srgb, var(--text-faint) 14%, transparent) 1px, transparent 1px);",
+  "  background-size: 24px 24px;",
+  "}",
+  "",
+  ".vision-board-canvas.is-embedded {",
+  "  height: clamp(180px, 24vw, 250px);",
+  "}",
+  "",
+  ".vision-board-canvas.is-focused {",
+  "  height: min(72vh, 760px);",
+  "  min-height: 420px;",
+  "  border-radius: 0 0 var(--radius-l) var(--radius-l);",
+  "}",
+  "",
+  ".vision-board-tile {",
+  "  position: absolute;",
+  "  left: calc(var(--vision-x) * 1%);",
+  "  top: calc(var(--vision-y) * 1%);",
+  "  width: calc(var(--vision-w) * 1%);",
+  "  aspect-ratio: 4 / 3;",
+  "  min-width: 72px;",
+  "  margin: 0;",
+  "  overflow: hidden;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.16);",
+  "  user-select: none;",
+  "  touch-action: none;",
+  "}",
+  "",
+  ".vision-board-canvas.is-focused .vision-board-tile {",
+  "  cursor: grab;",
+  "}",
+  "",
+  ".vision-board-canvas.is-focused .vision-board-tile.is-moving {",
+  "  z-index: 20;",
+  "  cursor: grabbing;",
+  "  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);",
+  "}",
+  "",
+  ".vision-board-tile \u003e img {",
+  "  display: block;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  object-fit: cover;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".vision-board-missing {",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  padding: 10px;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  text-align: center;",
+  "  overflow-wrap: anywhere;",
+  "}",
+  "",
+  ".vision-board-tile-actions {",
+  "  position: absolute;",
+  "  top: 6px;",
+  "  right: 6px;",
+  "  z-index: 2;",
+  "  display: flex;",
+  "  gap: 4px;",
+  "  opacity: 0;",
+  "  transition: opacity 120ms ease;",
+  "}",
+  "",
+  ".vision-board-tile:hover .vision-board-tile-actions,",
+  ".vision-board-tile:focus-within .vision-board-tile-actions {",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".vision-board-tile-actions \u003e button {",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 28px;",
+  "  height: 28px;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  padding: 0;",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  border: 1px solid rgba(255, 255, 255, 0.3);",
+  "  border-radius: 7px;",
+  "  background: rgba(18, 18, 20, 0.78);",
+  "  box-shadow: none;",
+  "  color: #fff;",
+  "  font: inherit;",
+  "  line-height: 1;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".vision-board-tile-actions \u003e button::before,",
+  ".vision-board-tile-actions \u003e button::after {",
+  "  display: none;",
+  "  content: none;",
+  "}",
+  "",
+  ".node-linked-vision-board {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  margin-top: 4px;",
+  "}",
+  "",
+  ".vision-board-dialog {",
+  "  width: min(1120px, calc(100vw - 40px));",
+  "  max-width: none;",
+  "  padding: 0;",
+  "  overflow: hidden;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-l);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".vision-board-dialog-shell {",
+  "  display: grid;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".vision-board-dialog-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 16px;",
+  "  padding: 14px 16px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".vision-board-dialog-header h2 {",
+  "  margin: 2px 0 0;",
+  "  font-size: 18px;",
+  "}",
+  "",
+  "@media (max-width: 720px) {",
+  "  .vision-board-toolbar {",
+  "    align-items: flex-start;",
+  "    flex-direction: column;",
+  "  }",
+  "",
+  "  .vision-board-toolbar \u003e div {",
+  "    justify-content: flex-start;",
+  "  }",
+  "",
+  "  .vision-board-dialog {",
+  "    width: calc(100vw - 16px);",
+  "  }",
+  "}",
+  "",
+  ".codex-image-target {",
+  "  position: relative;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  gap: 8px;",
+  "  width: 100%;",
+  "  height: clamp(180px, 28vw, 280px);",
+  "  min-width: 0;",
+  "  padding: 18px;",
+  "  overflow: hidden;",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  border: 1px dashed var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-primary);",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  text-align: center;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".codex-image-target::before,",
+  ".codex-image-target::after {",
+  "  display: none;",
+  "  content: none;",
+  "}",
+  "",
+  ".codex-image-target:hover,",
+  ".codex-image-editor.drag-over .codex-image-target {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".codex-image-placeholder-icon {",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 48px;",
+  "  height: 48px;",
+  "  border-radius: 50%;",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".codex-image-placeholder-icon svg {",
+  "  width: 24px;",
+  "  height: 24px;",
+  "  fill: none;",
+  "  stroke: currentColor;",
+  "  stroke-linecap: round;",
+  "  stroke-linejoin: round;",
+  "  stroke-width: 1.5;",
+  "}",
+  "",
+  ".codex-image-target strong,",
+  ".codex-image-target small {",
+  "  display: block;",
+  "  max-width: 100%;",
+  "}",
+  "",
+  ".codex-image-target strong {",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".codex-image-target small {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".codex-image-preview {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  display: block;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  object-fit: cover;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".codex-image-hover-label {",
+  "  position: absolute;",
+  "  right: 10px;",
+  "  bottom: 10px;",
+  "  padding: 5px 9px;",
+  "  border-radius: 999px;",
+  "  background: rgba(0, 0, 0, 0.68);",
+  "  color: #fff;",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "  opacity: 0;",
+  "  transform: translateY(4px);",
+  "  transition: opacity 120ms ease, transform 120ms ease;",
+  "}",
+  "",
+  ".codex-image-target:hover .codex-image-hover-label,",
+  ".codex-image-target:focus-visible .codex-image-hover-label {",
+  "  opacity: 1;",
+  "  transform: translateY(0);",
+  "}",
+  "",
+  ".codex-image-picker {",
+  "  position: relative;",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  padding: 8px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".codex-image-picker-head {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto auto;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".codex-image-picker-head \u003e input {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".codex-image-picker .vault-file-suggestions {",
+  "  position: static;",
+  "  max-height: 280px;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: 0;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ".vault-file-suggestion.codex-image-suggestion {",
+  "  grid-template-columns: 46px minmax(0, 1fr);",
+  "  align-items: center;",
+  "}",
+  "",
+  ".vault-file-suggestion.codex-image-suggestion \u003e img {",
+  "  width: 46px;",
+  "  height: 46px;",
+  "  border-radius: var(--radius-s);",
+  "  object-fit: cover;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".vault-file-suggestion.codex-image-suggestion \u003e span {",
+  "  display: grid;",
+  "  gap: 2px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".vault-file-suggestion.codex-image-suggestion small {",
+  "  max-width: 100%;",
+  "}",
+  "",
+  ".codex-image-file-actions {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".codex-image-reference {",
+  "  display: block;",
+  "  overflow: hidden;",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".character-card textarea {",
+  "  min-height: 104px;",
+  "}",
+  "",
+  ".danger-button {",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".danger-button:hover {",
+  "  border-color: rgba(224, 108, 117, 0.5);",
+  "  color: var(--accent-red);",
+  "}",
+  "",
+  ".small-button.danger-button {",
+  "  border-color: rgba(224, 108, 117, 0.28);",
+  "}",
+  "",
+  ".small-button.danger-button:hover {",
+  "  background: rgba(224, 108, 117, 0.1);",
+  "}",
+  "",
+  ".linked-node-list {",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "}",
+  "",
+  ".character-backlink-section {",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "}",
+  "",
+  ".character-backlink-group {",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  gap: 0;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".character-backlink-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  min-height: 38px;",
+  "  padding: 7px 10px;",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".character-backlink-header .character-backlink-toggle {",
+  "  flex: 1 1 auto;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  color: var(--text-normal);",
+  "  text-transform: none;",
+  "  letter-spacing: normal;",
+  "}",
+  "",
+  ".character-backlink-header .character-backlink-toggle::before,",
+  ".character-backlink-header .character-backlink-toggle::after {",
+  "  display: none;",
+  "  content: none;",
+  "}",
+  "",
+  ".character-backlink-header .nc-section-count {",
+  "  flex: 0 0 auto;",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".character-backlink-group \u003e .linked-node-list {",
+  "  padding: 8px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".linked-node {",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  justify-content: center;",
+  "  width: 100%;",
+  "  max-width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 30px;",
+  "  padding: 8px 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".linked-node:hover {",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".linked-node.empty {",
+  "  cursor: default;",
+  "}",
+  "",
+  ".character-backlink-main {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 10px;",
+  "  justify-content: flex-start;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".character-backlink-main strong,",
+  ".character-backlink-main small,",
+  ".character-backlink-snippet {",
+  "  display: block;",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "}",
+  "",
+  ".character-backlink-main strong {",
+  "  flex: 1 1 auto;",
+  "  min-width: 0;",
+  "  color: var(--text-normal);",
+  "  white-space: nowrap;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  ".character-backlink-main small {",
+  "  flex: 0 1 auto;",
+  "  min-width: 0;",
+  "  max-width: 42%;",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "  line-height: 1.3;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".linked-node-more {",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "  text-align: center;",
+  "}",
+  "",
+  ".character-backlink-snippet {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.35;",
+  "  display: -webkit-box;",
+  "  -webkit-line-clamp: 2;",
+  "  -webkit-box-orient: vertical;",
+  "  white-space: normal;",
+  "}",
+  "",
+  ".variable-table {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".variable-group-heading {",
+  "  display: flex;",
+  "  align-items: baseline;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  min-width: 0;",
+  "  margin-top: 8px;",
+  "  padding: 10px 8px 2px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".variable-heading + .variable-group-heading {",
+  "  margin-top: 0;",
+  "  border-top: 0;",
+  "}",
+  "",
+  ".variable-group-heading span {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "}",
+  "",
+  ".variable-group-heading small {",
+  "  flex: 0 0 auto;",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "  font-weight: 500;",
+  "}",
+  "",
+  ".playbook-section {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".playbook-section-header {",
+  "  display: flex;",
+  "  align-items: baseline;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "}",
+  "",
+  ".playbook-section-header \u003e div:first-child {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-section-header-actions {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: flex-end;",
+  "  gap: 8px;",
+  "  flex: 0 0 auto;",
+  "}",
+  "",
+  ".playbook-section-header h3 {",
+  "  margin: 0;",
+  "  color: var(--text-normal);",
+  "  font-size: 14px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".playbook-section-header p {",
+  "  margin: 3px 0 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  ".playbook-section-header span {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".playbook-builder-section {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-tabs {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-height: 42px;",
+  "  padding: 4px;",
+  "  overflow-x: auto;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".playbook-tab {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  flex: 0 0 auto;",
+  "  min-width: 84px;",
+  "  min-height: 32px;",
+  "  padding: 6px 10px;",
+  "  border: 1px solid transparent;",
+  "  border-radius: var(--radius-s);",
+  "  background: transparent;",
+  "  color: var(--text-muted);",
+  "  -webkit-text-fill-color: currentColor;",
+  "  font-family: inherit;",
+  "  font-size: 13px;",
+  "  font-weight: 650;",
+  "  line-height: 1.2;",
+  "  opacity: 1;",
+  "  white-space: nowrap;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".playbook-tab:hover {",
+  "  color: var(--text-normal);",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".playbook-tab.active {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 72%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".workspace-floating-controls {",
+  "  position: absolute;",
+  "  right: 12px;",
+  "  /* Clear of the status/search bar at the bottom of the workspace. */",
+  "  bottom: 64px;",
+  "  z-index: 6;",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  gap: 8px;",
+  "  align-items: center;",
+  "}",
+  "",
+  "/* Back-to-top is pointless at the top of the page and would overlap content rows,",
+  "   so it only appears once the panel is actually scrolled. */",
+  ".app-shell:not(.workspace-scrolled) .workspace-scroll-top-button {",
+  "  display: none;",
+  "}",
+  "",
+  ".document-shell {",
+  "  padding-bottom: 88px;",
+  "}",
+  "",
+  "/* The floating controls belong to the four document-style tabs, not the canvas. */",
+  ".app-shell:not([data-active-file=\"characters\"]):not([data-active-file=\"events\"]):not([data-active-file=\"variables\"]):not([data-active-file=\"document\"]) .workspace-floating-controls {",
+  "  display: none;",
+  "}",
+  "",
+  "/* The outline toggle is document-only. */",
+  ".app-shell:not([data-active-file=\"document\"]) .workspace-toc-button {",
+  "  display: none;",
+  "}",
+  "",
+  ".workspace-toc-button,",
+  ".playbook-scroll-top-button {",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 38px;",
+  "  height: 38px;",
+  "  padding: 0;",
+  "  border: 1px solid color-mix(in srgb, var(--text-muted) 38%, transparent);",
+  "  border-radius: 999px;",
+  "  background: color-mix(in srgb, var(--background-primary) 28%, transparent);",
+  "  color: var(--text-muted);",
+  "  -webkit-text-fill-color: currentColor;",
+  "  font-size: 20px;",
+  "  line-height: 1;",
+  "  box-shadow: none;",
+  "  opacity: 0.62;",
+  "  backdrop-filter: blur(6px);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".workspace-toc-button:hover,",
+  ".workspace-toc-button:focus-visible,",
+  ".playbook-scroll-top-button:hover,",
+  ".playbook-scroll-top-button:focus-visible {",
+  "  border-color: color-mix(in srgb, var(--text-normal) 54%, transparent);",
+  "  background: color-mix(in srgb, var(--background-primary) 42%, transparent);",
+  "  color: var(--text-normal);",
+  "  opacity: 0.9;",
+  "}",
+  "",
+  ".workspace-toc-button[aria-pressed=\"true\"] {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "  opacity: 0.95;",
+  "}",
+  "",
+  ".workspace-toc-button \u003e svg {",
+  "  display: block;",
+  "  width: 20px;",
+  "  height: 20px;",
+  "  fill: none;",
+  "  stroke: currentColor;",
+  "  stroke-width: 2.25;",
+  "  stroke-linecap: round;",
+  "  stroke-linejoin: round;",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".playbook-category-strip {",
+  "  display: flex;",
+  "  gap: 6px;",
+  "  overflow-x: auto;",
+  "  padding-bottom: 2px;",
+  "}",
+  "",
+  ".playbook-category-chip {",
+  "  display: inline-flex;",
+  "  flex: 0 0 auto;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-height: 28px;",
+  "  padding: 4px 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-family: inherit;",
+  "  cursor: pointer;",
+  "  white-space: nowrap;",
+  "  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;",
+  "}",
+  "",
+  ".playbook-category-chip:hover {",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-category-chip.is-active {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-category-chip strong {",
+  "  color: var(--text-normal);",
+  "  font-size: 11px;",
+  "  font-weight: 750;",
+  "}",
+  "",
+  ".playbook-gate-table {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "  overflow-x: auto;",
+  "  padding-bottom: 4px;",
+  "}",
+  "",
+  ".playbook-gate-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(280px, 0.9fr) minmax(380px, 1.15fr) minmax(440px, 1.25fr) 72px;",
+  "  gap: 6px;",
+  "  align-items: center;",
+  "  min-width: 1210px;",
+  "  padding: 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".playbook-gate-heading {",
+  "  min-height: 32px;",
+  "  border-color: transparent;",
+  "  background: transparent;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".playbook-gate-row \u003e input,",
+  ".playbook-gate-row \u003e select,",
+  ".playbook-gate-condition \u003e input,",
+  ".playbook-gate-condition \u003e select {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-gate-condition {",
+  "  display: grid;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-gate-effects {",
+  "  display: grid;",
+  "  min-width: 0;",
+  "  gap: 6px;",
+  "  width: 100%;",
+  "  align-content: center;",
+  "}",
+  "",
+  ".playbook-code-cell {",
+  "  display: grid;",
+  "  gap: 4px;",
+  "  min-width: 0;",
+  "  align-content: center;",
+  "}",
+  "",
+  ".playbook-code-editor {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 64px;",
+  "  resize: vertical;",
+  "  overflow: auto;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "  font-family: var(--nc-font-monospace);",
+  "  font-size: 13px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".playbook-condition-code-editor,",
+  ".playbook-effects-code-editor {",
+  "  min-height: 86px;",
+  "}",
+  "",
+  ".playbook-code-editor:focus {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 24%, transparent);",
+  "}",
+  "",
+  ".playbook-code-editor[readonly] {",
+  "  color: var(--text-muted);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".playbook-gate-effects .nc-empty-state {",
+  "  min-height: 76px;",
+  "  padding: 10px;",
+  "  overflow: hidden;",
+  "  border-radius: var(--radius-s);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".playbook-gate-effects-head {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-gate-effects strong {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".playbook-gate-effects small {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  font-size: 11px;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".playbook-gate-effects small:not(.play-rule-status) {",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".playbook-gate-effects .play-rule-status-ok,",
+  ".playbook-gate-effects .play-rule-status-pass,",
+  ".playbook-gate-effects .play-rule-status-always {",
+  "  color: var(--text-success, #4caf50);",
+  "}",
+  "",
+  ".playbook-gate-effects .play-rule-status-fail,",
+  ".playbook-gate-effects .play-rule-status-unknown {",
+  "  color: var(--text-warning, #c9962b);",
+  "}",
+  "",
+  ".playbook-gate-effects .play-rule-status-invalid {",
+  "  color: var(--text-error, #d94a4a);",
+  "}",
+  "",
+  ".playbook-gate-effects .small-button,",
+  ".playbook-gate-effects .icon-button {",
+  "  justify-self: center;",
+  "  align-self: center;",
+  "}",
+  "",
+  ".playbook-gate-effect-list {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-gate-effect-row {",
+  "  grid-template-columns: minmax(170px, 1.15fr) minmax(104px, 0.75fr) minmax(160px, 1fr);",
+  "  width: 100%;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  background: transparent;",
+  "}",
+  "",
+  ".playbook-gate-effect-row \u003e input,",
+  ".playbook-gate-effect-row \u003e select {",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "  max-width: 100%;",
+  "}",
+  "",
+  ".playbook-action-table {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "  overflow-x: auto;",
+  "}",
+  "",
+  ".playbook-action-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(92px, 0.8fr) minmax(132px, 1fr) minmax(210px, 1.45fr) minmax(112px, 0.9fr) minmax(160px, 1.15fr) minmax(58px, auto) minmax(44px, auto);",
+  "  gap: 6px;",
+  "  align-items: center;",
+  "  padding: 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".playbook-action-row \u003e input,",
+  ".playbook-action-row \u003e select {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-state-key-cell {",
+  "  display: grid;",
+  "  gap: 4px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-state-key-cell \u003e input,",
+  ".playbook-state-key-cell \u003e select {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-state-key-preview {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 4px;",
+  "  min-width: 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".playbook-state-key-preview code {",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-action-row .script-node-target {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-action-controls {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: flex-end;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-action-heading {",
+  "  min-height: 32px;",
+  "  border-color: transparent;",
+  "  background: transparent;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".script-node-table {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "  overflow-x: auto;",
+  "}",
+  "",
+  ".script-node-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(170px, 0.75fr) minmax(340px, 1.15fr) minmax(380px, 1.25fr) minmax(130px, 0.55fr) minmax(150px, 0.7fr) minmax(58px, auto);",
+  "  gap: 6px;",
+  "  align-items: stretch;",
+  "  min-width: 1280px;",
+  "  padding: 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".script-node-heading {",
+  "  min-height: 32px;",
+  "  border-color: transparent;",
+  "  background: transparent;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".script-node-link {",
+  "  display: flex;",
+  "  flex-direction: column;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  min-height: 56px;",
+  "  gap: 2px;",
+  "  text-align: center;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  ".script-node-link \u003e strong {",
+  "  width: 100%;",
+  "  white-space: normal;",
+  "  word-break: break-word;",
+  "}",
+  "",
+  ".script-node-link \u003e small {",
+  "  width: 100%;",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".script-node-row textarea {",
+  "  width: 100%;",
+  "  min-height: 56px;",
+  "  min-width: 0;",
+  "  resize: vertical;",
+  "}",
+  "",
+  ".script-node-row .condition-builder-list {",
+  "  align-content: start;",
+  "}",
+  "",
+  ".script-node-row select,",
+  ".script-node-row input {",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".state-report-section {",
+  "  min-width: 0;",
+  "  gap: 12px;",
+  "  overflow: visible;",
+  "}",
+  "",
+  ".state-report-summary {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(3, minmax(0, 1fr));",
+  "  gap: 10px;",
+  "  align-items: stretch;",
+  "}",
+  "",
+  ".state-report-summary-metric {",
+  "  display: grid;",
+  "  align-content: center;",
+  "  justify-items: center;",
+  "  gap: 4px;",
+  "  min-width: 0;",
+  "  min-height: 0;",
+  "  padding: 2px 0;",
+  "  border: none;",
+  "  background: transparent;",
+  "  color: inherit;",
+  "  text-align: center;",
+  "}",
+  "",
+  ".state-report-summary strong {",
+  "  width: 100%;",
+  "  color: var(--text-normal);",
+  "  font-size: 13px;",
+  "  font-weight: 750;",
+  "  line-height: 1.25;",
+  "}",
+  "",
+  ".state-report-summary span {",
+  "  width: 100%;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  ".state-report-invalid {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding: 10px;",
+  "  border: 1px solid color-mix(in srgb, var(--text-error, #d94a4a) 45%, var(--background-modifier-border));",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".state-report-invalid strong {",
+  "  color: var(--text-error, #d94a4a);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".state-report-export-blocks {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding: 10px;",
+  "  border: 1px solid color-mix(in srgb, var(--text-warning, #c9962b) 45%, var(--background-modifier-border));",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".state-report-export-blocks \u003e strong {",
+  "  color: var(--text-warning, #c9962b);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".state-report-export-list {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".state-report-export-item {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.45fr) minmax(170px, 1fr);",
+  "  gap: 8px;",
+  "  align-items: center;",
+  "  min-width: 0;",
+  "  padding: 6px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".state-report-export-item code,",
+  ".state-report-export-item span {",
+  "  min-width: 0;",
+  "  overflow-wrap: anywhere;",
+  "}",
+  "",
+  ".state-report-export-item span {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  ".state-report-export-item .state-report-ref {",
+  "  align-self: center;",
+  "}",
+  "",
+  ".state-report-table {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  overflow: visible;",
+  "}",
+  "",
+  ".state-report-card {",
+  "  display: grid;",
+  "  gap: 10px;",
+  "  min-width: 0;",
+  "  padding: 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".state-report-card[data-state-status=\"written-only\"],",
+  ".state-report-card[data-state-status=\"read-only\"],",
+  ".state-report-card[data-state-status=\"export-blocked\"] {",
+  "  border-color: color-mix(in srgb, var(--text-warning, #c9962b) 45%, var(--background-modifier-border));",
+  "}",
+  "",
+  ".state-report-card[data-state-status=\"unknown-key\"],",
+  ".state-report-card[data-state-status=\"object-unreadable\"],",
+  ".state-report-card[data-state-status=\"template-mismatch\"],",
+  ".state-report-card[data-state-status=\"invalid-expression\"] {",
+  "  border-color: color-mix(in srgb, var(--text-error, #d94a4a) 45%, var(--background-modifier-border));",
+  "}",
+  "",
+  ".state-report-card-head {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  align-items: start;",
+  "  gap: 12px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".state-report-card-grid {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".state-report-card-block {",
+  "  display: grid;",
+  "  align-content: start;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  padding: 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".state-report-card-block h4 {",
+  "  margin: 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  letter-spacing: 0;",
+  "}",
+  "",
+  ".state-report-key,",
+  ".state-report-initial,",
+  ".state-report-ref-list,",
+  ".state-report-status-list {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".state-report-key {",
+  "  display: grid;",
+  "  align-content: start;",
+  "  gap: 3px;",
+  "}",
+  "",
+  ".state-report-key code,",
+  ".state-report-initial code {",
+  "  overflow-wrap: anywhere;",
+  "}",
+  "",
+  ".state-report-key small,",
+  ".state-report-empty,",
+  ".state-report-more,",
+  ".state-report-ref-static {",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".state-report-initial {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.35;",
+  "  overflow-wrap: anywhere;",
+  "}",
+  "",
+  ".state-report-initial \u003e div {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".state-report-ref-list {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr);",
+  "  gap: 5px;",
+  "}",
+  "",
+  ".state-report-status-list {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  justify-content: flex-end;",
+  "  align-content: flex-start;",
+  "  gap: 5px;",
+  "}",
+  "",
+  ".state-report-ref {",
+  "  display: block;",
+  "  box-sizing: border-box;",
+  "  width: 100%;",
+  "  max-width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 24px;",
+  "  padding: 3px 7px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-muted);",
+  "  -webkit-text-fill-color: currentColor;",
+  "  font-family: inherit;",
+  "  font-size: 11px;",
+  "  line-height: 1.25;",
+  "  text-align: left;",
+  "  white-space: normal;",
+  "  overflow-wrap: anywhere;",
+  "  word-break: break-word;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".state-report-ref:hover {",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".state-report-ref-static {",
+  "  cursor: default;",
+  "}",
+  "",
+  ".state-report-more {",
+  "  justify-self: start;",
+  "}",
+  "",
+  ".state-report-status {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  min-height: 22px;",
+  "  padding: 2px 7px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  line-height: 1.2;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".state-report-status-wrap {",
+  "  position: relative;",
+  "  display: inline-flex;",
+  "}",
+  "",
+  ".state-report-status-tooltip {",
+  "  position: absolute;",
+  "  top: calc(100% + 8px);",
+  "  right: 0;",
+  "  z-index: 40;",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  width: min(380px, calc(100vw - 36px));",
+  "  max-width: calc(100vw - 36px);",
+  "  padding: 10px 11px;",
+  "  border: 1px solid color-mix(in srgb, var(--text-warning, #c9962b) 45%, var(--background-modifier-border));",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.38);",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  font-weight: 500;",
+  "  line-height: 1.45;",
+  "  text-align: left;",
+  "  white-space: normal;",
+  "  visibility: hidden;",
+  "  opacity: 0;",
+  "  pointer-events: none;",
+  "  transform: translateY(-3px);",
+  "  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;",
+  "}",
+  "",
+  ".state-report-status-tooltip::before {",
+  "  content: \"\";",
+  "  position: absolute;",
+  "  right: 18px;",
+  "  top: -6px;",
+  "  width: 10px;",
+  "  height: 10px;",
+  "  border-left: 1px solid color-mix(in srgb, var(--text-warning, #c9962b) 45%, var(--background-modifier-border));",
+  "  border-top: 1px solid color-mix(in srgb, var(--text-warning, #c9962b) 45%, var(--background-modifier-border));",
+  "  background: var(--background-primary);",
+  "  transform: rotate(45deg);",
+  "}",
+  "",
+  ".state-report-status-tooltip-unknown-key,",
+  ".state-report-status-tooltip-object-unreadable,",
+  ".state-report-status-tooltip-template-mismatch,",
+  ".state-report-status-tooltip-invalid-expression {",
+  "  border-color: color-mix(in srgb, var(--text-error, #d94a4a) 45%, var(--background-modifier-border));",
+  "}",
+  "",
+  ".state-report-status-tooltip-unknown-key::before,",
+  ".state-report-status-tooltip-object-unreadable::before,",
+  ".state-report-status-tooltip-template-mismatch::before,",
+  ".state-report-status-tooltip-invalid-expression::before {",
+  "  border-left-color: color-mix(in srgb, var(--text-error, #d94a4a) 45%, var(--background-modifier-border));",
+  "  border-top-color: color-mix(in srgb, var(--text-error, #d94a4a) 45%, var(--background-modifier-border));",
+  "}",
+  "",
+  ".state-report-status-wrap:hover .state-report-status-tooltip,",
+  ".state-report-status-wrap:focus-within .state-report-status-tooltip {",
+  "  visibility: visible;",
+  "  opacity: 1;",
+  "  pointer-events: auto;",
+  "  transform: translateY(0);",
+  "}",
+  "",
+  ".state-report-status:focus-visible {",
+  "  outline: 2px solid color-mix(in srgb, var(--interactive-accent) 65%, transparent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".state-report-status-tooltip strong,",
+  ".state-report-risk-detail,",
+  ".state-report-risk-summary,",
+  ".state-report-risk-more {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".state-report-status-tooltip strong {",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".state-report-risk-summary {",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".state-report-risk-detail {",
+  "  display: grid;",
+  "  gap: 3px;",
+  "  padding-top: 8px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".state-report-risk-detail small {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".state-report-risk-detail em {",
+  "  color: var(--text-warning, #c9962b);",
+  "  font-style: normal;",
+  "}",
+  "",
+  ".state-report-risk-more {",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".state-report-status-ok {",
+  "  border-color: color-mix(in srgb, var(--text-success, #4caf50) 45%, var(--background-modifier-border));",
+  "  color: var(--text-success, #4caf50);",
+  "}",
+  "",
+  ".state-report-status-written-only,",
+  ".state-report-status-read-only,",
+  ".state-report-status-export-blocked {",
+  "  border-color: color-mix(in srgb, var(--text-warning, #c9962b) 45%, var(--background-modifier-border));",
+  "  color: var(--text-warning, #c9962b);",
+  "}",
+  "",
+  ".state-report-status-unknown-key,",
+  ".state-report-status-object-unreadable,",
+  ".state-report-status-template-mismatch,",
+  ".state-report-status-invalid-expression {",
+  "  border-color: color-mix(in srgb, var(--text-error, #d94a4a) 45%, var(--background-modifier-border));",
+  "  color: var(--text-error, #d94a4a);",
+  "}",
+  "",
+  "@media (max-width: 1180px) {",
+  "  .state-report-export-item {",
+  "    grid-template-columns: 1fr;",
+  "  }",
+  "}",
+  "",
+  "@media (max-width: 900px) {",
+  "  .state-report-summary {",
+  "    grid-template-columns: 1fr;",
+  "  }",
+  "",
+  "  .state-report-card-head,",
+  "  .state-report-card-grid {",
+  "    grid-template-columns: 1fr;",
+  "  }",
+  "",
+  "  .state-report-status-list {",
+  "    justify-content: flex-start;",
+  "  }",
+  "}",
+  "",
+  ".script-node-target-hint {",
+  "  display: flex;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".script-node-target-hint .nc-routing-hint-body {",
+  "  width: 100%;",
+  "  margin: 0;",
+  "}",
+  "",
+  ".playbook-action-delete {",
+  "  flex: 0 0 30px;",
+  "  width: 30px;",
+  "  min-width: 30px;",
+  "  height: 30px;",
+  "}",
+  "",
+  ".variable-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(140px, 1fr) minmax(110px, 140px) minmax(180px, 1.4fr) minmax(58px, auto) auto;",
+  "  gap: 8px;",
+  "  align-items: center;",
+  "  padding: 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".variable-row textarea.variable-value-input {",
+  "  min-height: 30px;",
+  "  height: 30px;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "  box-sizing: border-box;",
+  "  padding: 4px 8px;",
+  "  line-height: 1.35;",
+  "  resize: vertical;",
+  "  align-self: center;",
+  "}",
+  "",
+  ".playbook-json-row-button {",
+  "  justify-self: center;",
+  "  align-self: center;",
+  "  min-width: 58px;",
+  "  padding-inline: 8px;",
+  "}",
+  "",
+  ".variable-heading \u003e span:nth-last-child(2),",
+  ".playbook-action-heading \u003e span:nth-last-child(2),",
+  ".playbook-gate-heading \u003e span:last-child,",
+  ".script-node-heading \u003e span:last-child {",
+  "  justify-self: center;",
+  "  text-align: center;",
+  "}",
+  "",
+  ".state-report-status-list .playbook-json-row-button {",
+  "  min-height: 26px;",
+  "  height: 26px;",
+  "}",
+  "",
+  ".node-logic-box {",
+  "  display: grid;",
+  "  gap: 10px;",
+  "  min-width: 0;",
+  "  padding: 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".node-logic-box \u003e header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 10px;",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  font-weight: 750;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".logic-editor-block {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".logic-editor-head {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  "/* Standardize every inspector button to one size (the Add choice reference)",
+  "   so Add condition, Add effect, Add choice, and the rest match. */",
+  ".inspector-panel .small-button {",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".logic-draft-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  gap: 6px;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".condition-draft-row {",
+  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr) auto;",
+  "}",
+  "",
+  ".condition-draft-row.no-condition-value {",
+  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) auto;",
+  "}",
+  "",
+  ".condition-builder-list {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".condition-builder-toolbar {",
+  "  display: flex;",
+  "  align-items: end;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".condition-builder-mode {",
+  "  display: grid;",
+  "  grid-template-columns: auto minmax(120px, 180px);",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".condition-builder-mode select {",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".condition-builder-toolbar .small-button {",
+  "  flex: 0 0 auto;",
+  "}",
+  "",
+  ".condition-builder-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr);",
+  "  gap: 6px;",
+  "  align-items: center;",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".condition-builder-row.has-connector {",
+  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr);",
+  "}",
+  "",
+  ".condition-builder-row.has-delete {",
+  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr) 32px;",
+  "}",
+  "",
+  ".condition-builder-row.has-connector.has-delete {",
+  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr) 32px;",
+  "}",
+  "",
+  ".condition-builder-row.no-condition-value {",
+  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr);",
+  "}",
+  "",
+  ".condition-builder-row.has-connector.no-condition-value {",
+  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr);",
+  "}",
+  "",
+  ".condition-builder-row.has-delete.no-condition-value {",
+  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) 32px;",
+  "}",
+  "",
+  ".condition-builder-row.has-connector.has-delete.no-condition-value {",
+  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr) 32px;",
+  "}",
+  "",
+  ".condition-builder-row \u003e input,",
+  ".condition-builder-row \u003e select {",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".condition-clause-delete {",
+  "  width: 32px;",
+  "  height: 30px;",
+  "  justify-self: center;",
+  "}",
+  "",
+  ".condition-custom-expression {",
+  "  margin-top: 6px;",
+  "  min-height: 66px;",
+  "}",
+  "",
+  ".effect-draft-row {",
+  "  grid-template-columns: minmax(88px, 0.75fr) minmax(120px, 1fr) minmax(92px, 0.8fr) minmax(110px, 1fr) auto;",
+  "}",
+  "",
+  ".effect-draft-row.no-trigger {",
+  "  grid-template-columns: minmax(120px, 1fr) minmax(92px, 0.8fr) minmax(110px, 1fr) auto;",
+  "}",
+  "",
+  ".logic-draft-row \u003e input,",
+  ".logic-draft-row \u003e select {",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".node-effect-list {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".node-effect-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(88px, 0.75fr) minmax(92px, 0.8fr) minmax(120px, 1fr) minmax(110px, 1fr) auto;",
+  "  gap: 6px;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".node-effect-row.no-trigger {",
+  "  grid-template-columns: minmax(120px, 1fr) minmax(92px, 0.8fr) minmax(110px, 1fr) auto;",
+  "}",
+  "",
+  ".node-effect-row \u003e input,",
+  ".node-effect-row \u003e select {",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".node-routing-grid {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);",
+  "  gap: 10px;",
+  "  align-items: start;",
+  "}",
+  "",
+  ".node-routing-hint {",
+  "  display: grid;",
+  "  gap: 4px;",
+  "}",
+  "",
+  ".nc-routing-hint-body {",
+  "  margin: 0;",
+  "  padding: 6px 8px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-s, 6px);",
+  "  background: color-mix(in srgb, var(--background-secondary) 80%, transparent);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.4;",
+  "}",
+  "",
+  ".choice-options-editor,",
+  ".dialog-turns-editor {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding: 10px 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: color-mix(in srgb, var(--background-secondary) 92%, transparent);",
+  "}",
+  "",
+  ".choice-options-editor \u003e header,",
+  ".dialog-turns-editor \u003e header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  font-weight: 650;",
+  "  font-size: 12px;",
+  "  color: var(--text-muted);",
+  "  text-transform: uppercase;",
+  "  letter-spacing: 0.04em;",
+  "}",
+  "",
+  ".choice-options-hint,",
+  ".dialog-turns-hint {",
+  "  font-size: 11px;",
+  "  color: var(--text-muted);",
+  "  line-height: 1.4;",
+  "}",
+  "",
+  "/* Add buttons sit at the bottom of the list so repeated adds never need scrolling up. */",
+  ".dialog-turns-footer,",
+  ".choice-options-footer {",
+  "  display: grid;",
+  "}",
+  "",
+  ".dialog-turns-footer .small-button,",
+  ".choice-options-footer .small-button {",
+  "  width: 100%;",
+  "  text-align: center;",
+  "}",
+  "",
+  ".choice-options-list {",
+  "  display: grid;",
+  "  gap: 10px;",
+  "}",
+  "",
+  ".choice-option-card {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  padding: 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: color-mix(in srgb, var(--background-secondary) 85%, var(--background-modifier-border) 15%);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".choice-option-head {",
+  "  display: grid;",
+  "  grid-template-columns: auto minmax(0, 1fr) auto auto auto;",
+  "  gap: 6px;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".choice-option-index {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  min-width: 22px;",
+  "  height: 22px;",
+  "  padding: 0 6px;",
+  "  border-radius: 999px;",
+  "  background: var(--background-modifier-border);",
+  "  font-size: 11px;",
+  "  font-weight: 700;",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".choice-option-condition {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  padding: 8px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "}",
+  "",
+  ".choice-option-condition-head {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".choice-option-condition-head \u003e span {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  font-size: 11px;",
+  "  font-weight: 600;",
+  "  color: var(--text-muted);",
+  "  text-transform: uppercase;",
+  "  letter-spacing: 0.04em;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".condition-relation-field {",
+  "  display: grid;",
+  "  grid-template-columns: auto minmax(0, 1fr);",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  font-size: 12px;",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".condition-relation-field select {",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".choice-option-effects {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  padding: 8px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "}",
+  "",
+  ".choice-option-effects-head {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".choice-option-condition-toggle,",
+  ".choice-option-effects-toggle {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  padding: 2px 4px;",
+  "  margin: -2px -4px;",
+  "  background: transparent;",
+  "  border: none;",
+  "  box-shadow: none;",
+  "  cursor: pointer;",
+  "  font: inherit;",
+  "  font-size: 11px;",
+  "  font-weight: 600;",
+  "  color: var(--text-muted);",
+  "  text-transform: uppercase;",
+  "  letter-spacing: 0.04em;",
+  "  text-align: left;",
+  "}",
+  "",
+  ".choice-option-condition-toggle:hover,",
+  ".choice-option-effects-toggle:hover {",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".choice-option-condition-caret,",
+  ".choice-option-effects-caret {",
+  "  display: inline-block;",
+  "  width: 0.9em;",
+  "  text-align: center;",
+  "  font-size: 10px;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".choice-option-condition-body,",
+  ".choice-option-effect-list {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".nc-section-toggle {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "  padding: 2px 4px;",
+  "  margin: -2px -4px;",
+  "  background: transparent;",
+  "  border: none;",
+  "  box-shadow: none;",
+  "  cursor: pointer;",
+  "  font: inherit;",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "  color: var(--text-muted);",
+  "  text-transform: uppercase;",
+  "  letter-spacing: 0.04em;",
+  "  text-align: left;",
+  "}",
+  "",
+  ".nc-section-toggle:hover {",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".nc-section-caret {",
+  "  display: inline-block;",
+  "  width: 0.9em;",
+  "  text-align: center;",
+  "  font-size: 10px;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".nc-section-title {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".nc-section-count {",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "  font-weight: 600;",
+  "}",
+  "",
+  ".node-logic-box input,",
+  ".node-logic-box select,",
+  ".node-logic-box textarea,",
+  ".choice-option-card input,",
+  ".choice-option-card select,",
+  ".choice-option-card textarea {",
+  "  box-sizing: border-box;",
+  "  max-width: 100%;",
+  "  min-width: 0;",
+  "}",
+  "",
+  "@container (max-width: 430px) {",
+  "  .condition-builder-toolbar {",
+  "    display: grid;",
+  "    grid-template-columns: minmax(0, 1fr) auto;",
+  "    align-items: stretch;",
+  "  }",
+  "",
+  "  .condition-builder-mode {",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "",
+  "  .condition-builder-toolbar .small-button {",
+  "    width: auto;",
+  "  }",
+  "",
+  "  .condition-draft-row,",
+  "  .condition-draft-row.no-condition-value,",
+  "  .effect-draft-row,",
+  "  .effect-draft-row.no-trigger,",
+  "  .condition-builder-row,",
+  "  .condition-builder-row.has-connector,",
+  "  .condition-builder-row.has-delete,",
+  "  .condition-builder-row.has-connector.has-delete,",
+  "  .condition-builder-row.no-condition-value,",
+  "  .condition-builder-row.has-connector.no-condition-value,",
+  "  .condition-builder-row.has-delete.no-condition-value,",
+  "  .condition-builder-row.has-connector.has-delete.no-condition-value,",
+  "  .node-effect-row,",
+  "  .node-effect-row.no-trigger,",
+  "  .node-routing-grid {",
+  "    grid-template-columns: repeat(2, minmax(0, 1fr));",
+  "  }",
+  "",
+  "  .condition-clause-delete {",
+  "    justify-self: stretch;",
+  "    width: 100%;",
+  "  }",
+  "",
+  "  .choice-option-head {",
+  "    grid-template-columns: auto minmax(0, 1fr) auto;",
+  "  }",
+  "",
+  "  .choice-option-effects-head,",
+  "  .choice-option-condition-head {",
+  "    flex-wrap: wrap;",
+  "  }",
+  "}",
+  "",
+  "@container (max-width: 300px) {",
+  "  .condition-builder-toolbar {",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "",
+  "  .condition-builder-toolbar .small-button {",
+  "    width: 100%;",
+  "  }",
+  "",
+  "  .condition-draft-row,",
+  "  .condition-draft-row.no-condition-value,",
+  "  .effect-draft-row,",
+  "  .effect-draft-row.no-trigger,",
+  "  .condition-builder-row,",
+  "  .condition-builder-row.has-connector,",
+  "  .condition-builder-row.has-delete,",
+  "  .condition-builder-row.has-connector.has-delete,",
+  "  .condition-builder-row.no-condition-value,",
+  "  .condition-builder-row.has-connector.no-condition-value,",
+  "  .condition-builder-row.has-delete.no-condition-value,",
+  "  .condition-builder-row.has-connector.has-delete.no-condition-value,",
+  "  .node-effect-row,",
+  "  .node-effect-row.no-trigger,",
+  "  .node-routing-grid {",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "}",
+  "",
+  ".dialog-turns-list {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".dialog-turn-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(120px, var(--dialog-speaker-ratio, 34%)) 12px minmax(0, 1fr) auto;",
+  "  gap: 4px;",
+  "  align-items: start;",
+  "}",
+  "",
+  ".dialog-turn-column-separator {",
+  "  position: relative;",
+  "  align-self: stretch;",
+  "  min-height: 56px;",
+  "  border-radius: 4px;",
+  "  cursor: col-resize;",
+  "  touch-action: none;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".dialog-turn-column-separator::before {",
+  "  content: \"\";",
+  "  position: absolute;",
+  "  top: 4px;",
+  "  bottom: 4px;",
+  "  left: 5px;",
+  "  width: 2px;",
+  "  border-radius: 999px;",
+  "  background: var(--background-modifier-border-hover);",
+  "  transition: background 120ms ease, box-shadow 120ms ease;",
+  "}",
+  "",
+  ".dialog-turn-column-separator:hover::before {",
+  "  background: var(--interactive-accent);",
+  "  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);",
+  "}",
+  "",
+  ".dialog-turn-actions {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(2, 28px);",
+  "  gap: 4px;",
+  "}",
+  "",
+  ".dialog-turn-actions .icon-button {",
+  "  width: 28px;",
+  "  min-width: 28px;",
+  "  height: 28px;",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".dialog-turn-split-row {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(12px, 1fr) auto minmax(12px, 1fr);",
+  "  gap: 8px;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".dialog-turn-split-row \u003e span {",
+  "  height: 1px;",
+  "  background: var(--background-modifier-border);",
+  "}",
+  "",
+  ".dialog-turn-split-button {",
+  "  min-height: 26px;",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".dialog-turn-row textarea {",
+  "  min-height: 56px;",
+  "  resize: vertical;",
+  "}",
+  "",
+  ".variable-heading {",
+  "  min-height: 32px;",
+  "  border-color: transparent;",
+  "  background: transparent;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".playbook-rule-grid {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));",
+  "  gap: 10px;",
+  "}",
+  "",
+  ".playbook-rule-card {",
+  "  display: grid;",
+  "  gap: 10px;",
+  "  min-width: 0;",
+  "  padding: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".playbook-rule-card.is-disabled {",
+  "  border-color: color-mix(in srgb, var(--background-modifier-border) 70%, transparent);",
+  "}",
+  "",
+  ".playbook-rule-card.is-disabled .field,",
+  ".playbook-rule-card.is-disabled .playbook-rule-note {",
+  "  opacity: 0.62;",
+  "}",
+  "",
+  ".playbook-end-condition-editor {",
+  "  box-sizing: border-box;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  min-height: 72px;",
+  "  max-height: 320px;",
+  "  overflow: auto;",
+  "  resize: vertical;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".playbook-rule-card header {",
+  "  display: flex;",
+  "  align-items: flex-start;",
+  "  justify-content: space-between;",
+  "  gap: 10px;",
+  "}",
+  "",
+  ".playbook-rule-heading {",
+  "  display: grid;",
+  "  gap: 3px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-rule-title-line {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-rule-card-actions {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 6px;",
+  "  flex: 0 0 auto;",
+  "}",
+  "",
+  ".playbook-rule-toggle {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  position: relative;",
+  "  width: 42px;",
+  "  height: 24px;",
+  "  min-height: 24px;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: 999px;",
+  "  background: transparent;",
+  "  flex: 0 0 42px;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".playbook-rule-toggle input {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  margin: 0;",
+  "  opacity: 0;",
+  "  cursor: inherit;",
+  "}",
+  "",
+  ".playbook-rule-switch-track {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: 999px;",
+  "  background: var(--background-secondary);",
+  "  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.26);",
+  "  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;",
+  "}",
+  "",
+  ".playbook-rule-switch-thumb {",
+  "  position: absolute;",
+  "  top: 2px;",
+  "  left: 2px;",
+  "  width: 18px;",
+  "  height: 18px;",
+  "  border-radius: 999px;",
+  "  background: var(--text-on-accent);",
+  "  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.36);",
+  "  transition: transform 140ms ease;",
+  "}",
+  "",
+  ".playbook-rule-toggle.is-enabled {",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".playbook-rule-toggle.is-enabled .playbook-rule-switch-track {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 65%, transparent);",
+  "  background: var(--interactive-accent);",
+  "  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.18);",
+  "}",
+  "",
+  ".playbook-rule-toggle.is-enabled .playbook-rule-switch-thumb {",
+  "  transform: translateX(18px);",
+  "}",
+  "",
+  ".playbook-rule-toggle input:focus-visible + .playbook-rule-switch-track {",
+  "  outline: 2px solid color-mix(in srgb, var(--interactive-accent) 70%, transparent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".playbook-rule-toggle input:disabled {",
+  "  cursor: default;",
+  "}",
+  "",
+  ".playbook-rule-toggle input:disabled + .playbook-rule-switch-track {",
+  "  opacity: 0.72;",
+  "}",
+  "",
+  ".playbook-rule-help {",
+  "  width: 22px;",
+  "  height: 22px;",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".playbook-rule-help.active {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-rule-help-note {",
+  "  margin: 0;",
+  "  padding: 8px 10px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".playbook-rule-note {",
+  "  margin: 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  ".playbook-rule-nested {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  gap: 10px;",
+  "  align-items: center;",
+  "  padding: 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".playbook-rule-nested.is-disabled {",
+  "  opacity: 0.72;",
+  "}",
+  "",
+  ".playbook-rule-nested-copy {",
+  "  display: grid;",
+  "  gap: 3px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-rule-nested-copy strong {",
+  "  color: var(--text-normal);",
+  "  font-size: 13px;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".playbook-rule-nested-copy span {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  ".playbook-rule-nested-actions {",
+  "  display: inline-flex;",
+  "  gap: 6px;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".playbook-rule-card h4 {",
+  "  min-width: 0;",
+  "  margin: 0;",
+  "  color: var(--text-normal);",
+  "  font-size: 16px;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".playbook-rule-kind {",
+  "  color: var(--text-muted);",
+  "  font-size: 11px;",
+  "  font-weight: 800;",
+  "  letter-spacing: 0;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".playbook-rule-card dl {",
+  "  display: grid;",
+  "  gap: 7px;",
+  "  margin: 0;",
+  "}",
+  "",
+  ".playbook-rule-card dl div {",
+  "  display: grid;",
+  "  grid-template-columns: 84px minmax(0, 1fr);",
+  "  gap: 8px;",
+  "  align-items: baseline;",
+  "}",
+  "",
+  ".playbook-rule-card dt {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".playbook-rule-card dd {",
+  "  min-width: 0;",
+  "  margin: 0;",
+  "  overflow: hidden;",
+  "  color: var(--text-normal);",
+  "  font-family: monospace;",
+  "  font-size: 12px;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".json-field textarea {",
+  "  min-height: 520px;",
+  "  overflow-y: hidden;",
+  "  font-family: monospace;",
+  "  font-size: 13px;",
+  "}",
+  "",
+  ".cast-editor {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding: 10px 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: color-mix(in srgb, var(--background-secondary) 92%, transparent);",
+  "}",
+  "",
+  ".cast-editor-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".cast-editor-header h3 {",
+  "  margin: 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".cast-editor-header \u003e span,",
+  ".cast-auto-row \u003e span,",
+  ".cast-empty {",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".cast-row-list {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".cast-row,",
+  ".cast-add-row {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  align-items: stretch;",
+  "}",
+  "",
+  ".cast-row {",
+  "  position: relative;",
+  "  grid-template-columns: 28px minmax(0, 1fr) minmax(96px, 0.65fr) 34px;",
+  "}",
+  "",
+  ".cast-add-row {",
+  "  grid-template-columns: minmax(0, 1fr) minmax(96px, 0.65fr) auto;",
+  "}",
+  "",
+  ".cast-row select,",
+  ".cast-add-row select {",
+  "  min-width: 0;",
+  "}",
+  "",
+  "/* Library-entry combobox: menu on focus, filter on typing. */",
+  ".cast-entry-picker {",
+  "  position: relative;",
+  "  display: flex;",
+  "  align-items: stretch;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".cast-entry-picker [data-cast-entry-input] {",
+  "  flex: 1 1 auto;",
+  "  min-width: 0;",
+  "  padding-right: 26px;",
+  "}",
+  "",
+  ".cast-entry-picker-arrow {",
+  "  position: absolute;",
+  "  top: 50%;",
+  "  right: 3px;",
+  "  transform: translateY(-50%);",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  width: 20px;",
+  "  height: 20px;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  font-size: 10px;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".cast-entry-picker-arrow::before,",
+  ".cast-entry-picker-arrow::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".cast-entry-picker-arrow:hover {",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".cast-entry-suggestions {",
+  "  position: absolute;",
+  "  top: calc(100% + 4px);",
+  "  right: 0;",
+  "  left: 0;",
+  "  z-index: 30;",
+  "  display: grid;",
+  "  max-height: 240px;",
+  "  overflow-y: auto;",
+  "  overscroll-behavior: contain;",
+  "  padding: 4px;",
+  "  border: 1px solid var(--background-modifier-border-hover);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  box-shadow: var(--shadow-soft);",
+  "}",
+  "",
+  ".cast-entry-suggestions[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".cast-entry-suggestion-group {",
+  "  padding: 6px 9px 2px;",
+  "  color: var(--text-faint);",
+  "  font-size: 10px;",
+  "  font-weight: 700;",
+  "  letter-spacing: 0.08em;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".cast-entry-suggestion {",
+  "  display: flex;",
+  "  align-items: baseline;",
+  "  justify-content: space-between;",
+  "  gap: 8px;",
+  "  width: 100%;",
+  "  margin: 0;",
+  "  padding: 6px 9px;",
+  "  border: 0;",
+  "  border-radius: var(--radius-s);",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-normal);",
+  "  font: inherit;",
+  "  text-align: left;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".cast-entry-suggestion::before,",
+  ".cast-entry-suggestion::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".cast-entry-suggestion span {",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".cast-entry-suggestion small {",
+  "  flex: 0 0 auto;",
+  "  color: var(--text-faint);",
+  "  font-size: 10px;",
+  "}",
+  "",
+  ".cast-entry-suggestion:hover,",
+  ".cast-entry-suggestion.active {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".cast-entry-suggestion.is-selected {",
+  "  color: var(--interactive-accent);",
+  "}",
+  "",
+  ".cast-entry-suggestion-empty {",
+  "  padding: 8px 9px;",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".cast-drag-handle {",
+  "  position: static;",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  width: 28px;",
+  "  min-width: 28px;",
+  "  min-height: 34px;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: var(--background-secondary);",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  font: 700 12px/1 var(--font-interface);",
+  "  cursor: grab;",
+  "  touch-action: none;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".cast-drag-handle::before,",
+  ".cast-drag-handle::after {",
+  "  content: none;",
+  "  display: none;",
+  "}",
+  "",
+  ".cast-drag-handle:hover,",
+  ".cast-drag-handle:focus-visible {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".cast-drag-handle:active {",
+  "  cursor: grabbing;",
+  "}",
+  "",
+  ".cast-row-drop-before::before,",
+  ".cast-row-drop-after::after {",
+  "  content: \"\";",
+  "  position: absolute;",
+  "  right: 0;",
+  "  left: 0;",
+  "  z-index: 2;",
+  "  height: 2px;",
+  "  border-radius: 2px;",
+  "  background: var(--interactive-accent);",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".cast-row-drop-before::before {",
+  "  top: -4px;",
+  "}",
+  "",
+  ".cast-row-drop-after::after {",
+  "  bottom: -4px;",
+  "}",
+  "",
+  ".cast-auto-row {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  padding-top: 8px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".cast-auto-chips {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 4px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".event-fields {",
+  "  display: grid;",
+  "  gap: 12px;",
+  "  padding: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--subtle-button-bg);",
+  "}",
+  "",
+  ".event-fields h3 {",
+  "  margin: 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".custom-fields {",
+  "  display: grid;",
+  "  gap: 12px;",
+  "  padding: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".custom-fields h3 {",
+  "  margin: 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 650;",
+  "  text-transform: uppercase;",
+  "}",
+  "",
+  ".event-sheet-shell {",
+  "  grid-template-rows: none;",
+  "  grid-auto-rows: auto;",
+  "  max-width: none;",
+  "}",
+  "",
+  ".event-sheet-shell .document-filter-bar {",
+  "  margin-bottom: 6px;",
+  "}",
+  "",
+  ".event-sheet-shell .document-actions .small-button {",
+  "  flex: 0 1 auto;",
+  "}",
+  "",
+  ".event-search-box:not(.workspace-search-box) {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  flex: 0 1 220px;",
+  "  min-width: 160px;",
+  "}",
+  "",
+  ".event-search-box:not(.workspace-search-box) input {",
+  "  width: 100%;",
+  "}",
+  "",
+  ".event-sheet-groups {",
+  "  display: grid;",
+  "  gap: 18px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".event-sheet-group {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".event-sheet-group-header {",
+  "  display: flex;",
+  "  align-items: baseline;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".event-sheet-group-actions {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  justify-content: flex-end;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".event-sheet-group-header h3 {",
+  "  margin: 0;",
+  "  color: var(--text-normal);",
+  "  font-size: 14px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".event-sheet-group-header span {",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".event-sheet-scroll {",
+  "  overflow: auto;",
+  "  max-width: 100%;",
+  "  min-height: 0;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary);",
+  "  scrollbar-gutter: stable;",
+  "}",
+  "",
+  ".event-sheet-table {",
+  "  table-layout: fixed;",
+  "  width: max-content;",
+  "  min-width: 100%;",
+  "  border-collapse: collapse;",
+  "}",
+  "",
+  ".event-row-handle-col {",
+  "  width: 32px;",
+  "  min-width: 32px;",
+  "}",
+  "",
+  ".event-row-handle-cell {",
+  "  width: 32px;",
+  "  min-width: 32px;",
+  "  max-width: 32px;",
+  "  padding: 0;",
+  "  text-align: center;",
+  "  vertical-align: middle;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".event-sheet-table thead th:first-child {",
+  "  width: 32px;",
+  "  min-width: 32px;",
+  "  max-width: 32px;",
+  "}",
+  "",
+  ".event-row-drag-handle {",
+  "  display: inline-block;",
+  "  padding: 4px 6px;",
+  "  color: var(--text-faint);",
+  "  cursor: grab;",
+  "  line-height: 1;",
+  "}",
+  "",
+  ".event-row-drag-handle:active {",
+  "  cursor: grabbing;",
+  "}",
+  "",
+  ".event-sheet-table tbody tr.event-row-drop-before \u003e td:first-child,",
+  ".event-sheet-table tbody tr.event-row-drop-before \u003e th {",
+  "  box-shadow: inset 0 2px 0 var(--interactive-accent);",
+  "}",
+  "",
+  ".event-sheet-table tbody tr.event-row-drop-after \u003e td:first-child,",
+  ".event-sheet-table tbody tr.event-row-drop-after \u003e th {",
+  "  box-shadow: inset 0 -2px 0 var(--interactive-accent);",
+  "}",
+  "",
+  ".event-sheet-table th,",
+  ".event-sheet-table td {",
+  "  min-width: 60px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  border-right: 1px solid var(--background-modifier-border);",
+  "  padding: 6px;",
+  "  vertical-align: top;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".event-sheet-table thead th[data-event-column-key] {",
+  "  overflow: visible;",
+  "}",
+  "",
+  ".event-sheet-table thead th:first-child,",
+  ".event-sheet-table .event-row-handle-cell {",
+  "  width: 32px;",
+  "  min-width: 32px;",
+  "  max-width: 32px;",
+  "}",
+  "",
+  ".event-sheet-table thead th {",
+  "  position: sticky;",
+  "  top: 0;",
+  "  z-index: 1;",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  text-align: left;",
+  "  white-space: normal;",
+  "  overflow-wrap: normal;",
+  "}",
+  "",
+  ".event-column-resize-handle {",
+  "  position: absolute;",
+  "  top: 0;",
+  "  right: -5px;",
+  "  bottom: 0;",
+  "  width: 10px;",
+  "  cursor: col-resize;",
+  "  user-select: none;",
+  "  z-index: 3;",
+  "}",
+  "",
+  ".event-column-resize-handle::after {",
+  "  content: \"\";",
+  "  position: absolute;",
+  "  top: 6px;",
+  "  bottom: 6px;",
+  "  left: 50%;",
+  "  width: 2px;",
+  "  background: var(--background-modifier-border);",
+  "  border-radius: 1px;",
+  "  opacity: 0.6;",
+  "  transform: translateX(-50%);",
+  "  transition: opacity 120ms ease, background 120ms ease, width 120ms ease;",
+  "}",
+  "",
+  ".event-column-resize-handle:hover::after,",
+  ".event-column-resizing .event-column-resize-handle::after {",
+  "  opacity: 1;",
+  "  background: var(--interactive-accent);",
+  "}",
+  "",
+  ".event-column-resizing,",
+  ".event-column-resizing * {",
+  "  cursor: col-resize;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".event-column-header {",
+  "  display: grid;",
+  "  align-content: start;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".event-column-name {",
+  "  display: block;",
+  "  min-width: 0;",
+  "  color: var(--text-muted);",
+  "  font-weight: 700;",
+  "  line-height: 1.2;",
+  "  overflow: hidden;",
+  "  overflow-wrap: normal;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  word-break: normal;",
+  "}",
+  "",
+  ".event-column-actions {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 4px;",
+  "}",
+  "",
+  ".event-column-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  min-width: 0;",
+  "  height: 22px;",
+  "  padding: 0 4px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-muted);",
+  "  cursor: pointer;",
+  "  font-size: 9.5px;",
+  "  font-weight: 650;",
+  "  line-height: 1;",
+  "  opacity: 0.78;",
+  "}",
+  "",
+  ".event-sheet-table thead th:hover .event-column-button {",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".event-column-button:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".event-column-button:focus-visible {",
+  "  opacity: 1;",
+  "  border-color: var(--focus-accent);",
+  "}",
+  "",
+  ".event-column-button.danger:hover {",
+  "  border-color: rgba(224, 108, 117, 0.45);",
+  "  background: rgba(224, 108, 117, 0.1);",
+  "  color: var(--accent-red);",
+  "}",
+  "",
+  ".event-node-col {",
+  "  width: 260px;",
+  "  min-width: 260px;",
+  "}",
+  "",
+  ".event-hidden-col {",
+  "  width: 220px;",
+  "  min-width: 220px;",
+  "}",
+  "",
+  ".event-node-heading,",
+  ".event-sheet-table tbody th {",
+  "  width: 260px;",
+  "  min-width: 260px;",
+  "}",
+  "",
+  ".event-sheet-table thead th:last-child,",
+  ".event-sheet-table tbody td:last-child {",
+  "  border-left: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".event-sheet-table thead th:last-child {",
+  "  min-width: 220px;",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".event-hidden-cell {",
+  "  width: 220px;",
+  "  min-width: 220px;",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".event-hidden-controls {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".event-hidden-restore-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  max-width: 100%;",
+  "  min-height: 24px;",
+  "  padding: 3px 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-muted);",
+  "  cursor: pointer;",
+  "  font-size: 11px;",
+  "  font-weight: 650;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "}",
+  "",
+  ".event-hidden-restore-button:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".event-hidden-empty {",
+  "  color: var(--text-faint);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".event-node-link {",
+  "  display: grid;",
+  "  place-items: center;",
+  "  gap: 2px;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "  min-height: 44px;",
+  "  padding: 8px 10px;",
+  "  border: 1px solid var(--subtle-button-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--subtle-button-bg);",
+  "  color: var(--text-normal);",
+  "  text-align: center;",
+  "  cursor: pointer;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".event-node-link span,",
+  ".event-node-link small {",
+  "  display: block;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "  white-space: normal;",
+  "  overflow-wrap: anywhere;",
+  "  word-break: break-word;",
+  "  text-align: center;",
+  "  line-height: 1.25;",
+  "}",
+  "",
+  ".event-node-link small {",
+  "  color: var(--text-faint);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".event-sheet-table input,",
+  ".event-sheet-table textarea {",
+  "  display: block;",
+  "  width: 100%;",
+  "  min-width: 0;",
+  "  max-width: 100%;",
+  "  border-color: transparent;",
+  "  background: var(--background-control);",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "}",
+  "",
+  ".event-sheet-table textarea {",
+  "  min-height: 72px;",
+  "  resize: vertical;",
+  "}",
+  "",
+  ".event-elements-cell {",
+  "  min-height: 72px;",
+  "  max-width: 100%;",
+  "  padding: 8px;",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--subtle-button-bg);",
+  "  color: var(--text-muted);",
+  "  line-height: 1.4;",
+  "  white-space: pre-wrap;",
+  "  overflow-wrap: anywhere;",
+  "}",
+  "",
+  ".event-elements-cell.empty {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".event-elements-collapsible {",
+  "  display: block;",
+  "}",
+  "",
+  ".event-elements-collapsible summary {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  min-height: 28px;",
+  "  margin: -2px -2px 8px;",
+  "  padding: 4px 6px;",
+  "  border-radius: var(--radius-s);",
+  "  color: var(--text-normal);",
+  "  cursor: pointer;",
+  "  list-style-position: inside;",
+  "}",
+  "",
+  ".event-elements-collapsible summary:hover {",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".event-elements-full {",
+  "  display: none;",
+  "}",
+  "",
+  ".event-elements-collapsible[open] .event-elements-preview {",
+  "  display: none;",
+  "}",
+  "",
+  ".event-elements-collapsible[open] .event-elements-full {",
+  "  display: block;",
+  "}",
+  "",
+  ".event-sheet-empty {",
+  "  min-height: 120px;",
+  "  color: var(--text-muted);",
+  "  text-align: center;",
+  "}",
+  "",
+  ".play-dialog {",
+  "  position: relative;",
+  "  inset: auto;",
+  "  grid-column: 4;",
+  "  grid-row: 1;",
+  "  display: none;",
+  "  width: 100%;",
+  "  max-width: none;",
+  "  height: 100%;",
+  "  max-height: none;",
+  "  margin: 0;",
+  "  border: 0;",
+  "  border-left: 1px solid var(--background-modifier-border);",
+  "  border-right: 1px solid var(--background-modifier-border);",
+  "  border-radius: 0;",
+  "  padding: 0;",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-normal);",
+  "  box-shadow: none;",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".play-dialog[open] {",
+  "  display: block;",
+  "}",
+  "",
+  ".play-dialog::backdrop {",
+  "  background: transparent;",
+  "}",
+  "",
+  "/* Floating preview: lift the docked panel into a centered window and reclaim its column. */",
+  ".app-shell[data-play-panel=\"open\"][data-play-floating=\"true\"] {",
+  "  --play-panel-track: 0px;",
+  "}",
+  "",
+  ".play-dialog.floating {",
+  "  position: fixed;",
+  "  inset: auto;",
+  "  top: 50%;",
+  "  left: 50%;",
+  "  grid-column: auto;",
+  "  grid-row: auto;",
+  "  width: min(760px, calc(100vw - 80px));",
+  "  height: min(80vh, 760px);",
+  "  transform: translate(-50%, -50%);",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-l);",
+  "  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);",
+  "  z-index: 60;",
+  "}",
+  "",
+  ".play-dialog.floating[data-pinned=\"true\"] {",
+  "  z-index: 320;",
+  "}",
+  "",
+  ".play-dialog.floating .play-header {",
+  "  cursor: grab;",
+  "  touch-action: none;",
+  "  user-select: none;",
+  "}",
+  "",
+  ".floating-window-resize-handle {",
+  "  position: absolute;",
+  "  z-index: 5;",
+  "  display: none;",
+  "  touch-action: none;",
+  "}",
+  "",
+  ".play-dialog.floating .floating-window-resize-handle,",
+  ".inspector-float-window .floating-window-resize-handle,",
+  ".ai-floating-window .floating-window-resize-handle {",
+  "  display: block;",
+  "}",
+  "",
+  ".floating-window-resize-handle.n,",
+  ".floating-window-resize-handle.s {",
+  "  left: 10px;",
+  "  right: 10px;",
+  "  height: 10px;",
+  "  cursor: ns-resize;",
+  "}",
+  "",
+  ".floating-window-resize-handle.n { top: -5px; }",
+  ".floating-window-resize-handle.s { bottom: -5px; }",
+  "",
+  ".floating-window-resize-handle.e,",
+  ".floating-window-resize-handle.w {",
+  "  top: 10px;",
+  "  bottom: 10px;",
+  "  width: 10px;",
+  "  cursor: ew-resize;",
+  "}",
+  "",
+  ".floating-window-resize-handle.e { right: -5px; }",
+  ".floating-window-resize-handle.w { left: -5px; }",
+  "",
+  ".floating-window-resize-handle.ne,",
+  ".floating-window-resize-handle.nw,",
+  ".floating-window-resize-handle.se,",
+  ".floating-window-resize-handle.sw {",
+  "  width: 16px;",
+  "  height: 16px;",
+  "}",
+  "",
+  ".floating-window-resize-handle.ne { top: -6px; right: -6px; cursor: nesw-resize; }",
+  ".floating-window-resize-handle.nw { top: -6px; left: -6px; cursor: nwse-resize; }",
+  ".floating-window-resize-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }",
+  ".floating-window-resize-handle.sw { bottom: -6px; left: -6px; cursor: nesw-resize; }",
+  "",
+  ".play-header-actions {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 4px;",
+  "}",
+  "",
+  ".play-float-button svg {",
+  "  width: 16px;",
+  "  height: 16px;",
+  "  fill: none;",
+  "  stroke: currentColor;",
+  "  stroke-width: 2;",
+  "  stroke-linecap: round;",
+  "  stroke-linejoin: round;",
+  "}",
+  "",
+  ".play-float-button[aria-pressed=\"true\"] svg {",
+  "  transform: rotate(180deg);",
+  "}",
+  "",
+  "/* Floating play preview no longer needs the \"dock\" button; clicking outside docks it. */",
+  ".play-dialog.floating .play-float-button {",
+  "  display: none;",
+  "}",
+  "",
+  ".confirm-dialog,",
+  ".type-dialog,",
+  ".nc-notice-dialog {",
+  "  width: min(420px, calc(100vw - 32px));",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  padding: 0;",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-normal);",
+  "  box-shadow: var(--shadow-soft);",
+  "}",
+  "",
+  ".playbook-help-dialog {",
+  "  width: min(680px, calc(100vw - 32px));",
+  "}",
+  "",
+  ".playbook-rule-dialog {",
+  "  width: min(620px, calc(100vw - 32px));",
+  "}",
+  "",
+  ".export-report-dialog {",
+  "  width: min(720px, calc(100vw - 32px));",
+  "}",
+  "",
+  ".confirm-dialog::backdrop,",
+  ".type-dialog::backdrop,",
+  ".nc-notice-dialog::backdrop {",
+  "  background: rgba(0, 0, 0, 0.6);",
+  "}",
+  "",
+  ".confirm-shell,",
+  ".type-shell {",
+  "  display: grid;",
+  "  gap: 18px;",
+  "  padding: 18px;",
+  "}",
+  "",
+  ".confirm-shell h2,",
+  ".type-shell h2 {",
+  "  margin: 4px 0 0;",
+  "  font-size: 16px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".confirm-body {",
+  "  margin: 8px 0 0;",
+  "  color: var(--text-muted);",
+  "  font-size: 13px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".type-dialog-settings {",
+  "  display: grid;",
+  "  /* Reserve a floor for the visibility column so its longest label (e.g. the English",
+  "     \"Hide frame rows from Events Sheet\") stays on one line, while the appearance column keeps",
+  "     a consistent, compact width in every language instead of ballooning when labels are short. */",
+  "  grid-template-columns: minmax(0, 1fr) minmax(288px, auto);",
+  "  align-items: stretch;",
+  "  gap: 14px;",
+  "}",
+  "",
+  ".type-dialog-setting-group {",
+  "  display: grid;",
+  "  align-content: start;",
+  "  gap: 10px;",
+  "  min-width: 0;",
+  "  margin: 0;",
+  "  padding: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: color-mix(in srgb, var(--background-secondary-alt) 72%, transparent);",
+  "}",
+  "",
+  ".type-dialog-setting-label {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".type-dialog {",
+  "  width: min(580px, calc(100vw - 32px));",
+  "}",
+  "",
+  ".type-shell {",
+  "  gap: 14px;",
+  "  max-height: calc(100vh - 48px);",
+  "  overflow-y: auto;",
+  "}",
+  "",
+  ".type-dialog-appearance {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  "/* Compact inline rows: label + small control (no full-width color bar). */",
+  ".type-dialog-field-row {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  margin: 0;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".type-dialog-field-row \u003e .type-dialog-setting-label {",
+  "  flex: 0 0 auto;",
+  "  min-width: 62px;",
+  "  font-weight: 600;",
+  "}",
+  "",
+  ".type-dialog-icon-input {",
+  "  box-sizing: border-box;",
+  "  flex: 1 1 0;",
+  "  min-width: 0;",
+  "  width: auto;",
+  "  height: 28px;",
+  "  padding: 0 4px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s, 6px);",
+  "  background: var(--background-control);",
+  "  color: var(--text-normal);",
+  "  font-size: 15px;",
+  "  text-align: start;",
+  "}",
+  "",
+  ".type-dialog-inline-reset {",
+  "  flex: 0 0 auto;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 28px;",
+  "  height: 28px;",
+  "  padding: 0;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s, 6px);",
+  "  background: var(--background-secondary);",
+  "  color: var(--text-muted);",
+  "  font-size: 15px;",
+  "  line-height: 1;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".type-dialog-inline-reset:hover {",
+  "  color: var(--text-normal);",
+  "  border-color: var(--background-modifier-border-hover, var(--interactive-accent));",
+  "}",
+  "",
+  ".type-dialog-color-field input[type=\"color\"] {",
+  "  -webkit-appearance: none;",
+  "  appearance: none;",
+  "  flex: 0 0 auto;",
+  "  width: 40px;",
+  "  height: 28px;",
+  "  padding: 3px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s, 6px);",
+  "  background: var(--background-control);",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".type-dialog-color-field input[type=\"color\"]::-webkit-color-swatch-wrapper {",
+  "  padding: 0;",
+  "}",
+  "",
+  ".type-dialog-color-field input[type=\"color\"]::-webkit-color-swatch {",
+  "  border: none;",
+  "  border-radius: 2px;",
+  "}",
+  "",
+  ".type-dialog-opacity-field .nc-range-control {",
+  "  --range-ratio: 1;",
+  "  --range-track-height: 4px;",
+  "  --range-thumb-size: 12px;",
+  "  position: relative;",
+  "  flex: 1 1 0;",
+  "  min-width: 0;",
+  "  height: 18px;",
+  "}",
+  "",
+  ".type-dialog-opacity-field input[type=\"range\"] {",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  z-index: 2;",
+  "  display: block;",
+  "  box-sizing: border-box;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: 0;",
+  "  -webkit-appearance: none;",
+  "  appearance: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  opacity: 0;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".type-dialog-opacity-value {",
+  "  flex: 0 0 auto;",
+  "  min-width: 40px;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-variant-numeric: tabular-nums;",
+  "  text-align: right;",
+  "}",
+  "",
+  ".type-dialog-opacity-field input[type=\"range\"]::-webkit-slider-runnable-track {",
+  "  height: 100%;",
+  "  border: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ".type-dialog-opacity-field input[type=\"range\"]::-webkit-slider-thumb {",
+  "  -webkit-appearance: none;",
+  "  appearance: none;",
+  "  width: var(--range-thumb-size);",
+  "  height: var(--range-thumb-size);",
+  "  margin-top: 0;",
+  "  border: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ".type-dialog-opacity-field input[type=\"range\"]::-moz-range-track {",
+  "  height: 100%;",
+  "  border: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ".type-dialog-opacity-field input[type=\"range\"]::-moz-range-thumb {",
+  "  width: var(--range-thumb-size);",
+  "  height: var(--range-thumb-size);",
+  "  border: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ".type-dialog-opacity-field .nc-range-track {",
+  "  position: absolute;",
+  "  inset: 50% 0 auto;",
+  "  height: var(--range-track-height);",
+  "  border-radius: 999px;",
+  "  background: var(--background-modifier-border-hover);",
+  "  box-shadow: none;",
+  "  transform: translateY(-50%);",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".type-dialog-opacity-field .nc-range-thumb {",
+  "  position: absolute;",
+  "  top: 50%;",
+  "  left: calc(var(--range-ratio) * (100% - var(--range-thumb-size)));",
+  "  box-sizing: border-box;",
+  "  width: var(--range-thumb-size);",
+  "  height: var(--range-thumb-size);",
+  "  border: 0;",
+  "  border-radius: 999px;",
+  "  background: var(--text-muted);",
+  "  box-shadow: none;",
+  "  transform: translateY(-50%);",
+  "  pointer-events: none;",
+  "}",
+  "",
+  ".type-dialog-opacity-field input[type=\"range\"]:hover + .nc-range-track .nc-range-thumb {",
+  "  background: var(--text-normal);",
+  "}",
+  "",
+  ".type-dialog-opacity-field input[type=\"range\"]:focus-visible + .nc-range-track .nc-range-thumb {",
+  "  background: var(--interactive-accent);",
+  "  box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 25%, transparent);",
+  "}",
+  "",
+  ".type-dialog-visibility {",
+  "  display: grid;",
+  "  align-content: start;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".node-type-field-section {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".node-type-field-heading {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".node-type-field-list {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".node-type-field-chip {",
+  "  padding: 4px 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: 999px;",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".node-type-existing-fields {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "}",
+  "",
+  ".node-type-existing-field {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;",
+  "  align-items: center;",
+  "  gap: 10px;",
+  "  width: 100%;",
+  "  padding: 7px 9px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "}",
+  "",
+  ".node-type-existing-field:not(:disabled) {",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".node-type-existing-field:not(:disabled):hover {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary-alt));",
+  "}",
+  "",
+  ".node-type-existing-field small {",
+  "  color: var(--text-faint);",
+  "  font-family: var(--nc-font-monospace);",
+  "}",
+  "",
+  ".node-type-existing-field strong {",
+  "  color: var(--interactive-accent);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".node-type-existing-field.added {",
+  "  opacity: 0.7;",
+  "}",
+  "",
+  ".type-shell textarea {",
+  "  min-height: 96px;",
+  "}",
+  "",
+  ".nc-checkbox-field {",
+  "  position: relative;",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 8px;",
+  "  min-width: 0;",
+  "  min-height: 38px;",
+  "  margin: 0;",
+  "  padding: 7px 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-control);",
+  "  color: var(--text-normal);",
+  "  font-size: 13px;",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  "/* Native input overlays the whole field, invisible but focusable/clickable; the label forwards",
+  "   clicks and the visible control is .nc-checkbox-box. */",
+  ".nc-checkbox-field input[type=\"checkbox\"] {",
+  "  -webkit-appearance: none;",
+  "  appearance: none;",
+  "  position: absolute;",
+  "  inset: 0;",
+  "  z-index: 1;",
+  "  display: block;",
+  "  box-sizing: border-box;",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  margin: 0;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: 0;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  transform: none;",
+  "  opacity: 0;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".nc-checkbox-text {",
+  "  min-width: 0;",
+  "}",
+  "",
+  "@media (max-width: 520px) {",
+  "  .type-dialog-settings {",
+  "    grid-template-columns: 1fr;",
+  "  }",
+  "}",
+  "",
+  ".notice-shell {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  padding: 18px;",
+  "}",
+  "",
+  ".notice-shell p {",
+  "  margin: 0;",
+  "  color: var(--text-normal);",
+  "  font-size: 15px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".playbook-help-shell {",
+  "  gap: 16px;",
+  "}",
+  "",
+  ".playbook-rule-shell {",
+  "  gap: 14px;",
+  "}",
+  "",
+  ".export-report-shell {",
+  "  gap: 14px;",
+  "}",
+  "",
+  ".playbook-help-shell h2 {",
+  "  margin: 4px 0 0;",
+  "  font-size: 18px;",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  ".playbook-help-body {",
+  "  min-height: 300px;",
+  "}",
+  "",
+  ".playbook-help-page {",
+  "  display: grid;",
+  "  gap: 14px;",
+  "}",
+  "",
+  ".playbook-help-lead {",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-help-section {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".playbook-help-section h3 {",
+  "  margin: 0;",
+  "  color: var(--text-normal);",
+  "  font-size: 13px;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  ".playbook-help-section ul {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  margin: 0;",
+  "  padding-left: 18px;",
+  "  color: var(--text-muted);",
+  "  font-size: 13px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".playbook-help-footer {",
+  "  display: grid;",
+  "  grid-template-columns: auto minmax(0, 1fr) auto auto;",
+  "  align-items: center;",
+  "}",
+  "",
+  ".playbook-help-pagination {",
+  "  display: inline-flex;",
+  "  min-width: 0;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  gap: 10px;",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".playbook-help-dots {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 5px;",
+  "}",
+  "",
+  ".playbook-help-dot {",
+  "  width: 7px;",
+  "  height: 7px;",
+  "  padding: 0;",
+  "  border: 0;",
+  "  border-radius: 999px;",
+  "  background: var(--text-faint);",
+  "  opacity: 0.55;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".playbook-help-dot.active,",
+  ".playbook-help-dot:hover {",
+  "  background: var(--interactive-accent);",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".export-report-shell h2,",
+  ".playbook-rule-shell h2 {",
+  "  margin: 4px 0 0;",
+  "  font-size: 18px;",
+  "  line-height: 1.35;",
+  "}",
+  "",
+  ".export-report-body {",
+  "  display: grid;",
+  "  gap: 14px;",
+  "  max-height: min(62vh, 560px);",
+  "  overflow: auto;",
+  "}",
+  "",
+  ".export-report-summary {",
+  "  display: grid;",
+  "  gap: 4px;",
+  "  padding: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--background-primary-alt) 72%, var(--background-secondary));",
+  "}",
+  "",
+  ".export-report-summary strong {",
+  "  font-size: 14px;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  ".export-report-summary span {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".export-report-section {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".export-report-section h3 {",
+  "  margin: 0;",
+  "  font-size: 13px;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  ".export-report-list {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  margin: 0;",
+  "}",
+  "",
+  ".export-report-warning {",
+  "  display: grid;",
+  "  gap: 5px;",
+  "  padding: 10px 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--background-primary-alt) 82%, var(--background-secondary));",
+  "  color: var(--text-normal);",
+  "  font-size: 12px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".export-report-warning code {",
+  "  width: fit-content;",
+  "  padding: 2px 6px;",
+  "  border: 1px solid var(--subtle-button-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-control));",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".export-report-warning span {",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".export-report-warning small {",
+  "  color: var(--text-faint);",
+  "}",
+  "",
+  ".export-report-map {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  margin: 0;",
+  "}",
+  "",
+  ".export-report-map div {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);",
+  "  gap: 8px;",
+  "  align-items: center;",
+  "  padding: 8px 10px;",
+  "  border-radius: var(--radius-s);",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  background: color-mix(in srgb, var(--background-primary-alt) 82%, var(--background-secondary));",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".export-report-map code {",
+  "  min-width: 0;",
+  "  overflow-wrap: anywhere;",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-help-grid {",
+  "  display: grid;",
+  "  grid-template-columns: repeat(2, minmax(0, 1fr));",
+  "  gap: 14px;",
+  "}",
+  "",
+  ".playbook-help-grid section {",
+  "  min-width: 0;",
+  "}",
+  "",
+  ".playbook-help-grid h3 {",
+  "  margin: 0 0 8px;",
+  "  font-size: 13px;",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-help-grid ul {",
+  "  display: grid;",
+  "  gap: 6px;",
+  "  margin: 0;",
+  "  padding-left: 18px;",
+  "  color: var(--text-muted);",
+  "  font-size: 13px;",
+  "  line-height: 1.45;",
+  "}",
+  "",
+  ".playbook-help-grid code,",
+  ".playbook-example {",
+  "  font-family: monospace;",
+  "}",
+  "",
+  ".playbook-example {",
+  "  margin: 0;",
+  "  max-height: 220px;",
+  "  overflow: auto;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "  padding: 12px;",
+  "  font-size: 12px;",
+  "  line-height: 1.5;",
+  "}",
+  "",
+  ".playbook-action-fixed-op {",
+  "  display: grid;",
+  "  align-content: center;",
+  "  min-height: 30px;",
+  "  padding: 5px 8px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: color-mix(in srgb, var(--background-primary-alt) 86%, var(--background-secondary));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".playbook-action-fixed-op strong {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  font-size: 12px;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".playbook-action-fixed-op small {",
+  "  min-width: 0;",
+  "  overflow: hidden;",
+  "  text-overflow: ellipsis;",
+  "  white-space: nowrap;",
+  "  color: var(--text-muted);",
+  "  font-size: 10px;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".playbook-rule-options {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".playbook-rule-options button {",
+  "  display: grid;",
+  "  grid-template-columns: 138px minmax(0, 1fr);",
+  "  align-items: center;",
+  "  gap: 10px;",
+  "  width: 100%;",
+  "  min-height: 58px;",
+  "  padding: 10px 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-normal);",
+  "  text-align: left;",
+  "  appearance: none;",
+  "}",
+  "",
+  ".playbook-rule-options button:hover {",
+  "  border-color: var(--focus-accent);",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".playbook-rule-options strong {",
+  "  font-size: 14px;",
+  "  line-height: 1.2;",
+  "}",
+  "",
+  ".playbook-rule-options span {",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  line-height: 1.25;",
+  "}",
+  "",
+  ".playbook-rule-allset {",
+  "  margin: 12px 0 0;",
+  "  padding: 10px 12px;",
+  "  border-radius: 6px;",
+  "  background: var(--background-secondary, rgba(255, 255, 255, 0.04));",
+  "  color: var(--text-muted);",
+  "  font-size: 12px;",
+  "  text-align: center;",
+  "}",
+  "",
+  ".play-rule-status {",
+  "  display: block;",
+  "  margin-top: 4px;",
+  "  font-size: 11px;",
+  "  line-height: 1.3;",
+  "  min-height: 14px;",
+  "  /* Explicit base so a status without a semantic modifier is a consistent muted",
+  "     gray instead of an inherited color that varies by container. */",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".play-rule-status-empty {",
+  "  display: none;",
+  "}",
+  "",
+  ".play-rule-status-ok,",
+  ".play-rule-status-pass,",
+  ".play-rule-status-always {",
+  "  color: var(--text-success, #4caf50);",
+  "}",
+  "",
+  ".play-rule-status-fail {",
+  "  color: var(--text-warning, #c9962b);",
+  "}",
+  "",
+  ".play-rule-status-unknown {",
+  "  color: var(--text-warning, #c9962b);",
+  "}",
+  "",
+  ".play-rule-status-invalid {",
+  "  color: var(--text-error, #d94a4a);",
+  "}",
+  "",
+  ".confirm-actions {",
+  "  display: flex;",
+  "  justify-content: flex-end;",
+  "  flex-wrap: wrap;",
+  "  gap: 8px;",
+  "}",
+  "",
+  ".confirm-muted {",
+  "  border-color: var(--background-modifier-border);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".confirm-cancel {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
+  "}",
+  "",
+  ".play-shell {",
+  "  display: grid;",
+  "  grid-template-rows: auto minmax(0, 1fr);",
+  "  width: 100%;",
+  "  height: 100%;",
+  "  margin: 0;",
+  "  min-height: 0;",
+  "}",
+  "",
+  "/* Body and actions scroll together so the buttons sit right below the",
+  "   content (debug section) instead of being pinned to the panel bottom. */",
+  ".play-scroll {",
+  "  min-height: 0;",
+  "  overflow: auto;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  ".play-header {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  min-height: 58px;",
+  "  padding: 10px 14px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".play-body {",
+  "  min-height: 0;",
+  "  padding: 18px;",
+  "  background: var(--background-primary);",
+  "  font-family: var(--nc-font-text);",
+  "  font-size: 16px;",
+  "  line-height: 1.55;",
+  "}",
+  "",
+  ".play-body h3 {",
+  "  margin: 0 0 12px;",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 18px;",
+  "  line-height: 1.3;",
+  "}",
+  "",
+  "/* Scrollable log of the cards the reader just passed. */",
+  ".play-history {",
+  "  display: grid;",
+  "  gap: 14px;",
+  "  margin-bottom: 18px;",
+  "}",
+  "",
+  ".play-history-card {",
+  "  padding: 0 0 14px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".play-history-card .play-meta {",
+  "  margin-bottom: 6px;",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".play-history-card h4 {",
+  "  margin: 0 0 6px;",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 14px;",
+  "  line-height: 1.3;",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".play-history-card p {",
+  "  margin: 0;",
+  "  font-size: 14px;",
+  "  line-height: 1.5;",
+  "  white-space: pre-wrap;",
+  "}",
+  "",
+  ".play-history-trimmed {",
+  "  padding: 4px 0;",
+  "  color: var(--text-faint);",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 11px;",
+  "  text-align: center;",
+  "}",
+  "",
+  ".play-card-images {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 8px;",
+  "  margin-top: 12px;",
+  "}",
+  "",
+  ".play-card-images img {",
+  "  max-width: 100%;",
+  "  max-height: 150px;",
+  "  border-radius: var(--radius-s);",
+  "}",
+  "",
+  ".play-history-card .play-card-images img {",
+  "  max-height: 92px;",
+  "}",
+  "",
+  ".play-history-jump {",
+  "  margin-top: 8px;",
+  "  padding: 3px 9px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "  color: var(--text-muted);",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 12px;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".play-history-jump:hover {",
+  "  border-color: var(--interactive-accent);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".play-meta {",
+  "  display: flex;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "  margin-bottom: 12px;",
+  "  color: var(--text-muted);",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 12px;",
+  "}",
+  "",
+  ".play-body p {",
+  "  margin: 0;",
+  "  white-space: pre-wrap;",
+  "}",
+  "",
+  ".play-fields {",
+  "  display: grid;",
+  "  gap: 8px;",
+  "  margin: 18px 0 0;",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 13px;",
+  "}",
+  "",
+  ".play-fields div {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(90px, 160px) minmax(0, 1fr);",
+  "  gap: 10px;",
+  "  padding-top: 8px;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".play-fields dt {",
+  "  color: var(--text-muted);",
+  "  font-weight: 650;",
+  "}",
+  "",
+  ".play-fields dd {",
+  "  margin: 0;",
+  "  color: var(--text-normal);",
+  "  white-space: pre-wrap;",
+  "}",
+  "",
+  ".play-debug {",
+  "  margin-top: 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary-alt);",
+  "}",
+  "",
+  ".play-debug summary {",
+  "  cursor: pointer;",
+  "  padding: 8px 10px;",
+  "  color: var(--text-muted);",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 13px;",
+  "  font-weight: 700;",
+  "}",
+  "",
+  ".play-debug pre {",
+  "  margin: 0;",
+  "  padding: 0 10px 10px;",
+  "  white-space: pre-wrap;",
+  "  color: var(--text-normal);",
+  "  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;",
+  "}",
+  "",
+  ".play-actions {",
+  "  display: flex;",
+  "  flex-wrap: wrap;",
+  "  gap: 8px;",
+  "  justify-content: flex-start;",
+  "  padding: 12px 14px 16px;",
+  "  background: var(--background-primary);",
+  "}",
+  "",
+  "/* Each choice option takes a full row of its own. */",
+  ".play-actions .play-choice-action {",
+  "  flex: 1 1 100%;",
+  "}",
+  "",
+  ".play-action {",
+  "  flex: 1 1 auto;",
+  "  min-height: 34px;",
+  "  padding: 0 12px;",
+  "  border-color: var(--background-modifier-border);",
+  "  background: var(--background-secondary-alt);",
+  "}",
+  "",
+  ".play-action:disabled,",
+  ".play-action[aria-disabled=\"true\"] {",
+  "  cursor: not-allowed;",
+  "  opacity: 0.52;",
+  "}",
+  "",
+  ".play-action[data-play-manual-applied=\"true\"] {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary-alt));",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ".system-lock-button {",
+  "  cursor: not-allowed;",
+  "  color: var(--text-faint);",
+  "  opacity: 0.72;",
+  "}",
+  "",
+  ".nc-empty-state {",
+  "  position: static;",
+  "  inset: auto;",
+  "  top: auto;",
+  "  right: auto;",
+  "  bottom: auto;",
+  "  left: auto;",
+  "  width: auto;",
+  "  height: auto;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  min-height: 220px;",
+  "  border: 1px dashed var(--background-modifier-border);",
+  "  border-radius: var(--radius-m);",
+  "  color: var(--text-muted);",
+  "  text-align: center;",
+  "}",
+  "",
+  "@media (max-width: 1320px) {",
+  "  .app-shell {",
+  "    --sidebar-left-width: 240px;",
+  "    --sidebar-right-width: 320px;",
+  "    --play-panel-width: 300px;",
+  "    --workspace-min-width: 360px;",
+  "  }",
+  "}",
+  "",
+  "@media (max-width: 760px) {",
+  "  body {",
+  "    overflow: auto;",
+  "  }",
+  "",
+  "  .app-shell {",
+  "    --workspace-min-width: 360px;",
+  "    width: max(1000px, calc(var(--sidebar-left-track) + var(--sidebar-left-resizer-width) + var(--workspace-min-width) + var(--play-panel-track) + var(--sidebar-right-resizer-width) + var(--sidebar-right-track)));",
+  "    min-width: max(1000px, calc(var(--sidebar-left-track) + var(--sidebar-left-resizer-width) + var(--workspace-min-width) + var(--play-panel-track) + var(--sidebar-right-resizer-width) + var(--sidebar-right-track)));",
+  "    height: 100vh;",
+  "    min-height: 100vh;",
+  "  }",
+  "",
+  "  .canvas-workspace {",
+  "    min-height: 100vh;",
+  "    grid-template-rows: auto auto minmax(560px, calc(100vh - 192px)) auto;",
+  "  }",
+  "",
+  "  .canvas-workspace-tabs {",
+  "    flex-wrap: wrap;",
+  "    height: auto;",
+  "  }",
+  "",
+  "  .canvas-panel {",
+  "    min-height: 560px;",
+  "  }",
+  "",
+  "  .document-panel {",
+  "    min-height: 560px;",
+  "  }",
+  "",
+  "  .document-header,",
+  "  .variable-row,",
+  "  .playbook-gate-row,",
+  "  .playbook-action-row {",
+  "    grid-template-columns: 1fr;",
+  "  }",
+  "",
+  "  .document-header {",
+  "    display: grid;",
+  "  }",
+  "",
+  "  .playbook-help-grid {",
+  "    grid-template-columns: 1fr;",
+  "  }",
+  "",
+  "  .playbook-help-footer {",
+  "    grid-template-columns: 1fr 1fr;",
+  "  }",
+  "",
+  "  .playbook-rule-nested {",
+  "    grid-template-columns: 1fr;",
+  "  }",
+  "",
+  "  .playbook-rule-nested-actions {",
+  "    justify-content: flex-start;",
+  "  }",
+  "",
+  "  .playbook-help-pagination {",
+  "    grid-column: 1 / -1;",
+  "    grid-row: 1;",
+  "    justify-content: flex-start;",
+  "  }",
+  "",
+  "  .status-bar {",
+  "    flex-wrap: wrap;",
+  "    min-height: 96px;",
+  "  }",
+  "",
+  "  .nc-workspace-search-controls {",
+  "    justify-content: flex-start;",
+  "    flex: 1 1 100%;",
+  "    min-width: 0;",
+  "  }",
+  "",
+  "  .workspace-search-box {",
+  "    max-width: none;",
+  "  }",
+  "",
+  "}",
+  "",
+  "/* Portrait displays keep the complete editor visible without a page-wide",
+  "   horizontal scroll. Sidebars become proportional, dense work areas scroll",
+  "   locally, and the preview uses the available vertical space as an overlay. */",
+  "@media (orientation: portrait) and (max-width: 1200px) {",
+  "  body {",
+  "    overflow: hidden;",
+  "  }",
+  "",
+  "  .app-shell {",
+  "    --sidebar-left-track: clamp(150px, 22vw, 220px);",
+  "    --sidebar-right-track: clamp(170px, 24vw, 260px);",
+  "    --sidebar-left-resizer-width: 4px;",
+  "    --sidebar-right-resizer-width: 4px;",
+  "    --workspace-min-width: 0px;",
+  "    --play-panel-track: 0px;",
+  "    width: 100%;",
+  "    min-width: 0;",
+  "    height: 100vh;",
+  "    min-height: 0;",
+  "  }",
+  "",
+  "  .app-shell[data-sidebar-left=\"collapsed\"] {",
+  "    --sidebar-left-track: var(--sidebar-collapsed-width);",
+  "    --sidebar-left-resizer-width: 0px;",
+  "  }",
+  "",
+  "  .app-shell[data-sidebar-right=\"collapsed\"] {",
+  "    --sidebar-right-track: var(--sidebar-collapsed-width);",
+  "    --sidebar-right-resizer-width: 0px;",
+  "  }",
+  "",
+  "  .app-shell[data-play-panel=\"open\"] {",
+  "    --play-panel-track: 0px;",
+  "  }",
+  "",
+  "  .canvas-workspace,",
+  "  .canvas-panel,",
+  "  .document-panel {",
+  "    min-width: 0;",
+  "    min-height: 0;",
+  "  }",
+  "",
+  "  .canvas-workspace {",
+  "    grid-template-rows: auto auto minmax(0, 1fr) auto;",
+  "  }",
+  "",
+  "  .workspace-global-bar {",
+  "    gap: 6px;",
+  "    padding-inline: 6px;",
+  "  }",
+  "",
+  "  .workspace-file-label {",
+  "    gap: 5px;",
+  "  }",
+  "",
+  "  .canvas-workspace-tabs {",
+  "    flex-wrap: nowrap;",
+  "    min-height: 44px;",
+  "    padding: 6px;",
+  "    overflow-x: auto;",
+  "    overflow-y: hidden;",
+  "  }",
+  "",
+  "  .canvas-workspace-tabs .toolbar-group {",
+  "    flex: 0 0 auto;",
+  "    flex-wrap: nowrap;",
+  "  }",
+  "",
+  "  .canvas-workspace-tabs .toolbar-group-right {",
+  "    margin-left: 0;",
+  "  }",
+  "",
+  "  .status-bar {",
+  "    flex-wrap: wrap;",
+  "    min-height: 74px;",
+  "    overflow: visible;",
+  "  }",
+  "",
+  "  #statusText {",
+  "    flex-basis: 100%;",
+  "  }",
+  "",
+  "  .nc-workspace-search-controls {",
+  "    flex: 1 1 100%;",
+  "    justify-content: flex-start;",
+  "    min-width: 0;",
+  "  }",
+  "",
+  "  .workspace-search-box {",
+  "    width: 100%;",
+  "    max-width: none;",
+  "  }",
+  "",
+  "  .document-header,",
+  "  .document-project-header {",
+  "    display: grid;",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "",
+  "  .document-actions {",
+  "    justify-content: flex-start;",
+  "  }",
+  "",
+  "  .document-editor-toolbar {",
+  "    align-items: flex-start;",
+  "    gap: 6px;",
+  "  }",
+  "",
+  "  .document-editor-status {",
+  "    flex-wrap: wrap;",
+  "  }",
+  "",
+  "  .character-grid {",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "",
+  "  .variable-row,",
+  "  .playbook-action-row,",
+  "  .playbook-rule-nested,",
+  "  .state-report-card-head,",
+  "  .state-report-card-grid {",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "",
+  "  .playbook-action-heading,",
+  "  .variable-heading {",
+  "    display: none;",
+  "  }",
+  "",
+  "  .dialog-turn-row {",
+  "    grid-template-columns: minmax(0, 1fr) auto;",
+  "    gap: 8px;",
+  "  }",
+  "",
+  "  .dialog-turn-row \u003e :not(.dialog-turn-actions) {",
+  "    grid-column: 1;",
+  "  }",
+  "",
+  "  .dialog-turn-column-separator {",
+  "    display: none;",
+  "  }",
+  "",
+  "  .dialog-turn-actions {",
+  "    grid-column: 2;",
+  "    grid-row: 1 / span 2;",
+  "  }",
+  "",
+  "  .inspector-float-overlay {",
+  "    padding: 12px;",
+  "  }",
+  "",
+  "  .inspector-float-window {",
+  "    width: calc(100% - 16px);",
+  "    height: calc(100% - 24px);",
+  "    min-height: 280px;",
+  "  }",
+  "",
+  "  .inspector-float-body .inspector-panel.active {",
+  "    padding: 14px 14px 40px;",
+  "  }",
+  "",
+  "  .app-shell[data-play-panel=\"open\"] .play-dialog[open] {",
+  "    position: fixed;",
+  "    inset: auto;",
+  "    top: 50%;",
+  "    left: 50%;",
+  "    grid-column: auto;",
+  "    grid-row: auto;",
+  "    width: min(640px, calc(100vw - 24px));",
+  "    height: min(860px, calc(100vh - 24px));",
+  "    transform: translate(-50%, -50%);",
+  "    border: 1px solid var(--background-modifier-border);",
+  "    border-radius: var(--radius-l);",
+  "    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);",
+  "    z-index: 60;",
+  "  }",
+  "",
+  "  .confirm-dialog,",
+  "  .type-dialog,",
+  "  .nc-notice-dialog {",
+  "    max-height: calc(100vh - 24px);",
+  "    overflow-y: auto;",
+  "  }",
+  "",
+  "  .playbook-help-body,",
+  "  .export-report-body {",
+  "    max-height: calc(100vh - 190px);",
+  "    min-height: 0;",
+  "  }",
+  "",
+  "  .playbook-help-grid,",
+  "  .playbook-help-footer,",
+  "  .playbook-rule-options button,",
+  "  .export-report-map div {",
+  "    grid-template-columns: minmax(0, 1fr);",
+  "  }",
+  "",
+  "  .playbook-help-pagination {",
+  "    grid-column: 1;",
+  "    grid-row: auto;",
+  "    justify-content: flex-start;",
+  "  }",
+  "",
+  "  .ai-floating-window {",
+  "    left: 8px;",
+  "    bottom: 86px;",
+  "    width: calc(100% - 16px);",
+  "    height: min(760px, calc(100% - 104px));",
+  "  }",
+  "",
+  "  .ai-composer-actions,",
+  "  .ai-context {",
+  "    flex-wrap: wrap;",
+  "  }",
+  "",
+  "  .workspace-floating-controls {",
+  "    right: 8px;",
+  "  }",
+  "}",
+  "",
+  "[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".language-toggle-button {",
+  "  position: static;",
+  "  flex: 0 0 auto;",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  gap: 2px;",
+  "  padding: 4px 7px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: 999px;",
+  "  background: var(--background-control);",
+  "  color: var(--text-muted);",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 11px;",
+  "  font-weight: 600;",
+  "  line-height: 1;",
+  "  letter-spacing: 0.02em;",
+  "  cursor: pointer;",
+  "  opacity: 0.82;",
+  "  box-shadow: var(--shadow-soft);",
+  "  transition: opacity 120ms ease, border-color 120ms ease, background 120ms ease;",
+  "}",
+  "",
+  ".language-toggle-button:hover {",
+  "  opacity: 1;",
+  "  border-color: var(--background-modifier-border-hover);",
+  "  background: var(--background-modifier-hover);",
+  "}",
+  "",
+  ".language-toggle-button:focus-visible {",
+  "  outline: 2px solid var(--interactive-accent);",
+  "  outline-offset: 2px;",
+  "}",
+  "",
+  ".language-toggle-option {",
+  "  padding: 2px 5px;",
+  "  border-radius: 999px;",
+  "  color: var(--text-faint);",
+  "  transition: color 120ms ease, background 120ms ease;",
+  "}",
+  "",
+  ".language-toggle-divider {",
+  "  color: var(--text-faint);",
+  "  opacity: 0.55;",
+  "}",
+  "",
+  ".language-toggle-button[data-active-lang=\"en\"] .language-toggle-option[data-lang=\"en\"],",
+  ".language-toggle-button[data-active-lang=\"zh\"] .language-toggle-option[data-lang=\"zh\"] {",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
+  "}",
+  "",
+  ".language-toggle-button[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  "textarea[data-project-field=\"variables\"]::selection {",
+  "  background: rgba(255, 196, 96, 0.55);",
+  "  color: inherit;",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) textarea[data-project-field=\"variables\"]::selection,",
+  ".app-shell[data-theme=\"light\"] textarea[data-project-field=\"variables\"]::selection {",
+  "  background: rgba(220, 130, 0, 0.4);",
+  "  color: inherit;",
+  "}",
+  "",
+  ".playbook-json-frame {",
+  "  position: relative;",
+  "  display: block;",
+  "}",
+  "",
+  ".playbook-json-frame \u003e textarea {",
+  "  display: block;",
+  "  width: 100%;",
+  "}",
+  "",
+  ".playbook-json-highlight {",
+  "  position: absolute;",
+  "  left: 0;",
+  "  right: 0;",
+  "  background: rgba(255, 196, 96, 0.32);",
+  "  border-radius: 3px;",
+  "  pointer-events: none;",
+  "  z-index: 1;",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .playbook-json-highlight,",
+  ".app-shell[data-theme=\"light\"] .playbook-json-highlight {",
+  "  background: rgba(220, 130, 0, 0.22);",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .small-button:not(.primary):not(.danger-button),",
+  ".app-shell[data-theme=\"light\"] .small-button:not(.primary):not(.danger-button),",
+  ":host([data-theme=\"light\"]) .toolbar-button:not(.primary):not(.danger-button),",
+  ".app-shell[data-theme=\"light\"] .toolbar-button:not(.primary):not(.danger-button) {",
+  "  border-color: rgba(35, 31, 27, 0.3);",
+  "  background: rgba(35, 31, 27, 0.045);",
+  "  color: var(--text-normal);",
+  "  box-shadow: inset 0 -1px 0 rgba(35, 31, 27, 0.06);",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .small-button:not(.primary):not(.danger-button):hover,",
+  ".app-shell[data-theme=\"light\"] .small-button:not(.primary):not(.danger-button):hover,",
+  ":host([data-theme=\"light\"]) .toolbar-button:not(.primary):not(.danger-button):hover,",
+  ".app-shell[data-theme=\"light\"] .toolbar-button:not(.primary):not(.danger-button):hover {",
+  "  border-color: rgba(35, 31, 27, 0.42);",
+  "  background: rgba(35, 31, 27, 0.085);",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .theme-toggle-button,",
+  ".app-shell[data-theme=\"light\"] .theme-toggle-button,",
+  ":host([data-theme=\"light\"]) .theme-toggle-button[aria-pressed=\"true\"],",
+  ".app-shell[data-theme=\"light\"] .theme-toggle-button[aria-pressed=\"true\"] {",
+  "  border-color: #b8afff;",
+  "  background: #f7f5ff;",
+  "  background-color: #f7f5ff;",
+  "  color: #201a45;",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .theme-toggle-button:hover,",
+  ".app-shell[data-theme=\"light\"] .theme-toggle-button:hover,",
+  ":host([data-theme=\"light\"]) .theme-toggle-button[aria-pressed=\"true\"]:hover,",
+  ".app-shell[data-theme=\"light\"] .theme-toggle-button[aria-pressed=\"true\"]:hover {",
+  "  border-color: #c6bfff;",
+  "  background: #ffffff;",
+  "  background-color: #ffffff;",
+  "  color: #201a45;",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .help-button,",
+  ".app-shell[data-theme=\"light\"] .help-button {",
+  "  border-color: rgba(35, 31, 27, 0.3);",
+  "  background: rgba(35, 31, 27, 0.045);",
+  "  color: var(--text-normal);",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .inspector-tab:not(.active):not(:disabled),",
+  ".app-shell[data-theme=\"light\"] .inspector-tab:not(.active):not(:disabled),",
+  ":host([data-theme=\"light\"]) .playbook-tab:not(.active):not(:disabled),",
+  ".app-shell[data-theme=\"light\"] .playbook-tab:not(.active):not(:disabled) {",
+  "  border-color: rgba(35, 31, 27, 0.18);",
+  "  background: rgba(35, 31, 27, 0.04);",
+  "  color: var(--text-normal);",
+  "}",
+  ".ai-workbench { display:flex; flex-direction:column; gap:12px; min-height:100%; }",
+  ".ai-context { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; border:1px solid var(--background-modifier-border); border-radius:8px; font-size:12px; color:var(--text-muted); }",
+  ".ai-context .ai-copy-button { gap:5px; flex:0 0 auto; }",
+  ".ai-messages { display:flex; flex-direction:column; gap:10px; min-height:180px; max-height:42vh; overflow:auto; }",
+  ".ai-message { position:relative; padding:10px; border:1px solid var(--background-modifier-border); border-radius:10px; line-height:1.45; overflow-wrap:anywhere; }",
+  ".ai-message-header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:5px; }",
+  ".ai-message-header \u003e strong { margin:0; font-size:11px; text-transform:uppercase; color:var(--text-muted); }",
+  ".ai-copy-button { display:inline-flex; align-items:center; justify-content:center; min-width:26px; min-height:24px; padding:2px 6px; border:1px solid transparent; border-radius:5px; background:transparent; color:var(--text-muted); cursor:pointer; }",
+  ".ai-copy-button:hover, .ai-copy-button:focus-visible { border-color:var(--background-modifier-border); background:var(--background-modifier-hover); color:var(--text-normal); }",
+  ".ai-copy-button svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }",
+  ".ai-message-user { background:color-mix(in srgb, var(--interactive-accent) 12%, transparent); }",
+  ".ai-message.streaming \u003e .ai-markdown::after { content:\"\"; display:inline-block; width:7px; height:1em; margin-left:3px; border-radius:2px; vertical-align:-2px; background:var(--interactive-accent); animation:ai-stream-caret .8s steps(1) infinite; }",
+  "@keyframes ai-stream-caret { 50% { opacity:.2; } }",
+  ".ai-markdown { color:var(--text-normal); }",
+  ".ai-markdown \u003e :first-child { margin-top:0; }",
+  ".ai-markdown \u003e :last-child { margin-bottom:0; }",
+  ".ai-markdown :is(p, ul, ol, blockquote, pre) { margin:0.55em 0; }",
+  ".ai-markdown :is(h1, h2, h3, h4) { margin:0.75em 0 0.35em; line-height:1.25; color:var(--text-normal); }",
+  ".ai-markdown h1 { font-size:1.35em; }",
+  ".ai-markdown h2 { font-size:1.2em; }",
+  ".ai-markdown :is(h3, h4) { font-size:1.05em; }",
+  ".ai-markdown :is(ul, ol) { padding-left:1.5em; }",
+  ".ai-markdown blockquote { padding:0.15em 0 0.15em 0.8em; border-left:3px solid var(--interactive-accent); color:var(--text-muted); }",
+  ".ai-markdown code { padding:0.1em 0.3em; border-radius:4px; background:var(--background-primary-alt, var(--background-secondary)); font-family:var(--nc-font-monospace); font-size:0.9em; }",
+  ".ai-markdown pre { overflow:auto; padding:10px; border:1px solid var(--background-modifier-border); border-radius:8px; background:var(--background-primary-alt, var(--background-secondary)); }",
+  ".ai-markdown pre code { padding:0; background:transparent; white-space:pre; }",
+  ".ai-markdown a { color:var(--link-color, var(--interactive-accent)); text-decoration:underline; text-underline-offset:2px; }",
+  ".ai-markdown hr { margin:0.75em 0; border:0; border-top:1px solid var(--background-modifier-border); }",
+  ".ai-composer { display:grid; gap:8px; padding:8px; border:1px solid var(--background-modifier-border); border-radius:10px; background:var(--background-primary); }",
+  ".ai-composer textarea { width:100%; min-height:96px; padding:4px; border:0; resize:vertical; background:transparent; box-shadow:none; }",
+  ".ai-composer textarea:focus { box-shadow:none; outline:none; }",
+  ".ai-composer-toolbar { display:flex; align-items:center; gap:6px; min-width:0; }",
+  ".ai-composer-toolbar .ai-actions { margin-left:auto; }",
+  ".ai-tool-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:32px; padding:5px 8px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--text-muted); font:inherit; font-size:12px; cursor:pointer; }",
+  ".ai-tool-button:hover:not(:disabled), .ai-tool-button.active { border-color:var(--background-modifier-border); background:var(--background-modifier-hover); color:var(--text-normal); }",
+  ".ai-tool-button.active { color:var(--interactive-accent); }",
+  ".ai-tool-button svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }",
+  "",
+  ".ai-actions { display:flex; gap:8px; flex-wrap:wrap; }",
+  "/* Theme-aware action buttons (were unstyled browser defaults). */",
+  ".ai-actions button {",
+  "  padding:7px 14px;",
+  "  border:1px solid var(--background-modifier-border);",
+  "  border-radius:var(--radius-s, 6px);",
+  "  background:var(--background-secondary);",
+  "  color:var(--text-normal);",
+  "  font:inherit;",
+  "  font-size:13px;",
+  "  line-height:1.2;",
+  "  cursor:pointer;",
+  "}",
+  ".ai-actions button:hover:not(:disabled) { background:var(--background-modifier-hover); border-color:var(--background-modifier-border-hover, var(--interactive-accent)); }",
+  ".ai-actions button:disabled { opacity:0.5; cursor:default; }",
+  ".ai-actions button[data-action=\"ai-apply-patch\"],",
+  ".ai-actions button[data-action=\"ai-send\"] {",
+  "  border-color:var(--interactive-accent);",
+  "  background:var(--interactive-accent);",
+  "  color:var(--text-on-accent);",
+  "}",
+  ".ai-actions button[data-action=\"ai-apply-patch\"]:hover:not(:disabled),",
+  ".ai-actions button[data-action=\"ai-send\"]:hover:not(:disabled) {",
+  "  background:var(--interactive-accent-hover, var(--interactive-accent));",
+  "  border-color:var(--interactive-accent-hover, var(--interactive-accent));",
+  "}",
+  ".ai-actions button[data-action=\"ai-reject-patch\"] { color:var(--text-muted); }",
+  ".ai-actions button[data-action=\"ai-reject-patch\"]:hover:not(:disabled) { color:var(--text-normal); }",
+  ".ai-proposal { padding:10px; border:1px solid var(--interactive-accent); border-radius:10px; background:color-mix(in srgb, var(--interactive-accent) 6%, transparent); }",
+  ".ai-proposal h3 { margin:0 0 8px; font-size:14px; }",
+  ".ai-proposal ol { margin:0 0 10px; padding-left:20px; }",
+  ".ai-error { color:var(--text-error, #e0555f); }",
+  ".ai-config { border:1px solid var(--background-modifier-border); border-radius:8px; padding:8px; }",
+  ".ai-config label { display:grid; gap:4px; margin-top:8px; font-size:12px; }",
+  "/* Visuals come from .project-feature-badge so every Beta tag matches; only alignment here. */",
+  ".ai-beta-badge {",
+  "  align-self: center;",
+  "}",
+  ".ai-title { display:flex; align-items:center; gap:8px; }",
+  ".ai-title h2 {",
+  "  color: var(--text-normal);",
+  "  -webkit-text-fill-color: var(--text-normal);",
+  "  opacity: 1;",
+  "}",
+  "",
+  ".ai-floating-button {",
+  "  position: absolute;",
+  "  left: 18px;",
+  "  bottom: 58px;",
+  "  z-index: 8;",
+  "  display: grid;",
+  "  place-items: center;",
+  "  width: 42px;",
+  "  height: 42px;",
+  "  padding: 0;",
+  "  border: 1px solid color-mix(in srgb, var(--interactive-accent) 58%, var(--background-modifier-border));",
+  "  border-radius: 50%;",
+  "  background: color-mix(in srgb, var(--background-primary) 88%, transparent);",
+  "  color: var(--text-normal);",
+  "  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);",
+  "  font-size: 12px;",
+  "  font-weight: 800;",
+  "  letter-spacing: -0.02em;",
+  "  backdrop-filter: blur(8px);",
+  "  cursor: grab;",
+  "  touch-action: none;",
+  "}",
+  "",
+  ".ai-floating-button:active {",
+  "  cursor: grabbing;",
+  "}",
+  "",
+  ".ai-floating-button:hover,",
+  ".ai-floating-button:focus-visible,",
+  ".ai-floating-button.active {",
+  "  border-color: var(--interactive-accent);",
+  "  background: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-primary));",
+  "}",
+  "",
+  ".ai-floating-window {",
+  "  position: absolute;",
+  "  left: calc(var(--sidebar-left-track) + var(--sidebar-left-resizer-width) + 18px);",
+  "  bottom: 110px;",
+  "  z-index: 300;",
+  "  width: min(420px, calc(100% - var(--sidebar-left-track) - var(--sidebar-left-resizer-width) - 36px));",
+  "  height: min(680px, calc(100% - 140px));",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: 12px;",
+  "  background: var(--background-primary);",
+  "  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);",
+  "  overflow: hidden;",
+  "}",
+  "",
+  ".ai-floating-window[data-pinned=\"true\"] {",
+  "  z-index: 320;",
+  "}",
+  "",
+  ".ai-floating-window[hidden] { display: none; }",
+  ".ai-floating-header { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:10px 12px; border-bottom:1px solid var(--background-modifier-border); background:var(--background-secondary); cursor:grab; touch-action:none; user-select:none; }",
+  ".ai-floating-window.is-moving .ai-floating-header { cursor:grabbing; }",
+  ".ai-floating-header h2 { margin:1px 0 0; font-size:18px; }",
+  ".ai-floating-body { height:calc(100% - 56px); padding:12px; overflow:auto; }",
+  ".ai-floating-body .ai-messages { max-height:none; flex:1 1 240px; }",
+].join("\n");
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1525,7 +12355,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003clink rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"./assets/icons/favicon-32x32.png\"\u003e",
   "    \u003clink rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"./assets/icons/apple-touch-icon.png\"\u003e",
   "    \u003clink rel=\"manifest\" href=\"./site.webmanifest\"\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=20260716m-1.2.7\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.0-09c35339\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\"\u003e",
@@ -1570,17 +12400,17 @@ const CANVAS_INDEX_HTML = [
   "            \u003cspan class=\"file-dot\"\u003e\u003c/span\u003e",
   "            \u003cspan class=\"nc-file-item-label\"\u003eNarrative.canvas\u003c/span\u003e",
   "          \u003c/button\u003e",
+  "          \u003cbutton class=\"nc-file-item\" data-file-id=\"document\"\u003e",
+  "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
+  "            \u003cspan class=\"nc-file-item-label\"\u003eDocument.md\u003c/span\u003e",
+  "          \u003c/button\u003e",
   "          \u003cbutton class=\"nc-file-item\" data-file-id=\"events\"\u003e",
   "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
   "            \u003cspan class=\"nc-file-item-label\"\u003eEvents Sheet.csv\u003c/span\u003e",
   "          \u003c/button\u003e",
   "          \u003cbutton class=\"nc-file-item\" data-file-id=\"characters\"\u003e",
   "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
-  "            \u003cspan class=\"nc-file-item-label\"\u003eCharacters.md\u003c/span\u003e",
-  "          \u003c/button\u003e",
-  "          \u003cbutton class=\"nc-file-item\" data-file-id=\"document\"\u003e",
-  "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
-  "            \u003cspan class=\"nc-file-item-label\"\u003eDocument.md\u003c/span\u003e",
+  "            \u003cspan class=\"nc-file-item-label\"\u003eLibrary.md\u003c/span\u003e",
   "          \u003c/button\u003e",
   "          \u003cbutton class=\"nc-file-item\" data-file-id=\"variables\"\u003e",
   "            \u003cspan class=\"file-dot muted\"\u003e\u003c/span\u003e",
@@ -1673,7 +12503,7 @@ const CANVAS_INDEX_HTML = [
   "            \u003cdiv id=\"minimap\" class=\"minimap\" role=\"button\" aria-label=\"Move canvas viewport\"\u003e\u003c/div\u003e",
   "          \u003c/div\u003e",
   "        \u003c/section\u003e",
-  "        \u003csection id=\"charactersPanel\" class=\"canvas-workspace-view document-panel\" aria-label=\"Characters\"\u003e\u003c/section\u003e",
+  "        \u003csection id=\"charactersPanel\" class=\"canvas-workspace-view document-panel\" aria-label=\"Narrative Library\"\u003e\u003c/section\u003e",
   "        \u003csection id=\"variablesPanel\" class=\"canvas-workspace-view document-panel\" aria-label=\"Variables\"\u003e\u003c/section\u003e",
   "        \u003csection id=\"eventsPanel\" class=\"canvas-workspace-view document-panel event-sheet-panel\" aria-label=\"Events Sheet\"\u003e\u003c/section\u003e",
   "        \u003csection id=\"documentPanel\" class=\"canvas-workspace-view document-panel document-source-panel\" aria-label=\"Document\"\u003e\u003c/section\u003e",
@@ -1804,7 +12634,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/aside\u003e",
   "",
   "      \u003cdiv id=\"inspectorFloatOverlay\" class=\"inspector-float-overlay\" hidden\u003e",
-  "        \u003csection class=\"inspector-float-window\" role=\"dialog\" aria-modal=\"false\" aria-labelledby=\"inspectorFloatTitle\"\u003e",
+  "        \u003csection class=\"inspector-float-window\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"inspectorFloatTitle\"\u003e",
   "          \u003cheader class=\"inspector-float-header\" data-floating-window-drag=\"inspector\"\u003e",
   "            \u003cdiv\u003e",
   "              \u003cspan class=\"pane-kicker\"\u003eInspector\u003c/span\u003e",
@@ -2068,7 +12898,17 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=20260716m-1.2.7\"\u003e\u003c/script\u003e",
+  "    \u003cdialog id=\"visionBoardDialog\" class=\"vision-board-dialog\" aria-label=\"Vision board\"\u003e",
+  "      \u003csection class=\"vision-board-dialog-shell\"\u003e",
+  "        \u003cheader class=\"vision-board-dialog-header\"\u003e",
+  "          \u003cdiv\u003e\u003cspan class=\"pane-kicker\"\u003eVISION BOARD\u003c/span\u003e\u003ch2 id=\"visionBoardTitle\"\u003eLinked files\u003c/h2\u003e\u003c/div\u003e",
+  "          \u003cbutton class=\"icon-button\" type=\"button\" data-action=\"close-vision-board\" aria-label=\"Close vision board\" title=\"Close vision board\"\u003e×\u003c/button\u003e",
+  "        \u003c/header\u003e",
+  "        \u003cdiv id=\"visionBoardCanvas\" class=\"vision-board-canvas is-focused\" aria-label=\"Move linked images\"\u003e\u003c/div\u003e",
+  "      \u003c/section\u003e",
+  "    \u003c/dialog\u003e",
+  "",
+  "    \u003cscript src=\"./app.js?v=1.3.0-09c35339\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -2098,6 +12938,8 @@ function installNarrativeCanvasApp() {
   const NODE_TYPE_ICON_MAX_UNITS = 3;
   const RETIRED_NODE_TYPES = new Set(["Condition", "Set"]);
   const SAVED_STATE_VERSION = 1;
+  const CODEX_KINDS = ["Character", "Location", "Item", "Lore"];
+  const CODEX_ALL_FILTER = "All";
   const WEB_LANGUAGE_STORAGE_KEY = "narrative-canvas-language-v1";
   const FRAME_CONTAINMENT_INDEX_CELL_SIZE = 1024;
   const PLAYBOOK_FILE_NAME = "Playbook.json";
@@ -2231,14 +13073,31 @@ function installNarrativeCanvasApp() {
   const LEGACY_EVENT_FRAME_COLORS = new Set(["#98c379"]);
   const DIRECT_NODE_FIELD_KEYS = new Set(["choices"]);
   const INLINE_NODE_FIELD_KEYS = new Set(["title", "body"]);
-  const CAST_RELATIONS = ["POV", "Speaker", "Present", "Mentioned", "Target", "Owner"];
+  const CAST_RELATIONS = ["POV", "Speaker", "Present", "Mentioned", "Target", "Owner", "Setting", "Featured", "Used", "Referenced", "Revealed"];
   const CAST_RELATION_LABELS = {
     POV: "POV",
     Speaker: "Speaker",
     Present: "Present",
     Mentioned: "Mentioned",
     Target: "Target",
-    Owner: "Owner"
+    Owner: "Owner",
+    Setting: "Setting",
+    Featured: "Featured",
+    Used: "Used",
+    Referenced: "Referenced",
+    Revealed: "Revealed"
+  };
+  const CODEX_RELATIONS_BY_KIND = {
+    Character: ["POV", "Speaker", "Present", "Mentioned", "Target", "Owner"],
+    Location: ["Setting", "Mentioned"],
+    Item: ["Featured", "Used", "Owner", "Target", "Mentioned"],
+    Lore: ["Referenced", "Revealed", "Mentioned"]
+  };
+  const CODEX_DEFAULT_RELATION_BY_KIND = {
+    Character: "Present",
+    Location: "Setting",
+    Item: "Featured",
+    Lore: "Referenced"
   };
   const CHARACTER_BACKLINK_GROUP_DEFS = [
     { id: "Speaker", label: "Speaker scenes" },
@@ -2247,9 +13106,14 @@ function installNarrativeCanvasApp() {
     { id: "POV", label: "POV scenes" },
     { id: "Target", label: "Target scenes" },
     { id: "Owner", label: "Owned nodes" },
+    { id: "Setting", label: "Set at" },
+    { id: "Featured", label: "Featured in" },
+    { id: "Used", label: "Used in" },
+    { id: "Referenced", label: "Referenced in" },
+    { id: "Revealed", label: "Revealed in" },
     { id: "EventFrames", label: "Frames" }
   ];
-  const CHARACTER_BACKLINK_PREVIEW_LIMIT = 6;
+  const CODEX_IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i;
   const DOCUMENT_RENDER_INITIAL_LIMIT = 80;
   const DOCUMENT_RENDER_INCREMENT = 80;
   const CANVAS_RENDER_PADDING = 420;
@@ -2403,7 +13267,7 @@ function installNarrativeCanvasApp() {
     { key: "eventType", label: "Event Type", width: "170px" },
     { key: "beatList", label: "Beat", width: "180px" },
     { key: "eventDescription", label: "Description", width: "360px" },
-    { key: "characterEncountered", label: "Characters", width: "320px" }
+    { key: "characterEncountered", label: "Library references", width: "320px" }
   ];
 
   // Canonical order of the built-in event columns. Each event-frame type carries
@@ -2525,9 +13389,9 @@ function installNarrativeCanvasApp() {
         reason: "原因"
       },
       characters: [
-        { id: "c0", name: "你", role: "第一次使用者", voice: "按节点顺序阅读说明。", notes: "正文里的 {protagonist} 显示为这个角色名；角色页按出场顺序列出相关节点。" },
+        { id: "c0", name: "你", role: "第一次使用者", voice: "按节点顺序阅读说明。", notes: "正文里的 {protagonist} 显示为这个角色名；资料库按出场顺序列出相关节点。" },
         { id: "c1", name: "向导", role: "解说", voice: "在对话节点里说明下一步操作。", notes: "演示对话节点的发言者，以及 Speaker / Present 角色关系。" },
-        { id: "c2", name: "作者", role: "内容创作者", voice: "从写作角度说明节点和对白如何使用。", notes: "在对话节点发言，并演示角色页反链。" },
+        { id: "c2", name: "作者", role: "内容创作者", voice: "从写作角度说明节点和对白如何使用。", notes: "在对话节点发言，并演示资料库反链。" },
         { id: "c3", name: "编辑", role: "内容编辑", voice: "关注结构、可达性和信息是否清楚。", notes: "在复核节点发言，并演示 Mentioned 关系。" },
         { id: "c4", name: "校对员", role: "状态复核", voice: "指出变量、条件和效果的读写位置。", notes: "关联校验、演示预览和状态复核节点。" },
         { id: "c5", name: "读者", role: "未来的读者", voice: "最终会读到这个故事的人。", notes: "演示“被提及”这一角色关系。" }
@@ -2545,7 +13409,7 @@ function installNarrativeCanvasApp() {
           { id: "opt_open_playbook", label: "先看演示设置如何门控选项", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
         n5: { title: "效果改变了变量", body: "所选选项已执行效果，workflow_progress 变为第 {workflow_progress} 步。后续节点和选项可以读取该变量，决定是否出现。", cast: [{ characterId: "c0", role: "POV" }] },
-        n6: { title: "对话节点", body: "这是对话分支的独立反馈。每轮包含说话者和台词；说话者与角色同名时，角色页会自动建立反链。", turns: [{ speaker: "向导", line: "你选择了对话分支，所以这里展示多轮发言。" }, { speaker: "作者", line: "我的名字与角色表一致，角色页会列出这次出场。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+        n6: { title: "对话节点", body: "这是对话分支的独立反馈。每轮包含说话者和台词；说话者与人物条目同名时，资料库会自动建立反链。", turns: [{ speaker: "向导", line: "你选择了对话分支，所以这里展示多轮发言。" }, { speaker: "作者", line: "我的名字与人物条目一致，资料库会列出这次出场。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
         n20: { title: "演示设置反馈", body: "这个分支展示门控选项：上一选项只有在 script_builder_seen 为 true 时才可用。条件决定能不能选，选择后效果负责写入 data_integrity 和 route；两者分工清楚，后续校验也更容易定位。", customFields: { evidence: "选项条件 / 选择后效果", owner: "演示设置", outcome: "确认门控条件与状态写入" }, cast: [{ characterId: "c4", role: "Owner" }] },
         e2: { title: "第二章：条件和效果", body: "这一段说明条件和效果的配合方式：选项用「选择后效果」改变变量，节点用「条件要求」决定能否通过。", beatList: "选项效果 / 节点效果 / 变量动作", eventType: "状态逻辑", eventDescription: "选项、节点和变量动作都能写状态；校验页汇总每个变量的写入位置和读取位置。", location: "演示设置", timeWeather: "梳理逻辑", questEpisode: "导览-02", status: "进行中" },
         cf1: { title: "对话框", body: "这是对话框（会话框）。可用于圈定一组对话或状态说明节点；折叠后仍保留为画布结构。", customFields: { participants: "向导 / 作者 / 校对员", summary: "变量确定后，检查每条路线在预览中是否可达。" }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
@@ -2555,7 +13419,7 @@ function installNarrativeCanvasApp() {
           { id: "opt_action_rules", label: "由变量动作写入状态", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
         n8: { title: "变量命名", body: "状态键建议使用小写英文下划线，例如 data_integrity。命名保持一致后，条件、效果、文本模板和校验页会更容易对应。", customFields: { evidence: "状态键命名", owner: "状态逻辑", outcome: "统一条件和效果里的变量名" }, cast: [{ characterId: "c4", role: "Owner" }] },
-        n9: { title: "角色和反链", body: "记录节点可保存来源、备注和相关角色。校对员负责确认变量的读写位置，编辑负责检查角色名是否一致；角色页会按出场顺序归并他们发言、在场或被提及的节点。", customFields: { recorder: "校对员", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
+        n9: { title: "资料库和反链", body: "记录节点可保存来源、备注和相关人物。校对员负责确认变量的读写位置，编辑负责检查人物名是否一致；资料库会按出场顺序归并他们发言、在场或被提及的节点。", customFields: { recorder: "校对员", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
         n23: { title: "变量动作反馈", body: "变量动作适合处理不依附某个选项或节点行的状态写入。这个分支把一条记录追加到 walkthrough_notes，并提高 review_pressure；随后与其它路线一起进入条件门。", customFields: { evidence: "变量动作", owner: "演示设置", outcome: "写入复核记录并继续主线" }, cast: [{ characterId: "c4", role: "Owner" }] },
         n10: { title: "条件门（节点要求）", body: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
         e3: { title: "第三章：整理和复核", body: "这一段使用分支—收束结构：三种复核操作分别给出反馈，然后汇合到最后练习。事件表字段记录状态、风险和说明对象。", beatList: "状态索引 / 三种复核 / 收束", eventType: "内容复核", eventDescription: "确认变量、条件、文本模板和节点备注是否一致。", location: "复核面板", timeWeather: "整理阶段", questEpisode: "导览-03", status: "待检查", clueStatus: "进行中", risk: "中", evidenceOwner: "校对员" },
@@ -2670,7 +13534,7 @@ function installNarrativeCanvasApp() {
         reason: "Reason"
       },
       characters: [
-        { id: "c0", name: "You", role: "First-time user", voice: "Read each node in order.", notes: "Body text renders {protagonist} as this character name; the Characters page lists related nodes in story order." },
+        { id: "c0", name: "You", role: "First-time user", voice: "Read each node in order.", notes: "Body text renders {protagonist} as this character name; Narrative Library lists related nodes in story order." },
         { id: "c1", name: "Guide", role: "Narrator", voice: "Explains the next operation in dialog nodes.", notes: "Demonstrates a Dialog speaker and the Speaker / Present roles." },
         { id: "c2", name: "Writer", role: "Content creator", voice: "Explains nodes and dialog from a writing perspective.", notes: "Speaks in a Dialog node and demonstrates character backlinks." },
         { id: "c3", name: "Editor", role: "Content editor", voice: "Checks structure, reachability, and clarity.", notes: "Speaks during review and demonstrates the Mentioned role." },
@@ -2690,7 +13554,7 @@ function installNarrativeCanvasApp() {
           { id: "opt_open_playbook", label: "See Playbook gate an option", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
         n5: { title: "An Effect Changed a Variable", body: "The selected option ran an effect and set workflow_progress to step {workflow_progress}. Later nodes and options can read this variable to decide whether to appear.", cast: [{ characterId: "c0", role: "POV" }] },
-        n6: { title: "The Dialog Node", body: "This is the dialog branch's distinct feedback. Each turn has a speaker and a line; matching a speaker to a character name creates a backlink on the Characters page.", turns: [{ speaker: "Guide", line: "You chose the dialog branch, so this node demonstrates multiple turns." }, { speaker: "Writer", line: "My name matches the character list, so the Characters page records this appearance." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+        n6: { title: "The Dialog Node", body: "This is the dialog branch's distinct feedback. Each turn has a speaker and a line; matching a speaker to a Character entry creates a backlink in Narrative Library.", turns: [{ speaker: "Guide", line: "You chose the dialog branch, so this node demonstrates multiple turns." }, { speaker: "Writer", line: "My name matches a Character entry, so Narrative Library records this appearance." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
         n20: { title: "Playbook Feedback", body: "This branch demonstrates a gated option. The previous option was available only when script_builder_seen was true. Its condition controlled availability; its effects wrote data_integrity and route. Keeping those jobs separate makes validation easier.", customFields: { evidence: "Choice condition / on-choose effects", owner: "Playbook", outcome: "Confirm gating and state writes" }, cast: [{ characterId: "c4", role: "Owner" }] },
         e2: { title: "Chapter 2: Conditions and Effects", body: "This chapter shows how conditions and effects work together: options change variables with on-choose effects, and node requirements decide whether the route can continue.", beatList: "Choice effects / node effects / variable actions", eventType: "State Logic", eventDescription: "Options, nodes, and variable actions all write state; Validation shows where each variable is written and read.", location: "Playbook", timeWeather: "Working out the logic", questEpisode: "Tour-02", status: "In progress" },
         cf1: { title: "The Dialog Frame", body: "This is a Dialog Frame. Use it to group dialog or state explanation nodes; when collapsed, it remains a canvas structure.", customFields: { participants: "Guide / Writer / Reviewer", summary: "Once variables are set, check that each route is reachable in preview." }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
@@ -2700,7 +13564,7 @@ function installNarrativeCanvasApp() {
           { id: "opt_action_rules", label: "Write state in a variable action", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
         ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
         n8: { title: "Naming Variables", body: "Use lower-case snake_case state keys, such as data_integrity. Consistent names make conditions, effects, text templates, and Validation easier to match.", customFields: { evidence: "State-key naming", owner: "State logic", outcome: "Use one variable name across conditions and effects" }, cast: [{ characterId: "c4", role: "Owner" }] },
-        n9: { title: "Characters and Backlinks", body: "A note node can store source, remarks, and related characters. The Reviewer checks variable reads and writes, while the Editor checks character naming; the Characters page groups where they speak, appear, or are mentioned in story order.", customFields: { recorder: "Reviewer", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
+        n9: { title: "Library and Backlinks", body: "A note node can store sources, remarks, and related Characters. The Reviewer checks variable reads and writes, while the Editor checks Character naming; Narrative Library groups where they speak, appear, or are mentioned in story order.", customFields: { recorder: "Reviewer", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
         n23: { title: "Variable Action Feedback", body: "Variable actions handle state writes that do not belong to one option or node row. This branch appends a record to walkthrough_notes and raises review_pressure, then joins the other routes at the condition gate.", customFields: { evidence: "Variable action", owner: "Playbook", outcome: "Write a review record and continue" }, cast: [{ characterId: "c4", role: "Owner" }] },
         n10: { title: "A Condition Gate", body: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
         e3: { title: "Chapter 3: Organize and Review", body: "This chapter uses branch-and-bottleneck structure: three review actions give distinct feedback, then converge on the final practice step. Events Sheet fields track status, risk, and subject.", beatList: "State index / three review actions / convergence", eventType: "Content Review", eventDescription: "Confirm that variables, conditions, text templates, and node notes match.", location: "Review panel", timeWeather: "Organizing", questEpisode: "Tour-03", status: "Needs check", clueStatus: "Open", risk: "Medium", evidenceOwner: "Reviewer" },
@@ -2998,9 +13862,54 @@ function installNarrativeCanvasApp() {
     };
   }
 
+  // Post-render UI restore (focus, selection, scroll) runs on a macrotask instead of
+  // requestAnimationFrame: rAF can be starved under headless/virtual-time test runs and
+  // throttled iframes, which silently drops the restore. Keep rAF for animation and
+  // layout-measurement scheduling only.
+  function runAfterRender(callback) {
+    window.setTimeout(callback, 0);
+  }
+
+  // Shadow-DOM safety: capture listeners bound on `document` receive retargeted events
+  // for shadow content (the target becomes the shadow host); composedPath()[0] restores
+  // the real target. In the non-shadow web build this returns event.target unchanged.
+  function getComposedEventTarget(event) {
+    if (typeof event?.composedPath === "function") {
+      const path = event.composedPath();
+      if (path && path.length) return path[0];
+    }
+    return event?.target || null;
+  }
+
+  // getScopeActiveElement() reports the shadow host for focus inside a shadow tree;
+  // dig into the shadow root for the real focused element.
+  function getScopeActiveElement() {
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    return active;
+  }
+
+  // Shared arrow-key navigation for dropdown suggestion lists: moves the `.active`
+  // class through `options`, syncs aria-selected, scrolls the pick into view, and
+  // returns it. Callers keep their own open/close and Enter/Escape semantics.
+  function moveActiveSuggestion(options, direction) {
+    if (!options.length) return null;
+    const currentIndex = options.findIndex((option) => option.classList.contains("active"));
+    const nextIndex = currentIndex < 0
+      ? (direction > 0 ? 0 : options.length - 1)
+      : (currentIndex + direction + options.length) % options.length;
+    options.forEach((option, index) => {
+      const active = index === nextIndex;
+      option.classList.toggle("active", active);
+      if (option.getAttribute("role") === "option") option.setAttribute("aria-selected", String(active));
+    });
+    options[nextIndex].scrollIntoView?.({ block: "nearest" });
+    return options[nextIndex];
+  }
+
   const fileViews = {
     adventure: "Narrative.canvas",
-    characters: "Characters.md",
+    characters: "Library.md",
     events: "Events Sheet.csv",
     variables: PLAYBOOK_FILE_NAME,
     document: "Document.md"
@@ -3008,10 +13917,10 @@ function installNarrativeCanvasApp() {
 
   const fileViewLabels = {
     adventure: "Narrative canvas",
-    characters: "Characters",
+    characters: "Narrative Library",
     events: "Events sheet",
     variables: "Playbook",
-    document: "Document"
+    document: "Edit document"
   };
 
   const uiTranslations = {
@@ -3120,6 +14029,7 @@ function installNarrativeCanvasApp() {
       "Add a variable definition before adding a variable action.": "添加变量动作前，请添加变量定义。",
       "Advanced JSON": "高级 JSON",
       "All": "全部",
+      "All entries": "全部条目",
       "All characters visible": "显示全部角色",
       "All characters visible.": "全部角色已显示。",
       "All event rows visible": "显示全部事件行",
@@ -3149,18 +14059,64 @@ function installNarrativeCanvasApp() {
       "Buttons": "按钮",
       "Browser storage": "浏览器存储",
       "A new project file will be created when possible.": "满足创建条件时，新建项目文件。",
+      "Add entry": "新增资料条目",
       "Cancel": "取消",
       "Canvas": "画布",
       "Canvas quick menu": "画布快捷菜单",
       "Category": "分类",
+      "Character": "人物",
+      "Narrative Library": "资料库",
+      "Comma-separated tags": "使用逗号分隔标签",
+      "Add tag...": "添加标签……",
+      "Add tag": "添加标签",
+      "Remove tag: {tag}": "删除标签：{tag}",
+      "Tag added.": "已添加标签。",
+      "Tag removed.": "已删除标签。",
+      "Tag suggestions": "标签建议",
       "Center": "居中",
       "Center canvas": "画布居中",
       "Characters": "角色",
       "Characters Markdown exported.": "角色 Markdown 已导出。",
       "Characters JSON exported.": "角色 JSON 已导出。",
-      "Characters.md opened.": "Characters.md 已打开。",
+      "Library.md opened.": "Library.md 已打开。",
+      "Narrative Library Markdown exported.": "资料库 Markdown 已导出。",
+      "Narrative Library JSON exported.": "资料库 JSON 已导出。",
+      "Library file": "资料文件",
+      "Image file": "预览图文件",
+      "Open file": "打开文件",
+      "Choose image": "选择预览图",
+      "Preview image": "预览图",
+      "Hide image": "隐藏预览图",
+      "Search or choose an image file": "搜索或选择预览图文件",
+      "Search images in vault": "搜索库中图片",
+      "Click or drop an image here": "点击选择，或将图片拖到这里",
+      "Drop an image from the vault or your computer": "可从库文件区或电脑拖入图片",
+      "Replace image": "更换预览图",
+      "Remove image": "移除预览图",
+      "Close image picker": "关闭图片选择器",
+      "Library files reloaded.": "资料文件已重新载入。",
+      "Could not reload library files.": "无法重新载入资料文件。",
       "Search character: {name}": "搜索角色：{name}",
+      "Open library entry: {name}": "打开资料条目：{name}",
       "Cast": "演员表",
+      "Library references": "资料",
+      "Library mentions": "资料引用",
+      "Library entry": "资料条目",
+      "Relation": "关系",
+      "Select library entry...": "选择资料条目...",
+      "No library entries yet": "还没有资料条目",
+      "No manual library references.": "还没有手动资料引用。",
+      "Select a library entry first.": "请先选择资料条目。",
+      "Library reference added.": "已添加资料引用。",
+      "Library reference removed.": "已移除资料引用。",
+      "Library references reordered.": "资料引用顺序已调整。",
+      "Remove library reference": "移除资料引用",
+      "Drag to reorder reference": "拖动调整资料顺序",
+      "Drag to reorder linked file": "拖动调整库文件顺序",
+      "Linked files reordered.": "库文件已重新排序。",
+      "Search or choose entry...": "搜索或选择资料条目……",
+      "Show all entries": "显示全部条目",
+      "No matching entries.": "没有匹配的条目。",
       "Choice: {label}": "选择：{label}",
       "Focus source Choice node: {label}": "聚焦来源选择节点：{label}",
       "Focus next node: {title}": "聚焦下一个节点：{title}",
@@ -3235,6 +14191,35 @@ function installNarrativeCanvasApp() {
       "Content": "内容",
       "Choices": "选项",
       "Custom fields": "自定义字段",
+      "Add field": "添加字段",
+      "Referenced nodes": "被引用的节点",
+      "Field name": "字段名",
+      "Field value": "字段值",
+      "Remove field": "删除字段",
+      "No custom fields yet. Fields sync to the entry's markdown frontmatter.": "还没有自定义字段。字段会同步到条目 markdown 文件的 frontmatter。",
+      "Field name {key} is reserved.": "字段名 {key} 为保留字段。",
+      "Category fields": "分类字段模板",
+      "Library": "资料库",
+      "Add category": "新增分类",
+      "Category name": "分类名称",
+      "Remove category": "删除分类",
+      "Category {name} already exists.": "分类 {name} 已存在。",
+      "Category {name} added.": "已新增分类 {name}。",
+      "Category {name} removed.": "已删除分类 {name}。",
+      "Category {name} still has {count} entries. Move or remove them first.": "分类 {name} 下还有 {count} 个条目，请先移动或删除它们。",
+      "Move or remove its entries first.": "请先移动或删除该分类下的条目。",
+      "Summary": "简介",
+      "New field name": "新字段名",
+      "Remove template field: {key}": "移除模板字段：{key}",
+      "Remove from template. Entry values are kept.": "从模板移除。条目中的已有值会保留。",
+      "Field {key} already in the template.": "模板中已有字段 {key}。",
+      "Field {key} added to {count} entries.": "字段 {key} 已添加到 {count} 个条目。",
+      "Field {key} removed from the template. Entry values are kept.": "已从模板移除字段 {key}，条目中的已有值保留。",
+      "Recent cards": "刚刚经过的卡片",
+      "Showing the last {count} cards.": "仅显示最近 {count} 张卡片。",
+      "Return to this card": "回到此卡片",
+      "Rewind the story to this card. Later steps are discarded.": "回到这张卡片重新开始。之后的步骤会被丢弃。",
+      "Returned to card {number}.": "已回到第 {number} 张卡片。",
       "Choice prompt": "选择提示",
       "Choice text": "选项文本",
       "Choices, one per line": "选项，每行一个",
@@ -3345,6 +14330,7 @@ function installNarrativeCanvasApp() {
       "Files": "文件",
       "Find": "查找",
       "Find character": "查找角色",
+      "Find library entries": "查找资料",
       "Find event": "查找事件",
       "Find nodes": "查找节点",
       "Find in Playbook": "在演示设置中查找",
@@ -3373,6 +14359,8 @@ function installNarrativeCanvasApp() {
       "Inspector": "检查器",
       "If": "如果",
       "Item": "物品",
+      "Location": "地点",
+      "Lore": "设定",
       "Item State": "物品状态",
       "Key": "键",
       "Light": "浅色",
@@ -3442,7 +14430,7 @@ function installNarrativeCanvasApp() {
       "Node Library": "节点库",
       "Node visit": "节点进入时",
       "Nodes": "节点",
-      "Notes": "备注",
+      "Notes": "笔记",
       "Note": "备注",
       "Opening text": "开场文本",
       "On visit": "进入时",
@@ -3508,6 +14496,11 @@ function installNarrativeCanvasApp() {
       "Present": "出场",
       "Mentioned": "提及",
       "Owner": "拥有者",
+      "Setting": "场景地点",
+      "Featured": "出现",
+      "Used": "使用",
+      "Referenced": "引用",
+      "Revealed": "揭示",
       "Show": "显示",
       "Show this frame type in Events Sheet": "在事件表中显示这一类框架",
       "Show fewer": "收起",
@@ -3544,6 +14537,11 @@ function installNarrativeCanvasApp() {
       "Subtract": "减去",
       "System rule": "系统规则",
       "Target scenes": "目标场景",
+      "Set at": "作为地点",
+      "Featured in": "出现于",
+      "Used in": "使用于",
+      "Referenced in": "引用于",
+      "Revealed in": "揭示于",
       "Text": "文本",
       "Text source": "文本源",
       "Text Source Mode": "文本源模式",
@@ -3728,6 +14726,10 @@ function installNarrativeCanvasApp() {
       "Node requirements": "节点条件",
       "Node effects": "节点效果",
       "All characters are hidden.": "所有角色都已隐藏。",
+      "All entries are hidden.": "所有资料条目都已隐藏。",
+      "No library entries yet.": "还没有资料条目。",
+      "No library entries match the current filters.": "没有符合当前筛选条件的资料条目。",
+      "{visible} of {total} library entries shown": "显示 {total} 个资料条目中的 {visible} 个",
       "Variable Actions: state writes": "变量动作：状态写入",
       "Advanced JSON is for exact edits and compatibility checks, not the main workflow.": "高级 JSON 用于精确编辑和兼容检查；主要编辑入口为结构化表单。",
       "Use the Operation menu's Append option to keep the old value and add the new value to a list.": "在操作菜单中选择追加，可保留原列表并加入新值。",
@@ -3899,6 +14901,7 @@ function installNarrativeCanvasApp() {
       "Zoom in": "放大",
       "Zoom out": "缩小",
       "{characters} characters, {links} character links": "{characters} 个角色，{links} 条角色链接",
+      "{entries} library entries, {links} node links": "{entries} 个资料条目，{links} 条节点关联",
       ", focusing {name}": "，正在聚焦 {name}",
       "{count} event rows from canvas nodes": "{count} 行事件来自画布节点",
       "{count} event rows": "{count} 行事件",
@@ -3961,7 +14964,55 @@ function installNarrativeCanvasApp() {
       "Text input dialog is unavailable.": "文本输入弹窗不可用。",
       "Events Sheet columns restored.": "事件表列已恢复。",
       "Could not open project picker.": "无法打开项目选择器。",
+      "Could not open the linked vault file.": "无法打开关联的库文件。",
+      "Could not preview the linked vault file.": "无法预览关联的库文件。",
       "No saved project to reload.": "没有可重新加载的已保存项目。",
+      "No linked vault file.": "该节点尚未关联库文件。",
+      "File already linked.": "该文件已关联。",
+      "Vault file linked.": "库文件已关联。",
+      "Vault file removed.": "库文件已移除。",
+      "Image preview size": "图片显示大小",
+      "Board": "画板",
+      "Open board": "打开画板",
+      "Create board": "创建画板",
+      "Create a native canvas board for this entry. Its images and linked files move onto the board.": "为此条目创建原生 canvas 画板；现有预览图和库文件会迁入画板。",
+      "Board created.": "画板已创建。",
+      "Could not create the board.": "无法创建画板。",
+      "Detach board": "解除画板",
+      "Resize image": "调整图片大小",
+      "Bring to front": "置于顶层",
+      "Bring forward": "上移一层",
+      "Send backward": "下移一层",
+      "Send to back": "置于底层",
+      "Image layer updated.": "图层顺序已更新。",
+      "Board detached. The canvas file is kept in the vault.": "已解除画板关联；.canvas 文件仍保留在库中。",
+      "Loading board...": "正在加载画板……",
+      "Could not load the board.": "无法加载画板。",
+      "The board is empty.": "画板还是空的。",
+      "Icon": "图标",
+      "Search icon image": "搜索图标图片",
+      "Remove icon": "移除图标",
+      "Icon updated.": "图标已更新。",
+      "Icon removed.": "图标已移除。",
+      "Not linked": "未关联",
+      "Open vault file": "打开库文件",
+      "Add images": "添加图片",
+      "Add local images": "从电脑导入",
+      "Preview images": "预览图",
+      "Vision board": "视觉板",
+      "Focus vision board": "聚焦视觉板",
+      "Linked images": "关联图片",
+      "Move linked images": "移动关联图片",
+      "Close vision board": "关闭视觉板",
+      "Add vault file": "添加库文件",
+      "Remove vault file": "移除库文件",
+      "Move linked file up": "上移关联文件",
+      "Move linked file down": "下移关联文件",
+      "Preview linked file on canvas": "在画布中预览关联文件",
+      "Loading linked file...": "正在读取关联文件……",
+      "Linked file is empty.": "关联文件为空。",
+      "Linked file preview enabled.": "已开启关联文件预览。",
+      "Linked file preview disabled.": "已关闭关联文件预览。",
       "Could not clear browser storage.": "无法清除浏览器存储。",
       "Browser storage cleared. Blank project saved.": "浏览器存储已清除，空项目已保存。",
       "Browser storage cleared. Blank project loaded.": "浏览器存储已清除，空项目已载入。",
@@ -3981,8 +15032,34 @@ function installNarrativeCanvasApp() {
       "Character name is required.": "角色名称不能为空。",
       "Character focus cleared.": "角色聚焦已清除。",
       "Character search cleared.": "角色搜索已清除。",
+      "Entry name is required.": "资料名称不能为空。",
+      "Library focus cleared.": "资料聚焦已清除。",
+      "Library search cleared.": "资料搜索已清除。",
+      "Search library: {name}": "搜索资料：{name}",
+      "All entries visible.": "全部资料条目已显示。",
       "Character links collapsed.": "角色关联已折叠。",
       "Character links expanded.": "角色关联已展开。",
+      "Library links collapsed.": "资料关联已折叠。",
+      "Library links expanded.": "资料关联已展开。",
+      "Library category filter cleared.": "已清除资料库分类筛选。",
+      "Library tag filter cleared.": "已清除资料库标签筛选。",
+      "Library entry added.": "已新增资料条目。",
+      "Library entry deleted.": "已删除资料条目。",
+      "Library image assigned.": "已设置资料预览图。",
+      "Library image removed.": "已移除资料预览图。",
+      "Could not import image.": "无法导入预览图。",
+      "Back to all entries": "返回全部资料",
+      "Open entry: {name}": "打开资料：{name}",
+      "{count} linked nodes": "{count} 个关联节点",
+      "Drop an image file.": "请拖入图片文件。",
+      "Delete entry": "删除条目",
+      "Hidden entries": "已隐藏条目",
+      "Show entry": "显示条目",
+      "Show all entries": "显示全部条目",
+      "Atmosphere": "氛围",
+      "Reference source": "参考来源",
+      "Choose vault file": "选择库中文件",
+      "Clear vault file": "清除关联文件",
       "Select a character first.": "请先选择角色。",
       "Cast link added.": "演员关联已添加。",
       "Cast link removed.": "演员关联已移除。",
@@ -4011,6 +15088,14 @@ function installNarrativeCanvasApp() {
       "New project created, but vault file creation failed.": "新项目已创建，但 vault 文件创建失败。",
       "New project created.": "新项目已创建。",
       "Project saved.": "项目已保存。",
+      "Link this node to notes or other files in the vault.": "将此节点关联到库中的笔记或其他文件。",
+      "Vault file": "库文件",
+      "Vault file link cleared.": "已清除库文件关联。",
+      "Vault file linked.": "已关联库文件。",
+      "Search or choose a vault file": "搜索或选择库文件",
+      "Vault file suggestions": "库文件建议",
+      "Vault links open only in Obsidian.": "库文件关联只能在 Obsidian 中打开。",
+      "Tags": "标签",
       "Project save failed.": "项目保存失败。",
       "New project created, but vault JSON creation failed.": "新项目已创建，但 vault JSON 创建失败。",
       "Sample project loaded in browser storage.": "示例项目已加载到浏览器存储。",
@@ -4067,6 +15152,7 @@ function installNarrativeCanvasApp() {
       "{label} reordered.": "{label} 已重新排序。",
       "Link created: {label}.": "连线已创建：{label}。",
       "Document": "文档",
+      "Edit document": "编辑文档",
       "Plain text": "纯文本",
       "Source": "文档源",
       "Project document": "项目文档",
@@ -4175,6 +15261,8 @@ function installNarrativeCanvasApp() {
     reconnectingEnd: null,
     characterFocusId: null,
     characterSearch: "",
+    codexKindFilter: CODEX_ALL_FILTER,
+    codexTagFilter: "",
     eventSearch: "",
     playbookSearch: "",
     searchIndex: -1,
@@ -4214,7 +15302,13 @@ function installNarrativeCanvasApp() {
     documentChromeCollapsed: false,
     documentHighlightFrame: null,
     autoSaveTimer: null,
-    characterBacklinkExpandedIds: new Set(),
+    characterBacklinkGroupCollapsedKeys: new Set(),
+    codexSelectedEntryId: "",
+    codexImagePickerCharacterId: "",
+    visionBoardContext: null,
+    visionBoardDrag: null,
+    visionBoardLayerMenu: null,
+    visionBoardLayerMenuDismiss: null,
     choiceOptionExpandedIds: new Set(),
     choiceOptionConditionExpandedIds: new Set(),
     nodeSectionExpandedIds: new Set(["dialogTurns"]),
@@ -4265,8 +15359,18 @@ function installNarrativeCanvasApp() {
     frameCanvasReturnView: null,
     search: "",
     eventRowDrag: null,
+    nodeCastDrag: null,
+    nodeVaultFileDrag: null,
+    codexVaultFileDrag: null,
+    aiButtonDrag: null,
+    aiButtonPos: null,
+    aiButtonClickSuppressed: false,
     eventColumnResize: null,
     mention: null,
+    vaultFileSuggestions: null,
+    vaultFileSuggestionRequestId: 0,
+    vaultFileSuggestionSuppressFocusOnce: false,
+    vaultFilePreviewCache: new Map(),
     characterRenderContext: null,
     characterIndex: null,
     nodeIndex: null,
@@ -4312,6 +15416,8 @@ function installNarrativeCanvasApp() {
     createSampleProjectFile,
     ensureVaultFile: ensureVaultProjectFile,
     loadVaultProject: loadCurrentVaultProject,
+    reloadCodexFiles,
+    refreshCodexCanvasPreviews,
     importStoryMarkdownText,
     importStoryLayoutText,
     importStateSchemaText
@@ -4434,7 +15540,9 @@ function installNarrativeCanvasApp() {
   function bindDom(scopeOverride = null) {
     dom.scope = scopeOverride || resolveDomScope();
     dom.root = dom.scope.querySelector(".app-shell");
-    dom.themeHost = dom.root?.closest(".narrative-canvas-plugin-host") || document.documentElement;
+    dom.themeHost = (typeof ShadowRoot === "function" && dom.scope instanceof ShadowRoot ? dom.scope.host : null)
+      || dom.root?.closest(".narrative-canvas-plugin-host")
+      || document.documentElement;
     dom.sidebarLeft = dom.scope.querySelector("[data-sidebar='left']");
     dom.sidebarRight = dom.scope.querySelector("[data-sidebar='right']");
     dom.sidebarToggles = [...dom.scope.querySelectorAll("[data-sidebar-toggle]")];
@@ -4544,6 +15652,9 @@ function installNarrativeCanvasApp() {
     dom.genericTextButton = dom.scope.querySelector("#genericTextButton");
     dom.playbookHelpDialog = dom.scope.querySelector("#playbookHelpDialog");
     dom.nodeRequiredDialog = dom.scope.querySelector("#nodeRequiredDialog");
+    dom.visionBoardDialog = dom.scope.querySelector("#visionBoardDialog");
+    dom.visionBoardTitle = dom.scope.querySelector("#visionBoardTitle");
+    dom.visionBoardCanvas = dom.scope.querySelector("#visionBoardCanvas");
     dom.playTitle = dom.scope.querySelector("#playTitle");
     dom.playBody = dom.scope.querySelector("#playBody");
     dom.playActions = dom.scope.querySelector("#playActions");
@@ -4592,6 +15703,10 @@ function installNarrativeCanvasApp() {
     const eventRoot = dom.scope || document;
 
     dom.aiFloatingButton?.addEventListener("click", handleAiFloatingControlClick, { signal });
+    dom.aiFloatingButton?.addEventListener("pointerdown", handleAiButtonPointerDown, { signal });
+    window.addEventListener("pointermove", handleAiButtonPointerMove, { signal });
+    window.addEventListener("pointerup", handleAiButtonPointerUp, { signal });
+    window.addEventListener("pointercancel", handleAiButtonPointerUp, { signal });
     dom.aiFloatingWindow?.querySelector("[data-action='close-ai-window']")?.addEventListener("click", handleAiFloatingControlClick, { signal });
 
     eventRoot.addEventListener("pointerdown", handleFormControlPointerEvent, { signal });
@@ -4602,6 +15717,27 @@ function installNarrativeCanvasApp() {
     eventRoot.addEventListener("pointerdown", handleDialogColumnResizePointerDown, { signal });
     eventRoot.addEventListener("pointermove", handleGraphHoverPointerMove, { signal });
     eventRoot.addEventListener("click", handleDocumentClick, { signal });
+    eventRoot.addEventListener("scroll", handleWorkspacePanelScroll, { capture: true, signal });
+    eventRoot.addEventListener("dragover", handleVaultFileDragOver, { signal });
+    eventRoot.addEventListener("drop", handleVaultFileDrop, { signal });
+    eventRoot.addEventListener("dragend", clearVaultDropHighlights, { signal });
+    eventRoot.addEventListener("dragleave", (event) => {
+      if (!getVaultFileDropZone(event.relatedTarget)) clearVaultDropHighlights();
+    }, { signal });
+
+    // The Obsidian workspace resizes the leaf (its own sidebars, split drags) without any
+    // window resize event; observe the app root so layout reflows on every size change.
+    if (typeof ResizeObserver === "function" && dom.root) {
+      state.rootResizeObserver?.disconnect?.();
+      state.rootResizeObserver = new ResizeObserver(() => {
+        if (state.rootResizeTimer) window.clearTimeout(state.rootResizeTimer);
+        state.rootResizeTimer = window.setTimeout(() => {
+          state.rootResizeTimer = null;
+          handleWindowResize();
+        }, 80);
+      });
+      state.rootResizeObserver.observe(dom.root);
+    }
     eventRoot.addEventListener("contextmenu", handleContextMenu, { signal });
     eventRoot.addEventListener("input", handleInput, { signal });
     eventRoot.addEventListener("change", handleChange, { signal });
@@ -4610,6 +15746,14 @@ function installNarrativeCanvasApp() {
     eventRoot.addEventListener("keydown", handleKeyDown, { signal });
     eventRoot.addEventListener("keydown", handleWorkspaceSearchKeyDown, { signal });
     eventRoot.addEventListener("pointerdown", handleStoryPointerDown, { signal });
+    eventRoot.addEventListener("pointerdown", handleVaultFileSuggestionPointerDown, { signal });
+    eventRoot.addEventListener("dragover", handleCodexImageDragOver, { signal });
+    eventRoot.addEventListener("dragleave", handleCodexImageDragLeave, { signal });
+    eventRoot.addEventListener("drop", handleCodexImageDrop, { signal });
+    eventRoot.addEventListener("pointerdown", handleVisionBoardPointerDown, { signal });
+    eventRoot.addEventListener("pointermove", handleVisionBoardPointerMove, { signal });
+    eventRoot.addEventListener("pointerup", handleVisionBoardPointerUp, { signal });
+    eventRoot.addEventListener("pointercancel", handleVisionBoardPointerUp, { signal });
     dom.mentionPopover?.addEventListener("pointerdown", handleMentionPopoverPointerDown, { signal });
     document.addEventListener("pointerdown", handleGlobalAppPointerContext, { capture: true, signal });
     document.addEventListener("click", handleGlobalAppPointerContext, { capture: true, signal });
@@ -4632,6 +15776,7 @@ function installNarrativeCanvasApp() {
     window.addEventListener("pointercancel", handleDialogColumnResizePointerUp, { signal });
     window.addEventListener("pointermove", handleStoryPointerMove, { signal });
     window.addEventListener("pointerup", handleStoryPointerUp, { signal });
+    window.addEventListener("pointercancel", handleStoryPointerUp, { signal });
     window.addEventListener("keydown", handleGlobalHistoryKeyDown, { capture: true, signal });
     window.addEventListener("blur", hideNodeContextMenu, { signal });
     window.addEventListener("resize", handleWindowResize, { signal });
@@ -4715,6 +15860,9 @@ function installNarrativeCanvasApp() {
     dom.playRuleDialog.addEventListener("click", (event) => {
       if (event.target === dom.playRuleDialog) dom.playRuleDialog.close();
     }, { signal });
+    dom.visionBoardDialog?.addEventListener("click", (event) => {
+      if (event.target === dom.visionBoardDialog) closeVisionBoard();
+    }, { signal });
     dom.nodeTypeDialog.addEventListener("close", () => {
       if (dom.nodeTypeDialog.returnValue === "confirm") {
         const historyBefore = getHistorySnapshot();
@@ -4738,6 +15886,13 @@ function installNarrativeCanvasApp() {
 
   function handleAiFloatingControlClick(event) {
     if (event.__narrativeCanvasClickHandled) return;
+    // A drag that just ended must not toggle the window.
+    if (state.aiButtonClickSuppressed) {
+      state.aiButtonClickSuppressed = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const action = event.currentTarget?.dataset?.action;
     if (action !== "toggle-ai-window" && action !== "close-ai-window") return;
     event.preventDefault();
@@ -4746,9 +15901,75 @@ function installNarrativeCanvasApp() {
     toggleAiWindow(action === "close-ai-window" ? false : null);
   }
 
+  // The AI launcher is a draggable floating ball: drag moves it anywhere in its
+  // container, a plain click still toggles the assistant window.
+  function handleAiButtonPointerDown(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const button = dom.aiFloatingButton;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    state.aiButtonDrag = {
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      active: false
+    };
+  }
+
+  function handleAiButtonPointerMove(event) {
+    const drag = state.aiButtonDrag;
+    if (!drag) return;
+    if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+    drag.active = true;
+    setAiButtonPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY);
+    event.preventDefault();
+  }
+
+  function handleAiButtonPointerUp() {
+    const drag = state.aiButtonDrag;
+    state.aiButtonDrag = null;
+    if (drag?.active) state.aiButtonClickSuppressed = true;
+  }
+
+  function setAiButtonPosition(clientLeft, clientTop) {
+    const button = dom.aiFloatingButton;
+    const parent = button?.offsetParent;
+    if (!button || !parent) return;
+    const parentRect = parent.getBoundingClientRect();
+    const left = clamp(clientLeft - parentRect.left, 0, Math.max(0, parentRect.width - button.offsetWidth));
+    const top = clamp(clientTop - parentRect.top, 0, Math.max(0, parentRect.height - button.offsetHeight));
+    state.aiButtonPos = { left, top };
+    applyAiButtonPosition();
+  }
+
+  function applyAiButtonPosition() {
+    const button = dom.aiFloatingButton;
+    if (!button) return;
+    const pos = state.aiButtonPos;
+    if (!pos || !Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return;
+    // Only clamp against a laid-out container; a hidden leaf reports zero sizes and
+    // would jam the ball into the corner.
+    const parent = button.offsetParent;
+    const hasLayout = parent && parent.clientWidth > 60 && parent.clientHeight > 60;
+    const maxLeft = hasLayout ? Math.max(0, parent.clientWidth - button.offsetWidth) : Infinity;
+    const maxTop = hasLayout ? Math.max(0, parent.clientHeight - button.offsetHeight) : Infinity;
+    button.style.left = `${clamp(pos.left, 0, maxLeft)}px`;
+    button.style.top = `${clamp(pos.top, 0, maxTop)}px`;
+    button.style.right = "auto";
+    button.style.bottom = "auto";
+  }
+
   function destroyNarrativeCanvas() {
     eventController?.abort();
     eventController = null;
+    closeVisionBoardLayerMenu();
+    state.rootResizeObserver?.disconnect?.();
+    state.rootResizeObserver = null;
+    if (state.rootResizeTimer) {
+      window.clearTimeout(state.rootResizeTimer);
+      state.rootResizeTimer = null;
+    }
     if (state.canvasViewportRenderFrame) {
       window.cancelAnimationFrame(state.canvasViewportRenderFrame);
       state.canvasViewportRenderFrame = null;
@@ -4809,13 +16030,25 @@ function installNarrativeCanvasApp() {
     Object.keys(dom).forEach((key) => delete dom[key]);
   }
 
+  // The back-to-top button only appears after real scrolling, so it never sits on top
+  // of interactive rows while the reader is at the top of a document page. Any scroller
+  // inside a document-style panel counts (the document editor scrolls an inner element).
+  function handleWorkspacePanelScroll(event) {
+    const scroller = event.target;
+    if (!(scroller instanceof Element) || !scroller.closest?.(".document-panel")) return;
+    if (scroller.closest("[data-vault-file-suggestions], .cast-entry-suggestions")) return;
+    dom.root?.classList.toggle("workspace-scrolled", scroller.scrollTop > 240);
+  }
+
   function handleWindowResize() {
     hideNodeContextMenu();
     renderSidebarState();
     constrainFloatingWindow("play");
     constrainFloatingWindow("inspector");
     constrainFloatingWindow("ai");
+    applyAiButtonPosition();
     scheduleCanvasViewportRender();
+    if (state.activeFileId === "characters") scheduleCharacterMasonryLayout();
   }
 
   function getFloatingWindowElement(kind) {
@@ -4888,7 +16121,7 @@ function installNarrativeCanvasApp() {
   }
 
   function handleFloatingWindowOutsideClick(event) {
-    const target = event.target;
+    const target = getComposedEventTarget(event);
     if (!(target instanceof Element)) return;
     const clickGuard = state.floatingWindowClickGuard;
     if (clickGuard && Date.now() <= clickGuard.until && event.detail > 0) {
@@ -5518,6 +16751,8 @@ function installNarrativeCanvasApp() {
       view: state.view,
       characterFocusId: state.characterFocusId,
       characterSearch: state.characterSearch,
+      codexKindFilter: state.codexKindFilter,
+      codexTagFilter: state.codexTagFilter,
       eventSearch: state.eventSearch,
       playbookSearch: state.playbookSearch,
       playbookJsonOpen: state.playbookJsonOpen,
@@ -5710,6 +16945,8 @@ function installNarrativeCanvasApp() {
     state.view = normalizeView(payload.view);
     state.characterFocusId = payload.characterFocusId && getCharacterById(payload.characterFocusId) ? payload.characterFocusId : null;
     state.characterSearch = typeof payload.characterSearch === "string" ? payload.characterSearch : "";
+    state.codexKindFilter = normalizeCodexKindFilter(payload.codexKindFilter);
+    state.codexTagFilter = normalizeOptionalString(payload.codexTagFilter).trim();
     state.eventSearch = typeof payload.eventSearch === "string" ? payload.eventSearch : "";
     state.playbookSearch = typeof payload.playbookSearch === "string" ? payload.playbookSearch : "";
     state.playbookJsonOpen = Boolean(payload.playbookJsonOpen);
@@ -5743,10 +16980,16 @@ function installNarrativeCanvasApp() {
       "hide-node-type",
       "delete-custom-node-type",
       "add-character",
+      "add-codex-entry",
       "hide-character",
       "show-character",
       "show-all-characters",
       "delete-character",
+      "remove-codex-tag",
+      "add-codex-extra-field",
+      "remove-codex-extra-field",
+      "add-codex-template-field",
+      "remove-codex-template-field",
       "add-node-cast",
       "delete-node-cast",
       "add-node-effect",
@@ -6044,12 +17287,12 @@ function installNarrativeCanvasApp() {
       [".export-image-controls", "aria-label", "Image export"],
       ["#canvasViewport", "aria-label", "Node canvas"],
       ["#minimap", "aria-label", "Move canvas viewport"],
-      ["#charactersPanel", "aria-label", "Characters"],
+      ["#charactersPanel", "aria-label", "Narrative Library"],
       ["#variablesPanel", "aria-label", "Variables"],
       ["#eventsPanel", "aria-label", "Events Sheet"],
       ["#documentPanel", "aria-label", "Document"],
       ["#workspaceSearchControls", "aria-label", "Search"],
-      ["#mentionPopover", "aria-label", "Character mentions"],
+      ["#mentionPopover", "aria-label", "Library mentions"],
       [".playbook-scroll-top-button", "title", "Back to top"],
       [".playbook-scroll-top-button", "aria-label", "Back to top"],
       [".workspace-toc-button", "title", "Toggle outline"],
@@ -6073,7 +17316,7 @@ function installNarrativeCanvasApp() {
     localizeLabelText(".document-search-box", "Find");
     [
       ["#queryInput", "Find nodes"],
-      ["#characterSearchInput", "Find character"],
+      ["#characterSearchInput", "Find library entries"],
       ["#eventSearchInput", "Find event"],
       ["#playbookSearchInput", "Find in Playbook"],
       ["#documentSearchInput", "Find in document"],
@@ -7450,30 +18693,72 @@ function installNarrativeCanvasApp() {
 
   function renderCharactersPage() {
     const model = buildCharacterDocumentModel(getCharacterRenderContext());
+    const selectedEntry = state.codexSelectedEntryId
+      ? model.characters.find((entry) => entry.id === state.codexSelectedEntryId)
+      : null;
+    if (state.codexSelectedEntryId && !selectedEntry) state.codexSelectedEntryId = "";
+    if (selectedEntry) {
+      renderCodexEntryDetail(selectedEntry, model.context);
+      return;
+    }
     const limit = getDocumentRenderLimit("characters");
     const shownCount = Math.min(model.visible.length, limit);
+    const masonryColumns = getCharacterMasonryColumnCount();
     dom.charactersPanel.innerHTML = `
-      <div class="document-shell">
+      <div class="document-shell codex-overview-shell">
         <header class="document-header">
           <div>
-            <span class="pane-kicker">Markdown</span>
-            <h2>Characters.md</h2>
+            <span class="pane-kicker">Library</span>
+            <h2>${t("Narrative Library")}</h2>
             <div class="document-meta" data-character-search-meta>${escapeHtml(formatCharacterMeta(model))}</div>
           </div>
           <div class="document-actions">
-            <button class="small-button" data-action="add-character">${t("Add character")}</button>
+            <button class="small-button" data-action="add-codex-entry">${t("Add entry")}</button>
             <button class="small-button" data-action="export-characters-md">${t("Export MD")}</button>
             <button class="small-button" data-action="export-characters-json">${t("Export JSON")}</button>
           </div>
         </header>
-        <div class="document-filter-bar" data-character-filter-bar>
-          ${renderCharacterFilterBar(model)}
-        </div>
+        <nav class="codex-category-tabs" data-codex-category-tabs aria-label="${escapeAttr(t("Category"))}">
+          ${renderCodexCategoryTabs(model)}
+        </nav>
+        <div class="codex-tag-filters" data-codex-tag-filters>${renderCodexTagFilters(model).trim()}</div>
+        <div class="codex-template-editor" data-codex-template-editor>${renderCodexTemplateEditorContent(model).trim()}</div>
+        <div class="document-filter-bar" data-character-filter-bar>${renderCharacterFilterBar(model).trim()}</div>
         ${renderHiddenCharacterRestoreBar(model)}
-        <div class="character-grid">
+        <div class="character-grid" data-masonry-columns="${masonryColumns}" style="--codex-masonry-columns:${masonryColumns}">
           ${renderCharacterCardsMarkup(model, limit)}
         </div>
         ${renderDocumentLimitNotice("characters", shownCount, model.visible.length)}
+      </div>
+    `;
+    scheduleCharacterMasonryLayout();
+    runAfterRender(hydrateCodexCanvasEmbeds);
+  }
+
+  function renderCodexEntryDetail(character, context = getCharacterRenderContext()) {
+    runAfterRender(hydrateCodexCanvasEmbeds);
+    const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
+    const backlinkCount = groups.reduce((total, group) => total + group.items.length, 0);
+    dom.charactersPanel.innerHTML = `
+      <div class="document-shell codex-detail-shell">
+        <header class="document-header codex-detail-header">
+          <div>
+            <button class="codex-detail-back" type="button" data-action="close-codex-entry-detail">
+              <span aria-hidden="true">←</span><span>${t("Back to all entries")}</span>
+            </button>
+            <span class="pane-kicker">${escapeHtml(t(character.kind))}</span>
+            <h2>${escapeHtml(character.name || t("Unnamed Character"))}</h2>
+          </div>
+        </header>
+        <div class="codex-detail-editor codex-detail-columns">
+          <aside class="codex-detail-references" aria-label="${escapeAttr(t("Referenced nodes"))}">
+            <h3 class="codex-detail-references-title">${t("Referenced nodes")} <small>${backlinkCount}</small></h3>
+            ${renderCharacterBacklinkSections(groups, character.id)}
+          </aside>
+          <div class="codex-detail-main">
+            ${renderCharacterCard(character, context, { includeBacklinks: false })}
+          </div>
+        </div>
       </div>
     `;
   }
@@ -7485,9 +18770,19 @@ function installNarrativeCanvasApp() {
     const focusedCharacter = getActiveCharacterFocus();
     const queryRaw = state.characterSearch || "";
     const query = queryRaw.trim().toLowerCase();
+    const kindFilter = normalizeCodexKindFilter(state.codexKindFilter);
+    const tagFilter = normalizeOptionalString(state.codexTagFilter).trim();
+    const categoryEntries = kindFilter === CODEX_ALL_FILTER
+      ? visibleCharacters
+      : visibleCharacters.filter((entry) => entry.kind === kindFilter);
+    const tagCounts = collectCodexTagCounts(categoryEntries);
+    const taggedEntries = tagFilter
+      ? categoryEntries.filter((entry) => parseCodexTags(entry.tags).some((tag) => tag.toLowerCase() === tagFilter.toLowerCase()))
+      : categoryEntries;
     const visible = query
-      ? visibleCharacters.filter((character) => characterMatchesSearch(character, query, context))
-      : visibleCharacters;
+      ? taggedEntries.filter((character) => characterMatchesSearch(character, query, context))
+      : taggedEntries;
+    const kindCounts = Object.fromEntries(getCodexKindsList().map((kind) => [kind, visibleCharacters.filter((entry) => entry.kind === kind).length]));
     return {
       context,
       characters,
@@ -7497,6 +18792,11 @@ function installNarrativeCanvasApp() {
       focusedCharacter,
       query,
       queryRaw,
+      kindFilter,
+      tagFilter,
+      tagCounts,
+      kindCounts,
+      hasFilters: Boolean(query || tagFilter || kindFilter !== CODEX_ALL_FILTER),
       linkCount: context.linkCount,
       totalCount: characters.length,
       hiddenCount: hidden.length,
@@ -7507,8 +18807,62 @@ function installNarrativeCanvasApp() {
   function formatCharacterMeta(model) {
     const focusText = model.focusedCharacter ? t(", focusing {name}", { name: model.focusedCharacter.name }) : "";
     const hiddenText = model.hiddenCount ? `, ${t("{count} hidden", { count: model.hiddenCount })}` : "";
-    if (model.query) return `${t("{visible} of {total} characters match {query}", { visible: model.visibleCount, total: model.totalCount, query: `"${model.queryRaw.trim()}"` })}${hiddenText}${focusText}`;
-    return `${t("{characters} characters, {links} character links", { characters: model.totalCount, links: model.linkCount })}${hiddenText}${focusText}`;
+    if (model.hasFilters) return `${t("{visible} of {total} library entries shown", { visible: model.visibleCount, total: model.totalCount })}${hiddenText}${focusText}`;
+    return `${t("{entries} library entries, {links} node links", { entries: model.totalCount, links: model.linkCount })}${hiddenText}${focusText}`;
+  }
+
+  function renderCodexCategoryTabs(model) {
+    const entries = [
+      { value: CODEX_ALL_FILTER, label: t("All entries"), count: model.visibleCharacters.length },
+      ...getCodexKindsList().map((kind) => ({ value: kind, label: t(kind), count: model.kindCounts[kind] || 0 }))
+    ];
+    const customKinds = new Set(normalizeCustomCodexKinds(state.project.customCodexKinds).map((kind) => kind.toLowerCase()));
+    return `${entries.map((entry) => {
+      const isCustom = customKinds.has(String(entry.value).toLowerCase());
+      // Custom categories always show the × control; it's disabled (with a reason)
+      // while entries still use the category, so the affordance stays discoverable.
+      const removeTitle = entry.count === 0
+        ? t("Remove category")
+        : t("Move or remove its entries first.");
+      return `
+      <span class="codex-category-tab-wrap">
+        <button class="codex-category-tab${model.kindFilter === entry.value ? " active" : ""}" type="button" data-action="set-codex-kind-filter" data-codex-kind="${escapeAttr(entry.value)}" aria-pressed="${model.kindFilter === entry.value ? "true" : "false"}">
+          <span>${escapeHtml(entry.label)}</span><small>${entry.count}</small>
+        </button>
+        ${isCustom ? `<button class="codex-category-remove" type="button" data-action="remove-codex-kind" data-codex-kind="${escapeAttr(entry.value)}" title="${escapeAttr(removeTitle)}" aria-label="${escapeAttr(removeTitle)}"${entry.count === 0 ? "" : " aria-disabled=\"true\""}>×</button>` : ""}
+      </span>`;
+    }).join("")}
+      <button class="codex-category-tab codex-category-add" type="button" data-action="add-codex-kind" title="${escapeAttr(t("Add category"))}" aria-label="${escapeAttr(t("Add category"))}">+</button>`;
+  }
+
+  function renderCodexTagFilters(model) {
+    const entries = [...model.tagCounts.entries()];
+    if (!entries.length) return "";
+    return `
+      <span class="codex-filter-label">${t("Tags")}</span>
+      <button class="codex-tag-filter${model.tagFilter ? "" : " active"}" type="button" data-action="clear-codex-tag-filter" aria-pressed="${model.tagFilter ? "false" : "true"}">${t("All")}</button>
+      ${entries.map(([tag, count]) => `
+        <button class="codex-tag-filter${model.tagFilter.toLowerCase() === tag.toLowerCase() ? " active" : ""}" type="button" data-action="set-codex-tag-filter" data-codex-tag="${escapeAttr(tag)}" aria-pressed="${model.tagFilter.toLowerCase() === tag.toLowerCase() ? "true" : "false"}">
+          <span>${escapeHtml(tag)}</span><small>${count}</small>
+        </button>
+      `).join("")}
+    `;
+  }
+
+  function renderCodexTemplateEditorContent(model) {
+    // Templates are per category; the editor only appears on a specific category tab.
+    if (model.kindFilter === CODEX_ALL_FILTER) return "";
+    const template = getCodexFieldTemplate(model.kindFilter);
+    return `
+      <span class="codex-filter-label">${t("Category fields")}</span>
+      ${template.map((key) => `
+        <button class="codex-template-chip" type="button" data-action="remove-codex-template-field" data-codex-template-key="${escapeAttr(key)}" aria-label="${escapeAttr(t("Remove template field: {key}", { key }))}" title="${escapeAttr(t("Remove from template. Entry values are kept."))}">
+          <span>${escapeHtml(key)}</span><span class="codex-tag-remove" aria-hidden="true">×</span>
+        </button>
+      `).join("")}
+      <input class="codex-template-input" data-codex-template-input placeholder="${escapeAttr(t("New field name"))}" spellcheck="false" autocomplete="off" aria-label="${escapeAttr(t("New field name"))}">
+      <button class="small-button" type="button" data-action="add-codex-template-field">${t("Add")}</button>
+    `;
   }
 
   function renderCharacterFilterBar(model) {
@@ -7517,6 +18871,14 @@ function installNarrativeCanvasApp() {
       chips.push(`
         <button type="button" class="filter-chip filter-chip-button" data-action="clear-character-search" aria-label="${escapeAttr(t("Clear character search"))}">
           <span>${t("Search")}: ${escapeHtml(model.queryRaw.trim())}</span>
+          <span class="filter-chip-clear">${t("Clear")}</span>
+        </button>
+      `);
+    }
+    if (model.tagFilter) {
+      chips.push(`
+        <button type="button" class="filter-chip filter-chip-button" data-action="clear-codex-tag-filter" aria-label="${escapeAttr(t("Library tag filter cleared."))}">
+          <span>${t("Tags")}: ${escapeHtml(model.tagFilter)}</span>
           <span class="filter-chip-clear">${t("Clear")}</span>
         </button>
       `);
@@ -7536,22 +18898,22 @@ function installNarrativeCanvasApp() {
     if (!model.hidden?.length) return "";
     return `
       <div class="document-restore-bar character-restore-bar" data-character-restore-bar>
-        <span>${t("Hidden characters")}:</span>
+        <span>${t("Hidden entries")}:</span>
         ${model.hidden.map((character) => `
-          <button type="button" class="filter-chip" data-action="show-character" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Show character"))}">
+          <button type="button" class="filter-chip" data-action="show-character" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Show entry"))}">
             ${escapeHtml(character.name || t("Unnamed Character"))}
           </button>
         `).join("")}
-        <button type="button" class="small-button" data-action="show-all-characters">${t("Show all characters")}</button>
+        <button type="button" class="small-button" data-action="show-all-characters">${t("Show all entries")}</button>
       </div>
     `;
   }
 
   function renderCharacterCardsMarkup(model, limit = getDocumentRenderLimit("characters")) {
-    if (!model.characters.length) return `<div class="nc-empty-state">${t("No characters yet.")}</div>`;
+    if (!model.characters.length) return `<div class="nc-empty-state">${t("No library entries yet.")}</div>`;
     const visible = model.visible.slice(0, Math.max(0, limit));
-    if (!model.visibleCharacters.length && model.hiddenCount) return `<div class="nc-empty-state">${t("All characters are hidden.")}</div>`;
-    if (!visible.length) return `<div class="nc-empty-state">${escapeHtml(t("No characters match {query}.", { query: `"${model.queryRaw.trim()}"` }))}</div>`;
+    if (!model.visibleCharacters.length && model.hiddenCount) return `<div class="nc-empty-state">${t("All entries are hidden.")}</div>`;
+    if (!visible.length) return `<div class="nc-empty-state">${t("No library entries match the current filters.")}</div>`;
     return renderCharacterMasonryColumns(visible, model.context);
   }
 
@@ -7582,38 +18944,283 @@ function installNarrativeCanvasApp() {
     const columns = Array.from({ length: columnCount }, () => ({ score: 0, cards: [] }));
     characters.forEach((character) => {
       const target = columns.reduce((best, column) => (column.score < best.score ? column : best), columns[0]);
-      target.cards.push(renderCharacterCard(character, context));
+      target.cards.push(renderCodexOverviewCard(character, context));
       target.score += estimateCharacterCardWeight(character, context);
     });
     return columns
-      .filter((column) => column.cards.length)
       .map((column) => `<div class="character-column">${column.cards.join("")}</div>`)
       .join("");
   }
 
-  function getCharacterMasonryColumnCount() {
-    const shellWidth = dom.charactersPanel?.querySelector(".document-shell")?.clientWidth
-      || dom.charactersPanel?.clientWidth
-      || window.innerWidth
-      || 1024;
-    return clamp(Math.floor((shellWidth + 18) / 358), 1, 4);
+  function renderCodexOverviewCard(character, context = getCharacterRenderContext()) {
+    const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
+    const backlinkCount = groups.reduce((total, group) => total + group.items.length, 0);
+    const tags = parseCodexTags(character.tags).slice(0, 3);
+    const extraTags = Math.max(0, parseCodexTags(character.tags).length - tags.length);
+    const host = window.NarrativeCanvasHost;
+    const imageReference = normalizeNodeVaultFileReference(character.imageFile);
+    const imageUrl = imageReference && host?.getVaultResourceUrl ? host.getVaultResourceUrl(imageReference) : "";
+    const summary = normalizeOptionalString(character.role || character.voice || character.notes).trim();
+    const kindLabel = t(character.kind);
+    const isFocused = state.characterFocusId === character.id;
+    return `
+      <button class="codex-overview-card${isFocused ? " focused" : ""}" type="button" data-action="open-codex-entry-detail" data-character-id="${escapeAttr(character.id)}" data-character-card-id="${escapeAttr(character.id)}" data-codex-kind="${escapeAttr(character.kind)}" aria-label="${escapeAttr(t("Open entry: {name}", { name: character.name || t("Unnamed Character") }))}">
+        <span class="codex-overview-image${imageUrl ? " has-image" : ""}">
+          ${renderCodexOverviewCover(character, imageUrl, kindLabel, host)}
+          <span class="codex-overview-kind">${escapeHtml(kindLabel)}</span>
+          ${isFocused ? `<span class="codex-overview-focus-badge">${escapeHtml(t("Focus"))}</span>` : ""}
+        </span>
+        <span class="codex-overview-body">
+          <strong class="codex-overview-name">${escapeHtml(character.name || t("Unnamed Character"))}</strong>
+          ${summary ? `<span class="codex-overview-summary">${escapeHtml(summary)}</span>` : ""}
+          ${tags.length ? `<span class="codex-overview-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}${extraTags ? `<small>+${extraTags}</small>` : ""}</span>` : ""}
+          <span class="codex-overview-meta">${escapeHtml(t("{count} linked nodes", { count: backlinkCount }))}</span>
+        </span>
+      </button>
+    `;
   }
 
-  function estimateCharacterCardWeight(character, context) {
-    const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
-    const linkCount = groups.reduce((sum, group) => sum + group.items.length, 0);
-    const textLength = [character.name, character.role, character.voice, character.notes]
-      .map((value) => String(value || "").length)
-      .reduce((sum, value) => sum + value, 0);
-    return 120 + Math.ceil(textLength / 48) * 28 + linkCount * 36;
+  function getCharacterMasonryColumnCount() {
+    const shell = dom.charactersPanel?.querySelector(".document-shell");
+    const measuredWidths = [
+      shell?.clientWidth || 0,
+      shell?.getBoundingClientRect?.().width || 0,
+      dom.charactersPanel?.clientWidth || 0,
+      dom.charactersPanel?.getBoundingClientRect?.().width || 0
+    ].filter((width) => Number.isFinite(width) && width > 0);
+    const shellWidth = measuredWidths.length ? Math.max(...measuredWidths) : Math.max(window.innerWidth || 0, 320);
+    return clamp(Math.floor((shellWidth + 16) / 260), 1, 6);
+  }
+
+  function applyCharacterMasonryLayout() {
+    if (state.activeFileId !== "characters") return;
+    const grid = dom.charactersPanel?.querySelector(".character-grid");
+    if (!grid) return;
+    const model = buildCharacterDocumentModel();
+    const columnCount = getCharacterMasonryColumnCount();
+    if (grid.dataset.masonryColumns === String(columnCount)) return;
+    grid.dataset.masonryColumns = String(columnCount);
+    grid.style.setProperty("--codex-masonry-columns", String(columnCount));
+    grid.innerHTML = renderCharacterCardsMarkup(model, getDocumentRenderLimit("characters"));
+  }
+
+  function scheduleCharacterMasonryLayout() {
+    // Measure twice: once right away, and once after the sidebar collapse/expand
+    // transition has finished animating the panel width.
+    window.setTimeout(applyCharacterMasonryLayout, 60);
+    window.setTimeout(applyCharacterMasonryLayout, 340);
+  }
+
+  function estimateCharacterCardWeight(character) {
+    // Overview cards share a fixed-ratio cover, so heights only differ by the
+    // summary and tag lines. Uniform weights keep the masonry columns even.
+    const summary = normalizeOptionalString(character.role || character.voice || character.notes).trim();
+    return 240 + (summary ? 22 : 0) + (parseCodexTags(character.tags).length ? 26 : 0);
   }
 
   function buildCharacterSearchText(character) {
-    return [character.name, character.role, character.voice, character.notes]
+    const extraFieldText = normalizeCodexExtraFields(character.extraFields)
+      .map((field) => `${field.key} ${field.value}`);
+    return [character.name, character.kind, character.role, character.voice, character.tags, character.notes, ...extraFieldText, ...normalizeCodexVaultFiles(character.vaultFiles)]
       .filter(Boolean)
       .map(String)
       .join("\n")
       .toLowerCase();
+  }
+
+  function parseCodexTags(value) {
+    const seen = new Set();
+    return String(value || "")
+      .split(/[,，\n]/)
+      .map((tag) => tag.trim())
+      .filter((tag) => {
+        const key = tag.toLowerCase();
+        if (!tag || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function handleCodexTagInput(input) {
+    const value = String(input?.value || "");
+    const parts = value.split(/[,，\n]/);
+    if (parts.length < 2) {
+      updateCodexTagSuggestions(input);
+      return false;
+    }
+    const trailingSeparator = /[,，\n]$/.test(value);
+    const draft = trailingSeparator ? "" : parts.pop() || "";
+    addCodexTags(input.dataset.characterId, parts, draft);
+    return true;
+  }
+
+  function handleCodexTagKeyDown(event) {
+    const input = event.target;
+    if (!input?.hasAttribute?.("data-character-tag-input")) return false;
+    if (event.isComposing || event.keyCode === 229) return false;
+    const suggestionButtons = getVisibleCodexTagSuggestionButtons(input);
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && suggestionButtons.length) {
+      const picked = moveActiveSuggestion(suggestionButtons, event.key === "ArrowDown" ? 1 : -1);
+      if (picked?.id) input.setAttribute("aria-activedescendant", picked.id);
+      event.preventDefault();
+      return true;
+    }
+    if (event.key === "Enter" || event.key === "," || event.key === "，") {
+      event.preventDefault();
+      const activeSuggestion = suggestionButtons.find((button) => button.classList.contains("active"));
+      if (event.key === "Enter" && activeSuggestion) {
+        selectCodexTagSuggestion(activeSuggestion);
+      } else if (input.value.trim()) {
+        addCodexTags(input.dataset.characterId, [input.value], "");
+      }
+      return true;
+    }
+    if (event.key === "Backspace" && !input.value) {
+      const tags = parseCodexTags(getCharacterById(input.dataset.characterId)?.tags);
+      if (tags.length) {
+        event.preventDefault();
+        removeCodexTagAt(input.dataset.characterId, tags.length - 1, "", true);
+      }
+      return true;
+    }
+    if (event.key === "Escape") {
+      hideCodexTagSuggestions(input);
+      event.preventDefault();
+      return true;
+    }
+    return false;
+  }
+
+  function updateCodexTagSuggestions(input) {
+    const editor = input?.closest?.("[data-character-tag-editor]");
+    const panel = editor?.querySelector?.("[data-codex-tag-suggestions]");
+    if (!editor || !panel) return;
+    const character = getCharacterById(input.dataset.characterId);
+    const currentTags = new Set(parseCodexTags(character?.tags).map((tag) => tag.toLowerCase()));
+    const query = String(input.value || "").trim().toLowerCase();
+    const suggestions = [...collectCodexTagCounts(getCharacters()).entries()]
+      .filter(([tag]) => !currentTags.has(tag.toLowerCase()) && (!query || tag.toLowerCase().includes(query)))
+      .sort((a, b) => {
+        const aPrefix = query && a[0].toLowerCase().startsWith(query) ? 0 : 1;
+        const bPrefix = query && b[0].toLowerCase().startsWith(query) ? 0 : 1;
+        return aPrefix - bPrefix || b[1] - a[1] || a[0].localeCompare(b[0]);
+      })
+      .slice(0, 8);
+    if (!suggestions.length) {
+      hideCodexTagSuggestions(input);
+      return;
+    }
+    panel.innerHTML = suggestions.map(([tag, count], index) => `
+      <button class="codex-tag-suggestion${index === 0 ? " active" : ""}" id="codex-tag-suggestion-${escapeAttr(character.id)}-${index}" type="button" role="option" data-action="select-codex-tag-suggestion" data-character-id="${escapeAttr(character.id)}" data-codex-tag-value="${escapeAttr(tag)}" aria-selected="${index === 0 ? "true" : "false"}">
+        <span>${escapeHtml(tag)}</span><small>${count}</small>
+      </button>
+    `).join("");
+    panel.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    input.setAttribute("aria-activedescendant", `codex-tag-suggestion-${character.id}-0`);
+  }
+
+  function hideCodexTagSuggestions(input) {
+    const panel = input?.closest?.("[data-character-tag-editor]")?.querySelector?.("[data-codex-tag-suggestions]");
+    if (panel) {
+      panel.hidden = true;
+      panel.innerHTML = "";
+    }
+    input?.setAttribute?.("aria-expanded", "false");
+    input?.removeAttribute?.("aria-activedescendant");
+  }
+
+  function getVisibleCodexTagSuggestionButtons(input) {
+    const panel = input?.closest?.("[data-character-tag-editor]")?.querySelector?.("[data-codex-tag-suggestions]");
+    return panel && !panel.hidden ? [...panel.querySelectorAll("[data-codex-tag-value]")] : [];
+  }
+
+  function selectCodexTagSuggestion(target) {
+    if (!target?.dataset?.codexTagValue) return false;
+    return addCodexTags(target.dataset.characterId, [target.dataset.codexTagValue], "");
+  }
+
+  function addCodexTags(characterId, values, focusDraft = "") {
+    const character = getCharacterById(characterId);
+    if (!character) return false;
+    const existing = parseCodexTags(character.tags);
+    const seen = new Set(existing.map((tag) => tag.toLowerCase()));
+    const additions = parseCodexTags((Array.isArray(values) ? values : [values]).join(","));
+    const next = [...existing];
+    additions.forEach((tag) => {
+      const key = tag.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      next.push(tag);
+    });
+    if (next.length === existing.length) {
+      if (focusDraft !== null) focusCodexTagInput(characterId, focusDraft);
+      return false;
+    }
+    const historyBefore = getHistorySnapshot();
+    writeCodexTags(character, next, {
+      focusDraft,
+      historyBefore,
+      status: "Tag added."
+    });
+    return true;
+  }
+
+  function removeCodexTag(target) {
+    const editor = target?.closest?.("[data-character-tag-editor]");
+    const draft = editor?.querySelector("[data-character-tag-input]")?.value || "";
+    removeCodexTagAt(target?.dataset?.characterId, Number(target?.dataset?.codexTagIndex), draft, false);
+  }
+
+  function removeCodexTagAt(characterId, index, focusDraft = "", recordHistory = true) {
+    const character = getCharacterById(characterId);
+    const tags = parseCodexTags(character?.tags);
+    if (!character || !Number.isInteger(index) || index < 0 || index >= tags.length) return false;
+    const historyBefore = recordHistory ? getHistorySnapshot() : null;
+    tags.splice(index, 1);
+    writeCodexTags(character, tags, {
+      focusDraft,
+      historyBefore,
+      status: "Tag removed."
+    });
+    return true;
+  }
+
+  function writeCodexTags(character, tags, options = {}) {
+    character.tags = parseCodexTags(tags.join(",")).join(", ");
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderCharacterListSurfaces();
+    if (options.historyBefore) commitHistoryFromSnapshot(options.historyBefore);
+    if (options.status) setStatus(options.status);
+    if (options.focusDraft !== null && options.focusDraft !== undefined) {
+      focusCodexTagInput(character.id, options.focusDraft);
+    }
+  }
+
+  function focusCodexTagInput(characterId, draft = "") {
+    // Timer instead of requestAnimationFrame: rAF can be starved under headless/virtual-time
+    // test runs and throttled iframes, dropping the preserved tag draft.
+    window.setTimeout(() => {
+      const input = dom.charactersPanel?.querySelector(`[data-character-tag-input][data-character-id="${CSS.escape(characterId)}"]`);
+      if (!input) return;
+      input.value = draft;
+      input.focus?.({ preventScroll: true });
+      input.setSelectionRange?.(input.value.length, input.value.length);
+      updateCodexTagSuggestions(input);
+    }, 0);
+  }
+
+  function collectCodexTagCounts(entries) {
+    const counts = new Map();
+    (entries || []).forEach((entry) => {
+      parseCodexTags(entry.tags).forEach((tag) => {
+        const existing = [...counts.keys()].find((key) => key.toLowerCase() === tag.toLowerCase());
+        const key = existing || tag;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      });
+    });
+    return new Map([...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])));
   }
 
   function characterMatchesSearch(character, query, context = state.characterRenderContext) {
@@ -7623,31 +19230,73 @@ function installNarrativeCanvasApp() {
   }
 
   function renderCharacterGridForSearch() {
+    if (state.codexSelectedEntryId) {
+      renderCharactersPage();
+      return;
+    }
     const grid = dom.charactersPanel?.querySelector(".character-grid");
     const meta = dom.charactersPanel?.querySelector("[data-character-search-meta]");
     const filterBar = dom.charactersPanel?.querySelector("[data-character-filter-bar]");
+    const categoryTabs = dom.charactersPanel?.querySelector("[data-codex-category-tabs]");
+    const tagFilters = dom.charactersPanel?.querySelector("[data-codex-tag-filters]");
     if (!grid) return;
     const model = buildCharacterDocumentModel();
     const limit = getDocumentRenderLimit("characters");
     const shownCount = Math.min(model.visible.length, limit);
     if (meta) meta.textContent = formatCharacterMeta(model);
-    if (filterBar) filterBar.innerHTML = renderCharacterFilterBar(model);
+    if (filterBar) filterBar.innerHTML = renderCharacterFilterBar(model).trim();
+    if (categoryTabs) categoryTabs.innerHTML = renderCodexCategoryTabs(model);
+    if (tagFilters) tagFilters.innerHTML = renderCodexTagFilters(model).trim();
+    const templateEditor = dom.charactersPanel?.querySelector("[data-codex-template-editor]");
+    if (templateEditor) templateEditor.innerHTML = renderCodexTemplateEditorContent(model).trim();
     const restoreBar = dom.charactersPanel?.querySelector("[data-character-restore-bar]");
     if (restoreBar) restoreBar.outerHTML = renderHiddenCharacterRestoreBar(model);
     else if (filterBar) filterBar.insertAdjacentHTML("afterend", renderHiddenCharacterRestoreBar(model));
     grid.innerHTML = renderCharacterCardsMarkup(model, limit);
+    const masonryColumns = getCharacterMasonryColumnCount();
+    grid.dataset.masonryColumns = String(masonryColumns);
+    grid.style.setProperty("--codex-masonry-columns", String(masonryColumns));
+    runAfterRender(hydrateCodexCanvasEmbeds);
     const shell = dom.charactersPanel?.querySelector(".document-shell");
     shell?.querySelector("[data-document-limit-notice]")?.remove();
     shell?.insertAdjacentHTML("beforeend", renderDocumentLimitNotice("characters", shownCount, model.visible.length));
   }
 
-  function renderCharacterCard(character, context = getCharacterRenderContext()) {
+  // Overview cover precedence: entry icon → board snapshot → preview-image board
+  // snapshot (all images in their layout, scaled) → category placeholder.
+  function renderCodexOverviewCover(character, imageUrl, kindLabel, host) {
+    if (character.icon && host?.getVaultResourceUrl) {
+      return `<img src="${escapeAttr(host.getVaultResourceUrl(character.icon))}" alt="" loading="lazy">`;
+    }
+    const canvasPath = normalizeNodeVaultFileReference(character.canvasFile);
+    if (canvasPath && host?.readVaultFile) {
+      return `<span class="codex-overview-canvas" data-codex-canvas-embed data-canvas-cover="true" data-canvas-path="${escapeAttr(canvasPath)}" aria-hidden="true"></span>`;
+    }
+    const images = host?.getVaultResourceUrl ? getCharacterImages(character) : [];
+    if (images.length) {
+      return `<span class="codex-overview-board" aria-hidden="true">${images.map((image) => `
+        <img src="${escapeAttr(host.getVaultResourceUrl(image.path))}" style="left:${image.x}%;top:${image.y}%;width:${image.w}%" alt="" loading="lazy" draggable="false">
+      `).join("")}</span>`;
+    }
+    if (imageUrl) {
+      return `<img src="${escapeAttr(imageUrl)}" alt="" loading="lazy">`;
+    }
+    return `<span class="codex-overview-placeholder" aria-hidden="true">${escapeHtml(kindLabel.slice(0, 1))}</span>`;
+  }
+
+  function renderCharacterCard(character, context = getCharacterRenderContext(), options = {}) {
     const isFocused = state.characterFocusId === character.id;
-    const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
-    const isExpanded = state.characterBacklinkExpandedIds?.has(character.id);
+    const includeBacklinks = options.includeBacklinks !== false;
+    const groups = includeBacklinks
+      ? (context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character))
+      : [];
+    const kindLabels = getCodexKindFieldLabels(character.kind);
     return `
-      <article class="character-card ${isFocused ? "focused" : ""}" data-character-card-id="${escapeAttr(character.id)}">
+      <article class="character-card ${isFocused ? "focused" : ""}" data-character-card-id="${escapeAttr(character.id)}" data-codex-kind="${escapeAttr(character.kind)}">
         <div class="character-card-header">
+          ${window.NarrativeCanvasHost?.getVaultResourceUrl && character.icon
+            ? `<img class="codex-icon-avatar" src="${escapeAttr(window.NarrativeCanvasHost.getVaultResourceUrl(character.icon))}" alt="" loading="lazy">`
+            : ""}
           <label class="field">
             <span>${t("Name")}</span>
             <input data-character-id="${escapeAttr(character.id)}" data-character-field="name" value="${escapeAttr(character.name)}">
@@ -7655,61 +19304,491 @@ function installNarrativeCanvasApp() {
           <div class="character-card-actions">
             <button class="small-button" data-action="${isFocused ? "clear-character-focus" : "focus-character"}" data-character-id="${escapeAttr(character.id)}">${isFocused ? t("Clear") : t("Focus")}</button>
             <button class="small-button" data-action="hide-character" data-character-id="${escapeAttr(character.id)}">${t("Hide")}</button>
-            <button class="icon-button danger-button" title="${escapeAttr(t("Delete character"))}" data-action="delete-character" data-character-id="${escapeAttr(character.id)}">x</button>
+            <button class="small-button danger-button" title="${escapeAttr(t("Delete entry"))}" data-action="delete-character" data-character-id="${escapeAttr(character.id)}">${t("Delete")}</button>
           </div>
         </div>
+        ${window.NarrativeCanvasHost?.searchVaultFiles ? `
+          <div class="field codex-icon-field">
+            <span>${t("Icon")}</span>
+            <div class="codex-icon-row">
+              <div class="codex-vault-file-input-wrap codex-icon-input-wrap">
+                <input data-character-icon-input data-character-id="${escapeAttr(character.id)}" value="${escapeAttr(character.icon || "")}" placeholder="${escapeAttr(t("Search icon image"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Search icon image"))}" aria-autocomplete="list" aria-expanded="false">
+                <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+              </div>
+              ${character.icon ? `<button class="icon-button danger-button vault-row-icon-button" type="button" data-action="clear-codex-icon" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Remove icon"))}" aria-label="${escapeAttr(t("Remove icon"))}">×</button>` : ""}
+            </div>
+          </div>
+        ` : ""}
+        ${renderCodexPluginFileFields(character)}
         <div class="field-row">
           <label class="field">
-            <span>${t("Role")}</span>
+            <span>${t("Category")}</span>
+            <select data-character-id="${escapeAttr(character.id)}" data-character-field="kind">
+              ${renderCodexKindOptions(character.kind)}
+            </select>
+          </label>
+          <label class="field">
+            <span>${escapeHtml(kindLabels.primary)}</span>
             <input data-character-id="${escapeAttr(character.id)}" data-character-field="role" value="${escapeAttr(character.role || "")}">
           </label>
           <label class="field">
-            <span>${t("Voice")}</span>
+            <span>${escapeHtml(kindLabels.secondary)}</span>
             <input data-character-id="${escapeAttr(character.id)}" data-character-field="voice" value="${escapeAttr(character.voice || "")}">
           </label>
+        </div>
+        <div class="field codex-tags-field">
+          <span>${t("Tags")}</span>
+          ${renderCodexTagEditor(character)}
         </div>
         <label class="field">
           <span>${t("Notes")}</span>
           <textarea data-character-id="${escapeAttr(character.id)}" data-character-field="notes">${escapeHtml(character.notes || "")}</textarea>
         </label>
-        ${renderCharacterBacklinkSections(groups, character.id, isExpanded)}
+        ${renderCodexExtraFieldsEditor(character)}
+        ${includeBacklinks ? renderCharacterBacklinkSections(groups, character.id) : ""}
       </article>
     `;
   }
 
-  function renderCharacterBacklinkSections(groups, characterId, isExpanded = false) {
-    const nonEmptyGroups = groups.filter((group) => group.items.length);
-    if (!nonEmptyGroups.length) return `<div class="linked-node empty">${t("No linked scenes yet")}</div>`;
+  function renderCodexExtraFieldsEditor(character) {
+    const fields = normalizeCodexExtraFields(character.extraFields);
     return `
-      <div class="character-backlink-section">
-        ${nonEmptyGroups.map((group) => `
-          <section class="character-backlink-group">
-            <h3>${escapeHtml(t(group.label))}</h3>
-            <div class="linked-node-list">
-              ${renderCharacterBacklinkGroupItems(group, characterId, isExpanded)}
-            </div>
-          </section>
+      <section class="codex-extra-fields" data-character-extra-fields data-character-id="${escapeAttr(character.id)}">
+        <div class="codex-extra-fields-header">
+          <span>${t("Custom fields")}</span>
+          <button class="small-button" type="button" data-action="add-codex-extra-field" data-character-id="${escapeAttr(character.id)}">+ ${t("Add field")}</button>
+        </div>
+        ${fields.length ? fields.map((field, index) => `
+          <div class="codex-extra-field-row">
+            <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="key" value="${escapeAttr(field.key)}" placeholder="${escapeAttr(t("Field name"))}" spellcheck="false">
+            <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="value" value="${escapeAttr(field.value)}" placeholder="${escapeAttr(t("Field value"))}">
+            <button class="icon-button danger-button" type="button" data-action="remove-codex-extra-field" data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" title="${escapeAttr(t("Remove field"))}" aria-label="${escapeAttr(t("Remove field"))}">×</button>
+          </div>
+        `).join("") : `<div class="codex-extra-fields-empty">${t("No custom fields yet. Fields sync to the entry's markdown frontmatter.")}</div>`}
+      </section>
+    `;
+  }
+
+  function renderCodexTagEditor(character) {
+    const tags = parseCodexTags(character.tags);
+    return `
+      <div class="codex-tag-editor" data-character-tag-editor data-character-id="${escapeAttr(character.id)}">
+        ${tags.map((tag, index) => `
+          <button class="codex-tag-chip" type="button" data-action="remove-codex-tag" data-character-id="${escapeAttr(character.id)}" data-codex-tag-index="${index}" aria-label="${escapeAttr(t("Remove tag: {tag}", { tag }))}">
+            <span>${escapeHtml(tag)}</span><span class="codex-tag-remove" aria-hidden="true">×</span>
+          </button>
         `).join("")}
+        <input class="codex-tag-input" data-character-tag-input data-character-id="${escapeAttr(character.id)}" value="" placeholder="${escapeAttr(t("Add tag..."))}" aria-label="${escapeAttr(t("Add tag"))}" aria-autocomplete="list" aria-expanded="false" aria-controls="codex-tag-suggestions-${escapeAttr(character.id)}" autocomplete="off" spellcheck="false">
+        <div class="codex-tag-suggestions" id="codex-tag-suggestions-${escapeAttr(character.id)}" data-codex-tag-suggestions role="listbox" aria-label="${escapeAttr(t("Tag suggestions"))}" hidden></div>
       </div>
     `;
   }
 
-  function renderCharacterBacklinkGroupItems(group, characterId, isExpanded) {
-    const items = isExpanded ? group.items : group.items.slice(0, CHARACTER_BACKLINK_PREVIEW_LIMIT);
-    const hiddenCount = group.items.length - items.length;
+  function renderVisionBoard(kind, id, images, options = {}) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.getVaultResourceUrl || !images.length) return "";
+    const focused = Boolean(options.focused);
     return `
-      ${items.map((item) => renderCharacterBacklinkItem(item)).join("")}
-      ${hiddenCount > 0 ? `
-        <button class="linked-node linked-node-more" data-action="toggle-character-backlinks" data-character-id="${escapeAttr(characterId)}">
-          ${t("Show {count} more", { count: hiddenCount })}
-        </button>
-      ` : ""}
-      ${isExpanded && group.items.length > CHARACTER_BACKLINK_PREVIEW_LIMIT ? `
-        <button class="linked-node linked-node-more" data-action="toggle-character-backlinks" data-character-id="${escapeAttr(characterId)}">
-          ${t("Show fewer")}
-        </button>
-      ` : ""}
+      <div${focused ? " id=\"visionBoardCanvas\"" : ""} class="vision-board-canvas${focused ? " is-focused" : " is-embedded"}" data-vision-board-kind="${escapeAttr(kind)}" data-vision-board-id="${escapeAttr(id)}">
+        ${images.map((image, index) => {
+          const imageUrl = host.getVaultResourceUrl(image.path);
+          return `
+            <article class="vision-board-tile" data-vision-board-tile data-vision-board-index="${index}" style="--vision-x:${image.x};--vision-y:${image.y};--vision-w:${image.w}" title="${escapeAttr(image.path)}">
+              ${imageUrl ? `<img src="${escapeAttr(imageUrl)}" alt="" draggable="false" loading="lazy">` : `<span class="vision-board-missing">${escapeHtml(image.path.split("/").pop() || image.path)}</span>`}
+              <div class="vision-board-tile-actions">
+                <button type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(image.path)}" title="${escapeAttr(t("Open file"))}" aria-label="${escapeAttr(t("Open file"))}">↗</button>
+                ${kind === "character" ? `<button type="button" data-action="remove-codex-image" data-character-id="${escapeAttr(id)}" data-codex-image-index="${index}" title="${escapeAttr(t("Remove image"))}" aria-label="${escapeAttr(t("Remove image"))}">×</button>` : ""}
+              </div>
+              ${focused ? `<span class="vision-board-tile-resize" data-vision-board-resize title="${escapeAttr(t("Resize image"))}" aria-hidden="true"></span>` : ""}
+            </article>
+          `;
+        }).join("")}
+      </div>
     `;
+  }
+
+  function renderCodexPluginFileFields(character) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.loadCodexEntries || !host?.searchVaultFiles) return "";
+    const images = getCharacterImages(character);
+    const pickerOpen = state.codexImagePickerCharacterId === character.id;
+    const canvasPath = normalizeNodeVaultFileReference(character.canvasFile);
+    // An entry with a native canvas board delegates images and linked files to it:
+    // the board is embedded read-only here and edited in Obsidian's canvas view.
+    if (host.readVaultFile && canvasPath) {
+      return `
+        <section class="codex-plugin-files">
+          ${character.codexFile ? `
+            <div class="codex-managed-file-row">
+              <span><strong>${t("Library file")}</strong><small>${escapeHtml(character.codexFile)}</small></span>
+              <button class="small-button" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(character.codexFile)}">${t("Open file")}</button>
+            </div>
+          ` : ""}
+          <div class="codex-canvas-section">
+            <div class="codex-vault-files-header">
+              <span>${t("Board")}</span>
+              <div>
+                <button class="small-button" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(canvasPath)}">${t("Open board")}</button>
+                <button class="small-button" type="button" data-action="detach-codex-canvas" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Board detached. The canvas file is kept in the vault."))}">${t("Detach board")}</button>
+              </div>
+            </div>
+            <div class="codex-canvas-embed" data-codex-canvas-embed data-canvas-path="${escapeAttr(canvasPath)}" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(canvasPath)}" role="button" tabindex="0" title="${escapeAttr(t("Open board"))}" aria-label="${escapeAttr(t("Open board"))}">${escapeHtml(t("Loading board..."))}</div>
+          </div>
+        </section>
+      `;
+    }
+    return `
+      <section class="codex-plugin-files">
+        ${character.codexFile ? `
+          <div class="codex-managed-file-row">
+            <span><strong>${t("Library file")}</strong><small>${escapeHtml(character.codexFile)}</small></span>
+            <button class="small-button" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(character.codexFile)}">${t("Open file")}</button>
+          </div>
+        ` : ""}
+        ${host.createCodexCanvas ? `
+          <div class="codex-canvas-create-row">
+            <span>${escapeHtml(t("Create a native canvas board for this entry. Its images and linked files move onto the board."))}</span>
+            <button class="small-button" type="button" data-action="create-codex-canvas" data-character-id="${escapeAttr(character.id)}">${t("Create board")}</button>
+          </div>
+        ` : ""}
+        ${renderCodexVaultFileLinks(character)}
+        <div class="codex-image-editor${images.length ? " has-image" : ""}${pickerOpen ? " picker-open" : ""}" data-codex-image-drop data-character-id="${escapeAttr(character.id)}">
+          <div class="vision-board-toolbar">
+            ${images.length ? `<strong>${t("Preview images")} <small>${images.length}</small></strong>` : `<span></span>`}
+            <div>
+              <button class="small-button" type="button" data-action="choose-codex-image-file" data-character-id="${escapeAttr(character.id)}">+ ${t("Add images")}</button>
+              ${images.length ? `<button class="small-button" type="button" data-action="open-vision-board" data-vision-board-kind="character" data-vision-board-id="${escapeAttr(character.id)}">${t("Focus")}</button>` : ""}
+            </div>
+          </div>
+          <input data-codex-local-image-input data-character-id="${escapeAttr(character.id)}" type="file" accept="image/*" multiple hidden>
+          ${renderVisionBoard("character", character.id, images)}
+          ${pickerOpen ? `
+            <div class="codex-image-picker" data-codex-image-picker>
+              <div class="codex-image-picker-head">
+                <input data-character-id="${escapeAttr(character.id)}" data-character-image-picker-input="true" value="" placeholder="${escapeAttr(t("Search images in vault"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Search images in vault"))}" aria-autocomplete="list" aria-expanded="false">
+                <button class="small-button" type="button" data-action="import-local-codex-images" data-character-id="${escapeAttr(character.id)}">${t("Add local images")}</button>
+                <button class="icon-button" type="button" data-action="close-codex-image-picker" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Close image picker"))}" aria-label="${escapeAttr(t("Close image picker"))}">×</button>
+              </div>
+              <div class="vault-file-suggestions codex-image-suggestions" data-vault-file-suggestions role="listbox" aria-label="${escapeAttr(t("Search images in vault"))}" hidden></div>
+            </div>
+          ` : ""}
+        </div>
+      </section>
+    `;
+  }
+
+  // Library entries can link vault files like nodes do: each row opens or removes its
+  // file, and the search input at the bottom links a new one. Paths sync to the entry's
+  // frontmatter `files` array.
+  function renderCodexVaultFileLinks(character) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.searchVaultFiles) return "";
+    const files = normalizeCodexVaultFiles(character.vaultFiles);
+    return `
+      <div class="codex-vault-files">
+        <div class="codex-vault-files-header"><span>${t("Vault file")}</span>${files.length ? `<small>${files.length}</small>` : ""}</div>
+        ${files.map((path, index) => {
+          const parts = path.split("/");
+          const name = parts.pop() || path;
+          const folder = parts.join("/");
+          return `
+            <div class="codex-vault-file-row" data-codex-vault-row-index="${index}">
+              <button class="cast-drag-handle vault-drag-handle" type="button" data-codex-vault-drag="${index}" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Drag to reorder linked file"))}" aria-label="${escapeAttr(t("Drag to reorder linked file"))}">::</button>
+              <button class="node-vault-open" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(path)}" title="${escapeAttr(t("Open vault file"))}">
+                <span class="node-vault-open-icon" aria-hidden="true">↗</span>
+                <span class="node-vault-open-text"><strong>${escapeHtml(name)}</strong>${folder ? `<small>${escapeHtml(folder)}</small>` : ""}</span>
+              </button>
+              <button class="icon-button danger-button" type="button" data-action="remove-codex-vault-file" data-character-id="${escapeAttr(character.id)}" data-codex-vault-file-index="${index}" title="${escapeAttr(t("Remove vault file"))}" aria-label="${escapeAttr(t("Remove vault file"))}">×</button>
+            </div>
+          `;
+        }).join("")}
+        <div class="codex-vault-file-input-wrap">
+          <input data-character-vault-file-input data-character-id="${escapeAttr(character.id)}" value="" placeholder="${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Add vault file"))}" aria-autocomplete="list" aria-expanded="false">
+          <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function detachCodexCanvas(characterId) {
+    const character = getCharacterById(characterId);
+    if (!character?.canvasFile) return;
+    character.canvasFile = "";
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderWorkspaceFile();
+    setStatus(t("Board detached. The canvas file is kept in the vault."));
+  }
+
+  // Re-renders board previews when their .canvas file changes on disk (called by the
+  // plugin's vault watcher).
+  function refreshCodexCanvasPreviews(pathValue) {
+    const path = normalizeNodeVaultFileReference(pathValue);
+    dom.charactersPanel?.querySelectorAll?.("[data-codex-canvas-embed]").forEach((element) => {
+      if (path && normalizeNodeVaultFileReference(element.dataset.canvasPath) !== path) return;
+      void renderCodexCanvasPreview(element);
+    });
+  }
+
+  function setCodexIcon(characterId, path) {
+    const character = getCharacterById(characterId);
+    if (!character) return;
+    character.icon = normalizeNodeVaultFileReference(path);
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderCharacterAwareSurfaces();
+    setStatus(character.icon ? t("Icon updated.") : t("Icon removed."));
+  }
+
+  async function createCodexCanvasForCharacter(characterId) {
+    const host = window.NarrativeCanvasHost;
+    const character = getCharacterById(characterId);
+    if (!character || !host?.createCodexCanvas) return;
+    try {
+      const path = await host.createCodexCanvas({
+        id: character.id,
+        name: character.name,
+        images: getCharacterImages(character),
+        files: normalizeCodexVaultFiles(character.vaultFiles).map((entry) => entry.path ?? entry),
+        codexFile: character.codexFile
+      });
+      if (!path) return;
+      character.canvasFile = normalizeNodeVaultFileReference(path);
+      invalidateCharacterRenderContext();
+      setProjectDirty(true);
+      renderWorkspaceFile();
+      setStatus(t("Board created."));
+    } catch (error) {
+      console.error(error);
+      setStatus(t("Could not create the board."));
+    }
+  }
+
+  // The board preview parses the .canvas JSON directly and draws a scaled, read-only
+  // snapshot: image cards show the image, note cards show a text excerpt, groups show
+  // dashed frames, edges are drawn as lines. (Obsidian's own embed component does not
+  // render inside the plugin's shell.)
+  const CANVAS_PREVIEW_COLOR_PRESETS = {
+    1: "#fb464c", 2: "#e9973f", 3: "#e0de71", 4: "#44cf6e", 5: "#53dfdd", 6: "#a882ff"
+  };
+
+  function hydrateCodexCanvasEmbeds() {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.readVaultFile) return;
+    dom.charactersPanel?.querySelectorAll?.("[data-codex-canvas-embed]").forEach((element) => {
+      if (element.dataset.canvasEmbedHydrated) return;
+      element.dataset.canvasEmbedHydrated = "true";
+      void renderCodexCanvasPreview(element, host);
+    });
+  }
+
+  async function renderCodexCanvasPreview(element, host = window.NarrativeCanvasHost) {
+    try {
+      const raw = await host.readVaultFile(element.dataset.canvasPath);
+      const text = typeof raw === "string" ? raw : String(raw?.text || "");
+      const data = JSON.parse(text || "{}");
+      if (!element.isConnected) return;
+      renderCanvasPreviewInto(element, data, host);
+    } catch (error) {
+      console.error(error);
+      element.textContent = t("Could not load the board.");
+    }
+  }
+
+  function renderCanvasPreviewInto(element, data, host) {
+    const nodes = (Array.isArray(data?.nodes) ? data.nodes : []).filter((node) => Number.isFinite(Number(node?.x)));
+    const edges = Array.isArray(data?.edges) ? data.edges : [];
+    if (!nodes.length) {
+      element.textContent = t("The board is empty.");
+      return;
+    }
+    const pad = 40;
+    const minX = Math.min(...nodes.map((node) => Number(node.x))) - pad;
+    const minY = Math.min(...nodes.map((node) => Number(node.y))) - pad;
+    const maxX = Math.max(...nodes.map((node) => Number(node.x) + (Number(node.width) || 0))) + pad;
+    const maxY = Math.max(...nodes.map((node) => Number(node.y) + (Number(node.height) || 0))) + pad;
+    const boundsWidth = Math.max(1, maxX - minX);
+    const boundsHeight = Math.max(1, maxY - minY);
+    const containerWidth = element.clientWidth || 640;
+    // Cover mode (overview card): fit the whole board into the fixed cover box.
+    const heightLimit = element.dataset.canvasCover === "true" ? (element.clientHeight || 150) : 520;
+    const scale = Math.min(1, containerWidth / boundsWidth, heightLimit / boundsHeight);
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const edgePoint = (node, side) => {
+      const x = Number(node.x) - minX;
+      const y = Number(node.y) - minY;
+      const w = Number(node.width) || 0;
+      const h = Number(node.height) || 0;
+      if (side === "left") return [x, y + h / 2];
+      if (side === "right") return [x + w, y + h / 2];
+      if (side === "top") return [x + w / 2, y];
+      return [x + w / 2, y + h];
+    };
+    const colorOf = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      return CANVAS_PREVIEW_COLOR_PRESETS[raw] || (raw.startsWith("#") ? raw : "");
+    };
+    // Groups render behind cards, in area order so nested groups stay visible.
+    const ordered = [...nodes].sort((a, b) => (a.type === "group" ? -1 : 0) - (b.type === "group" ? -1 : 0));
+    const cards = ordered.map((node) => {
+      const x = Number(node.x) - minX;
+      const y = Number(node.y) - minY;
+      const w = Number(node.width) || 0;
+      const h = Number(node.height) || 0;
+      const color = colorOf(node.color);
+      const style = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;${color ? `--canvas-card-color:${escapeAttr(color)};` : ""}`;
+      if (node.type === "group") {
+        return `<div class="canvas-preview-group" style="${style}">${node.label ? `<span>${escapeHtml(String(node.label))}</span>` : ""}</div>`;
+      }
+      if (node.type === "text") {
+        return `<div class="canvas-preview-card is-text" style="${style}"><div class="canvas-preview-card-body">${escapeHtml(String(node.text || "")).slice(0, 1200)}</div></div>`;
+      }
+      if (node.type === "file") {
+        const path = String(node.file || "");
+        const name = path.split("/").pop() || path;
+        if (CODEX_IMAGE_FILE_PATTERN.test(path) && host?.getVaultResourceUrl) {
+          return `<div class="canvas-preview-card is-image" style="${style}"><img src="${escapeAttr(host.getVaultResourceUrl(path))}" alt="" loading="lazy" draggable="false"></div>`;
+        }
+        return `<div class="canvas-preview-card is-file" style="${style}" data-canvas-preview-file="${escapeAttr(path)}"><div class="canvas-preview-card-title">${escapeHtml(name)}</div><div class="canvas-preview-card-body" data-canvas-preview-file-body>${escapeHtml(t("Loading linked file..."))}</div></div>`;
+      }
+      return `<div class="canvas-preview-card is-file" style="${style}"><div class="canvas-preview-card-title">${escapeHtml(String(node.url || node.type || ""))}</div></div>`;
+    }).join("");
+    const lines = edges.map((edge) => {
+      const from = nodeById.get(edge.fromNode);
+      const to = nodeById.get(edge.toNode);
+      if (!from || !to) return "";
+      const [x1, y1] = edgePoint(from, String(edge.fromSide || "bottom"));
+      const [x2, y2] = edgePoint(to, String(edge.toSide || "top"));
+      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+    }).join("");
+    const offsetX = element.dataset.canvasCover === "true"
+      ? Math.max(0, Math.round((containerWidth - boundsWidth * scale) / 2))
+      : 0;
+    element.replaceChildren();
+    element.insertAdjacentHTML("beforeend", `
+      <div class="canvas-preview-viewport" style="height:${Math.round(boundsHeight * scale)}px">
+        <div class="canvas-preview-inner" style="left:${offsetX}px;width:${boundsWidth}px;height:${boundsHeight}px;transform:scale(${scale})">
+          <svg class="canvas-preview-edges" width="${boundsWidth}" height="${boundsHeight}" aria-hidden="true">${lines}</svg>
+          ${cards}
+        </div>
+      </div>
+    `);
+    hydrateCanvasPreviewFileCards(element, host);
+  }
+
+  function hydrateCanvasPreviewFileCards(element, host) {
+    if (!host?.readVaultFile) return;
+    element.querySelectorAll("[data-canvas-preview-file]").forEach((card) => {
+      const path = card.dataset.canvasPreviewFile;
+      const body = card.querySelector("[data-canvas-preview-file-body]");
+      if (!path || !body) return;
+      Promise.resolve(host.readVaultFile(path)).then((raw) => {
+        if (!body.isConnected) return;
+        const text = (typeof raw === "string" ? raw : String(raw?.text || ""))
+          .replace(/^---\n[\s\S]*?\n---\n?/, "")
+          .trim();
+        body.textContent = text ? text.slice(0, 600) : t("Linked file is empty.");
+      }).catch(() => {
+        if (body.isConnected) body.textContent = t("Could not preview the linked vault file.");
+      });
+    });
+  }
+
+  function addCodexVaultFile(characterId, path) {
+    const character = getCharacterById(characterId);
+    const normalized = normalizeNodeVaultFileReference(path);
+    if (!character || !normalized) return;
+    const files = normalizeCodexVaultFiles(character.vaultFiles);
+    if (files.includes(normalized)) {
+      hideVaultFileSuggestions();
+      setStatus("File already linked.");
+      return;
+    }
+    files.push(normalized);
+    character.vaultFiles = files;
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    hideVaultFileSuggestions();
+    renderWorkspaceFile();
+    setStatus(t("Vault file linked."));
+  }
+
+  function removeCodexVaultFile(characterId, index) {
+    const character = getCharacterById(characterId);
+    if (!character) return;
+    const files = normalizeCodexVaultFiles(character.vaultFiles);
+    if (!Number.isInteger(index) || index < 0 || index >= files.length) return;
+    files.splice(index, 1);
+    character.vaultFiles = files;
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderWorkspaceFile();
+    setStatus(t("Vault file removed."));
+  }
+
+  function renderCodexKindOptions(selected) {
+    const value = normalizeCodexKind(selected);
+    return getCodexKindsList()
+      .map((kind) => `<option value="${escapeAttr(kind)}" ${kind === value ? "selected" : ""}>${escapeHtml(t(kind))}</option>`)
+      .join("");
+  }
+
+  function getCodexKindFieldLabels(kind) {
+    if (kind === "Character") return { primary: t("Role"), secondary: t("Voice") };
+    if (kind === "Location") return { primary: t("Type"), secondary: t("Atmosphere") };
+    if (kind === "Item") return { primary: t("Type"), secondary: t("Owner") };
+    if (kind === "Lore") return { primary: t("Type"), secondary: t("Reference source") };
+    // Custom categories get generic, purpose-neutral labels instead of inheriting
+    // the Character defaults; add per-field templates for anything more specific.
+    return { primary: t("Type"), secondary: t("Summary") };
+  }
+
+  function renderCharacterBacklinkSections(groups, characterId) {
+    const nonEmptyGroups = groups.filter((group) => group.items.length);
+    if (!nonEmptyGroups.length) return `<div class="linked-node empty">${t("No linked scenes yet")}</div>`;
+    return `
+      <div class="character-backlink-section">
+        ${nonEmptyGroups.map((group) => renderCharacterBacklinkGroup(group, characterId)).join("")}
+      </div>
+    `;
+  }
+
+  function renderCharacterBacklinkGroup(group, characterId) {
+    const expanded = isCharacterBacklinkGroupExpanded(characterId, group.id);
+    const label = t(group.label);
+    return `
+      <section class="character-backlink-group nc-collapsible${expanded ? " expanded" : ""}">
+        <header class="character-backlink-header nc-collapsible-header">
+          <button class="nc-section-toggle character-backlink-toggle" type="button" data-action="toggle-character-backlink-group" data-character-id="${escapeAttr(characterId)}" data-character-backlink-group="${escapeAttr(group.id)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${escapeAttr(`${label} (${group.items.length})`)}">
+            <span class="nc-section-caret" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+            <span class="nc-section-title">${escapeHtml(label)}</span>
+          </button>
+          <span class="nc-section-count">${group.items.length}</span>
+        </header>
+        ${expanded ? `
+          <div class="linked-node-list">
+            ${renderCharacterBacklinkGroupItems(group)}
+          </div>
+        ` : ""}
+      </section>
+    `;
+  }
+
+  function getCharacterBacklinkGroupKey(characterId, groupId) {
+    return JSON.stringify([String(characterId || ""), String(groupId || "")]);
+  }
+
+  function isCharacterBacklinkGroupExpanded(characterId, groupId) {
+    // Groups are expanded by default; the set remembers the ones the user collapsed.
+    const keys = state.characterBacklinkGroupCollapsedKeys;
+    return !(keys instanceof Set && keys.has(getCharacterBacklinkGroupKey(characterId, groupId)));
+  }
+
+  function renderCharacterBacklinkGroupItems(group) {
+    // The relation group header is the fold level; an expanded group always shows
+    // every node without a second "show more" truncation.
+    return group.items.map((item) => renderCharacterBacklinkItem(item)).join("");
   }
 
   function renderCharacterBacklinkItem(item) {
@@ -7825,7 +19904,7 @@ function installNarrativeCanvasApp() {
         ` : ""}
       </div>
     `;
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const textarea = resizePlaybookJsonTextarea();
       restorePlaybookJsonSearchHighlight();
       if (options.focusJsonToken) focusPlaybookJsonToken(options.focusJsonToken, textarea);
@@ -9829,7 +21908,7 @@ function installNarrativeCanvasApp() {
       textarea.focus();
     }
     scrollPlaybookJsonLineIntoView(textarea, lineIndex);
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       setTextareaSelection(textarea, lineStart, lineEnd);
       scrollPlaybookJsonLineIntoView(textarea, lineIndex);
     });
@@ -10348,9 +22427,13 @@ function installNarrativeCanvasApp() {
     const width = key === "characterEncountered" && sourceWidth === "220px"
       ? defaultColumn?.width
       : sourceWidth || defaultColumn?.width;
+    const sourceLabel = String((typeof column === "object" && column?.label) || defaultColumn?.label || key).trim() || key;
+    const label = key === "characterEncountered" && ["Characters", "Character Encountered"].includes(sourceLabel)
+      ? defaultColumn?.label || sourceLabel
+      : sourceLabel;
     return {
       key,
-      label: String((typeof column === "object" && column?.label) || defaultColumn?.label || key).trim() || key,
+      label,
       width: normalizeEventColumnWidth(width),
       readonly: Boolean((typeof column === "object" && column?.readonly) || defaultColumn?.readonly),
       custom: defaultColumn ? Boolean(typeof column === "object" && column?.custom) : true
@@ -10615,12 +22698,14 @@ function installNarrativeCanvasApp() {
     dom.genericTextTitle.textContent = t(options.title || "Edit value");
     dom.genericTextLabel.textContent = t(options.label || "Value");
     dom.genericTextInput.value = options.value || "";
-    dom.genericTextInput.maxLength = options.maxLength ? String(options.maxLength) : "";
+    // Assigning "" coerces maxLength to 0 and blocks all typing; remove instead.
+    if (options.maxLength) dom.genericTextInput.maxLength = String(options.maxLength);
+    else dom.genericTextInput.removeAttribute("maxlength");
     dom.genericTextBody.textContent = t(options.message || "");
     dom.genericTextButton.textContent = t(options.confirmLabel || "Apply");
     dom.genericTextDialog.returnValue = "";
     dom.genericTextDialog.showModal();
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       dom.genericTextInput.focus();
       dom.genericTextInput.select();
     });
@@ -10955,6 +23040,7 @@ function installNarrativeCanvasApp() {
     });
     if (dom.frameLayer) dom.frameLayer.innerHTML = frameMarkup.join("");
     dom.nodeLayer.innerHTML = nodeMarkup.join("");
+    hydrateVaultFilePreviews();
     refreshGraphHoverClasses();
     refreshWorkspaceSearchCount();
   }
@@ -11002,6 +23088,7 @@ function installNarrativeCanvasApp() {
             ${renderNodeTitle(node, inlineEditField)}
             ${renderNodeCastChips(node)}
             ${renderNodeCardContent(node, inlineEditField)}
+            ${renderNodeVaultFileCard(node)}
           </div>
           <button class="node-resize-handle right" data-resize-handle="e" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize width"))}" aria-label="${escapeAttr(t("Resize width"))}"></button>
           <button class="node-resize-handle bottom" data-resize-handle="s" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize height"))}" aria-label="${escapeAttr(t("Resize height"))}"></button>
@@ -11077,6 +23164,137 @@ function installNarrativeCanvasApp() {
     if (isChoiceNode(node)) return renderChoiceNodeCardContent(node);
     if (isDialogNode(node) && Array.isArray(node.turns) && node.turns.length) return renderDialogNodeCardContent(node);
     return `${renderNodeText(node, inlineEditField)}${hasNodeChoices(node) ? `<div class="node-meta">${t("{count} choices", { count: node.choices.length })}</div>` : ""}`;
+  }
+
+  function renderNodeVaultFileCard(node) {
+    // Frames organize the canvas; they do not carry vault file links.
+    if (isFrameNode(node)) return "";
+    const host = window.NarrativeCanvasHost;
+    const references = getNodeVaultFiles(node);
+    if (!host?.readVaultFile || !references.length) return "";
+    return `<div class="node-vault-links" data-no-drag="true">${references.map((entry, index) => {
+      const parts = entry.path.split("/");
+      const name = parts.pop() || entry.path;
+      const folder = parts.join("/");
+      return `
+        <section class="node-vault-link${entry.preview ? " is-previewing" : ""}" data-no-drag="true">
+          <div class="node-vault-link-row">
+            <button class="node-vault-open" type="button" data-action="open-node-vault-file" data-node-id="${escapeAttr(node.id)}" data-node-vault-file-index="${index}" data-no-drag="true" title="${escapeAttr(t("Open vault file"))}">
+              <span class="node-vault-open-icon" aria-hidden="true">↗</span>
+              <span class="node-vault-open-text"><strong>${escapeHtml(name)}</strong>${folder ? `<small>${escapeHtml(folder)}</small>` : ""}</span>
+            </button>
+            ${entry.preview && CODEX_IMAGE_FILE_PATTERN.test(entry.path) ? `
+              <input type="range" class="node-vault-size-slider" data-node-vault-size-slider data-node-id="${escapeAttr(node.id)}" data-node-vault-file-index="${index}" min="48" max="320" step="4" value="${normalizeVaultPreviewSize(entry.previewSize)}" data-no-drag="true" title="${escapeAttr(t("Image preview size"))}" aria-label="${escapeAttr(t("Image preview size"))}">
+            ` : ""}
+            ${renderNodeVaultPreviewSwitch(node, index, true)}
+          </div>
+          ${entry.preview ? `<div class="node-vault-preview" style="--vault-preview-h:${normalizeVaultPreviewSize(entry.previewSize)}px" data-vault-file-preview data-node-vault-preview-index="${index}" data-vault-file-path="${escapeAttr(entry.path)}" aria-live="polite">${escapeHtml(t("Loading linked file..."))}</div>` : ""}
+        </section>
+      `;
+    }).join("")}</div>`;
+  }
+
+  function renderNodeVaultPreviewSwitch(node, index = 0, compact = false) {
+    const enabled = Boolean(getNodeVaultFiles(node)[index]?.preview);
+    const label = t("Preview linked file on canvas");
+    return `
+      <button class="vault-preview-toggle${enabled ? " is-enabled" : ""}${compact ? " is-compact" : ""}" type="button" role="switch" aria-checked="${enabled ? "true" : "false"}" aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}" data-action="toggle-node-vault-preview" data-node-id="${escapeAttr(node?.id || "")}" data-node-vault-file-index="${index}" data-no-drag="true">
+        <span class="vault-preview-toggle-track" aria-hidden="true"><span class="vault-preview-toggle-thumb"></span></span>
+      </button>
+    `;
+  }
+
+  function hydrateVaultFilePreviews() {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.readVaultFile || !dom.nodeLayer) return;
+    const previews = Array.from(dom.nodeLayer.querySelectorAll("[data-vault-file-preview]"));
+    const paths = [...new Set(previews.map((element) => normalizeNodeVaultFileReference(element.dataset.vaultFilePath)).filter(Boolean))];
+    paths.forEach((path) => { void loadVaultFilePreview(path); });
+  }
+
+  async function loadVaultFilePreview(path) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.readVaultFile || !path) return;
+    const now = Date.now();
+    // Image files render as images, not as their source text.
+    if (CODEX_IMAGE_FILE_PATTERN.test(path) && host.getVaultResourceUrl) {
+      const image = { status: "loaded", loadedAt: now, text: "", sourcePath: path, isMarkdown: false, isImage: true, imageUrl: host.getVaultResourceUrl(path), error: "" };
+      state.vaultFilePreviewCache.set(path, image);
+      patchVaultFilePreview(path, image);
+      return;
+    }
+    const cached = state.vaultFilePreviewCache.get(path);
+    if (cached?.status === "loading") return;
+    if (cached && now - cached.loadedAt < 1500) {
+      patchVaultFilePreview(path, cached);
+      return;
+    }
+    const loading = { status: "loading", loadedAt: now, text: "", error: "" };
+    state.vaultFilePreviewCache.set(path, loading);
+    patchVaultFilePreview(path, loading);
+    try {
+      const result = await host.readVaultFile(path);
+      const text = typeof result === "string" ? result : String(result?.text || "");
+      const sourcePath = typeof result === "string" ? path : normalizeNodeVaultFileReference(result?.path) || path;
+      const isMarkdown = typeof result === "string"
+        ? /\.(?:md|markdown)$/i.test(sourcePath)
+        : Boolean(result?.isMarkdown ?? /\.(?:md|markdown)$/i.test(sourcePath));
+      const loaded = { status: "loaded", loadedAt: Date.now(), text: formatVaultFilePreviewText(text), sourcePath, isMarkdown, error: "" };
+      state.vaultFilePreviewCache.set(path, loaded);
+      patchVaultFilePreview(path, loaded);
+    } catch (error) {
+      console.error(error);
+      const failed = { status: "error", loadedAt: Date.now(), text: "", error: t("Could not preview the linked vault file.") };
+      state.vaultFilePreviewCache.set(path, failed);
+      patchVaultFilePreview(path, failed);
+    }
+  }
+
+  function patchVaultFilePreview(path, entry) {
+    const host = window.NarrativeCanvasHost;
+    if (!dom.nodeLayer) return;
+    dom.nodeLayer.querySelectorAll("[data-vault-file-preview]").forEach((element) => {
+      if (normalizeNodeVaultFileReference(element.dataset.vaultFilePath) !== path) return;
+      element.classList.toggle("is-loading", entry.status === "loading");
+      element.classList.toggle("is-error", entry.status === "error");
+      element.classList.toggle("is-markdown", entry.status === "loaded" && Boolean(entry.isMarkdown));
+      element.classList.toggle("is-image", entry.status === "loaded" && Boolean(entry.isImage));
+      if (entry.status === "loading") element.textContent = t("Loading linked file...");
+      else if (entry.status === "error") element.textContent = entry.error || t("Could not preview the linked vault file.");
+      else if (entry.isImage) {
+        if (entry.imageUrl) {
+          const img = document.createElement("img");
+          img.src = entry.imageUrl;
+          img.alt = "";
+          img.draggable = false;
+          img.loading = "lazy";
+          element.replaceChildren(img);
+        } else {
+          element.textContent = t("Could not preview the linked vault file.");
+        }
+      }
+      else if (!entry.text) element.textContent = t("Linked file is empty.");
+      else if (entry.isMarkdown && host?.renderVaultMarkdown) {
+        const renderToken = String(entry.loadedAt || Date.now());
+        element.dataset.vaultMarkdownRender = renderToken;
+        element.replaceChildren();
+        void Promise.resolve(host.renderVaultMarkdown(entry.text, element, entry.sourcePath || path)).catch((error) => {
+          console.error(error);
+          if (element.dataset.vaultMarkdownRender === renderToken) {
+            element.classList.remove("is-markdown");
+            element.textContent = entry.text;
+          }
+        });
+      } else {
+        element.textContent = entry.text;
+      }
+    });
+  }
+
+  function formatVaultFilePreviewText(value) {
+    const text = String(value || "").replace(/\r\n?/g, "\n").trim();
+    if (text.length <= 6000) return text;
+    return `${text.slice(0, 6000).trimEnd()}\n…`;
   }
 
   function renderChoiceNodeCardContent(node) {
@@ -12228,6 +24446,7 @@ function installNarrativeCanvasApp() {
   }
 
   function renderNodePanel(node) {
+    hideVaultFileSuggestions();
     dom.nodePanel.classList.remove("is-empty");
     if (!node) {
       dom.nodePanel.replaceChildren();
@@ -12256,6 +24475,7 @@ function installNarrativeCanvasApp() {
             <input data-node-field="title" value="${escapeAttr(node.title || "")}">
           </label>
           ${renderNodeBodyField(node)}
+          ${renderNodeVaultFileField(node)}
           ${isDialogNode(node) ? renderNodeDialogTurnsField(node) : ""}
           ${renderNodeCastFields(node)}
           ${!isFrameNode(node) ? renderNodeStateLogicFields(node) : ""}
@@ -12314,7 +24534,7 @@ function installNarrativeCanvasApp() {
           <button class="small-button" type="button" data-action="add-dialog-turn">${t("Add turn")}</button>
         </div>
         <datalist id="dialogTurnSpeakerOptions">
-          ${getCharacters().map((char) => `<option value="${escapeAttr(char.name)}"></option>`).join("")}
+          ${getCastCharacters().map((char) => `<option value="${escapeAttr(char.name)}"></option>`).join("")}
         </datalist>
         ` : ""}
       </section>
@@ -12354,6 +24574,50 @@ function installNarrativeCanvasApp() {
     `;
   }
 
+  function renderNodeVaultFileField(node) {
+    // Frames organize the canvas; they do not carry vault file links.
+    if (isFrameNode(node)) return "";
+    const host = window.NarrativeCanvasHost;
+    if (!host?.searchVaultFiles) return "";
+    const references = getNodeVaultFiles(node);
+    const expanded = isNodeSectionExpanded("vaultFile");
+    const summary = references.length ? String(references.length) : t("Not linked");
+    return `
+      <section class="node-vault-file-field nc-collapsible${expanded ? " expanded" : ""}">
+        <header class="node-vault-file-header nc-collapsible-header">
+          ${renderNodeSectionToggle("vaultFile", t("Vault file"), expanded)}
+          <span class="nc-section-count">${escapeHtml(summary)}</span>
+        </header>
+        ${expanded ? `
+        <div class="node-vault-file-content">
+        <div class="node-vault-file-list">
+          ${references.map((entry, index) => `
+            <div class="node-vault-file-item" data-node-vault-row-index="${index}">
+              <div class="node-vault-file-input-row">
+                <button class="cast-drag-handle vault-drag-handle" type="button" data-node-vault-drag="${index}" title="${escapeAttr(t("Drag to reorder linked file"))}" aria-label="${escapeAttr(t("Drag to reorder linked file"))}">::</button>
+                <div class="node-vault-file-input-wrap">
+                  <input data-node-vault-file-index="${index}" value="${escapeAttr(entry.path)}" placeholder="${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Vault file"))}" aria-autocomplete="list" aria-expanded="false">
+                  <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+                </div>
+                <button class="icon-button vault-row-icon-button" type="button" data-action="open-node-vault-file" data-node-vault-file-index="${index}" title="${escapeAttr(t("Open vault file"))}" aria-label="${escapeAttr(t("Open vault file"))}">↗</button>
+                <button class="icon-button danger-button vault-row-icon-button" type="button" data-action="clear-node-vault-file" data-node-vault-file-index="${index}" title="${escapeAttr(t("Remove vault file"))}" aria-label="${escapeAttr(t("Remove vault file"))}">×</button>
+              </div>
+            </div>
+          `).join("")}
+          <div class="node-vault-file-item is-add">
+            <div class="node-vault-file-input-wrap">
+              <input data-node-vault-file-index="${references.length}" value="" placeholder="${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Add vault file"))}" aria-autocomplete="list" aria-expanded="false">
+              <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+            </div>
+          </div>
+        </div>
+        <small>${escapeHtml(t("Link this node to notes or other files in the vault."))}</small>
+        </div>
+        ` : ""}
+      </section>
+    `;
+  }
+
   function isNodeSectionExpanded(sectionKey) {
     if (!sectionKey) return false;
     const set = state.nodeSectionExpandedIds;
@@ -12385,24 +24649,22 @@ function installNarrativeCanvasApp() {
   }
 
   function renderNodeCastFields(node) {
-    const characters = getCharacters();
+    const entries = getCharacters();
     const cast = normalizeNodeCast(node.cast);
     const autoLinks = getNodeCharacterLinks(node, { includeCast: false, includeEventAggregate: false });
     const expanded = isNodeSectionExpanded("cast");
-    const summary = characters.length
+    const summary = entries.length
       ? `${cast.length} ${t("manual")}, ${autoLinks.length} ${t("auto")}`
-      : t("No characters yet");
-    const body = !characters.length
-      ? `<button class="small-button" data-action="add-character">${t("Add character")}</button>`
+      : t("No library entries yet");
+    const body = !entries.length
+      ? `<button class="small-button" data-action="add-codex-entry">${t("Add entry")}</button>`
       : `
         <div class="cast-row-list">
-          ${cast.map((entry, index) => renderNodeCastRow(entry, index)).join("") || `<div class="cast-empty">${t("No manual cast links.")}</div>`}
+          ${cast.map((entry, index) => renderNodeCastRow(entry, index)).join("") || `<div class="cast-empty">${t("No manual library references.")}</div>`}
         </div>
         <div class="cast-add-row">
-          <select data-new-cast-character>
-            ${renderCastCharacterOptions("", { placeholder: t("Select character...") })}
-          </select>
-          <select data-new-cast-role>
+          ${renderCastEntryPicker("", "new")}
+          <select data-new-cast-role aria-label="${escapeAttr(t("Relation"))}">
             ${renderCastRelationOptions("Present")}
           </select>
           <button class="small-button" data-action="add-node-cast">${t("Add")}</button>
@@ -12419,7 +24681,7 @@ function installNarrativeCanvasApp() {
     return `
       <section class="cast-editor nc-collapsible${expanded ? " expanded" : ""}">
         <div class="cast-editor-header nc-collapsible-header">
-          ${renderNodeSectionToggle("cast", t("Cast"), expanded)}
+          ${renderNodeSectionToggle("cast", t("Library references"), expanded)}
           <span>${escapeHtml(summary)}</span>
         </div>
         ${expanded ? body : ""}
@@ -12908,33 +25170,177 @@ function installNarrativeCanvasApp() {
   }
 
   function renderNodeCastRow(entry, index) {
+    const codexEntry = getCharacterById(entry.characterId);
     return `
-      <div class="cast-row">
-        <select data-node-cast-index="${index}" data-node-cast-field="characterId">
-          ${renderCastCharacterOptions(entry.characterId)}
-        </select>
+      <div class="cast-row" data-node-cast-row-index="${index}" data-codex-kind="${escapeAttr(codexEntry?.kind || "Character")}">
+        <button class="cast-drag-handle" type="button" data-node-cast-drag="${index}" title="${escapeAttr(t("Drag to reorder reference"))}" aria-label="${escapeAttr(t("Drag to reorder reference"))}">::</button>
+        ${renderCastEntryPicker(entry.characterId, String(index))}
         <select data-node-cast-index="${index}" data-node-cast-field="role">
-          ${renderCastRelationOptions(entry.role)}
+          ${renderCastRelationOptions(entry.role, entry.characterId)}
         </select>
-        <button class="icon-button danger-button" title="${escapeAttr(t("Remove cast link"))}" data-action="delete-node-cast" data-node-cast-index="${index}">x</button>
+        <button class="icon-button danger-button" title="${escapeAttr(t("Remove library reference"))}" data-action="delete-node-cast" data-node-cast-index="${index}">x</button>
       </div>
     `;
   }
 
-  function renderCastCharacterOptions(selectedId, options = {}) {
-    const placeholder = options.placeholder
-      ? `<option value="" ${selectedId ? "" : "selected"}>${escapeHtml(options.placeholder)}</option>`
-      : "";
-    return placeholder + getCharacters().map((character) => `
-      <option value="${escapeAttr(character.id)}" ${character.id === selectedId ? "selected" : ""}>${escapeHtml(character.name || t("Unnamed Character"))}</option>
+  // Combobox for choosing a library entry: click or focus shows the full, category-grouped
+  // menu (dropdown behavior); typing filters it (search behavior). `context` is a cast row
+  // index, or "new" for the add row.
+  function renderCastEntryPicker(selectedId, context) {
+    const entry = getCharacterById(selectedId);
+    const name = entry ? (entry.name || t("Unnamed Character")) : "";
+    const contextAttr = context === "new"
+      ? ` data-cast-entry-context="new"`
+      : ` data-cast-entry-index="${escapeAttr(context)}"`;
+    return `
+      <div class="cast-entry-picker" data-cast-entry-picker data-codex-kind="${escapeAttr(entry?.kind || "")}">
+        <input data-cast-entry-input${contextAttr} data-cast-entry-id="${escapeAttr(entry ? entry.id : "")}" value="${escapeAttr(name)}" placeholder="${escapeAttr(t("Search or choose entry..."))}" role="combobox" aria-label="${escapeAttr(t("Library entry"))}" aria-autocomplete="list" aria-expanded="false" autocomplete="off" spellcheck="false">
+        <button class="cast-entry-picker-arrow" type="button" data-action="toggle-cast-entry-suggestions" tabindex="-1" aria-label="${escapeAttr(t("Show all entries"))}">▾</button>
+        <div class="cast-entry-suggestions" data-cast-entry-suggestions role="listbox" aria-label="${escapeAttr(t("Library entry"))}" hidden></div>
+      </div>
+    `;
+  }
+
+  function renderCastEntrySuggestionMarkup(input) {
+    const selectedId = input.dataset.castEntryId || "";
+    const selected = getCharacterById(selectedId);
+    const raw = String(input.value || "").trim();
+    // When the field still shows the selected entry's name, browse the full menu
+    // instead of filtering down to one entry.
+    const query = selected && raw === (selected.name || t("Unnamed Character")) ? "" : raw.toLowerCase();
+    const groups = getCodexKindsList().map((kind) => {
+      const entries = getCharacters().filter((entry) => entry.kind === kind
+        && (!query || String(entry.name || "").toLowerCase().includes(query)));
+      if (!entries.length) return "";
+      return `
+        <div class="cast-entry-suggestion-group" role="presentation">${escapeHtml(t(kind))}</div>
+        ${entries.map((entry) => `
+          <button type="button" class="cast-entry-suggestion${entry.id === selectedId ? " is-selected" : ""}" role="option" aria-selected="${entry.id === selectedId ? "true" : "false"}" data-action="select-cast-entry-suggestion" data-cast-entry-id="${escapeAttr(entry.id)}" data-codex-kind="${escapeAttr(entry.kind)}">
+            <span>${escapeHtml(entry.name || t("Unnamed Character"))}</span><small>${escapeHtml(t(entry.kind))}</small>
+          </button>
+        `).join("")}
+      `;
+    }).join("");
+    return groups || `<div class="cast-entry-suggestion-empty">${t("No matching entries.")}</div>`;
+  }
+
+  function openCastEntrySuggestions(input) {
+    const picker = input?.closest?.("[data-cast-entry-picker]");
+    const list = picker?.querySelector("[data-cast-entry-suggestions]");
+    if (!list) return;
+    hideCastEntrySuggestions(input);
+    list.innerHTML = renderCastEntrySuggestionMarkup(input);
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  function hideCastEntrySuggestions(exceptInput = null) {
+    dom.nodePanel?.querySelectorAll("[data-cast-entry-suggestions]").forEach((list) => {
+      const picker = list.closest("[data-cast-entry-picker]");
+      const input = picker?.querySelector("[data-cast-entry-input]");
+      if (exceptInput && input === exceptInput) return;
+      list.hidden = true;
+      list.innerHTML = "";
+      input?.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function restoreCastEntryInputValue(input) {
+    const entry = getCharacterById(input?.dataset?.castEntryId || "");
+    if (!input) return;
+    input.value = entry ? (entry.name || t("Unnamed Character")) : "";
+  }
+
+  function toggleCastEntrySuggestions(target) {
+    const picker = target?.closest?.("[data-cast-entry-picker]");
+    const input = picker?.querySelector("[data-cast-entry-input]");
+    const list = picker?.querySelector("[data-cast-entry-suggestions]");
+    if (!input || !list) return;
+    if (list.hidden) {
+      input.focus?.({ preventScroll: true });
+      input.select?.();
+      openCastEntrySuggestions(input);
+    } else {
+      hideCastEntrySuggestions();
+    }
+  }
+
+  function selectCastEntrySuggestion(target) {
+    const picker = target?.closest?.("[data-cast-entry-picker]");
+    const input = picker?.querySelector("[data-cast-entry-input]");
+    const entry = getCharacterById(target?.dataset?.castEntryId || "");
+    if (!input || !entry) return;
+    if (input.dataset.castEntryContext === "new") {
+      input.dataset.castEntryId = entry.id;
+      input.value = entry.name || t("Unnamed Character");
+      picker.dataset.codexKind = entry.kind;
+      const roleSelect = input.closest(".cast-add-row")?.querySelector("[data-new-cast-role]");
+      if (roleSelect) roleSelect.innerHTML = renderCastRelationOptions(getDefaultCodexRelation(entry), entry.id);
+      hideCastEntrySuggestions();
+      return;
+    }
+    const index = Number(input.dataset.castEntryIndex);
+    if (!Number.isInteger(index)) return;
+    const historyBefore = getHistorySnapshot();
+    setNodeCastField(index, "characterId", entry.id, true);
+    commitHistoryFromSnapshot(historyBefore);
+  }
+
+  function handleCastEntryPickerKeyDown(event) {
+    const input = event.target;
+    if (!input?.hasAttribute?.("data-cast-entry-input")) return false;
+    const picker = input.closest("[data-cast-entry-picker]");
+    const list = picker?.querySelector("[data-cast-entry-suggestions]");
+    if (!list) return false;
+    const options = [...list.querySelectorAll(".cast-entry-suggestion")];
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (list.hidden) {
+        openCastEntrySuggestions(input);
+        return true;
+      }
+      moveActiveSuggestion(options, event.key === "ArrowDown" ? 1 : -1);
+      return true;
+    }
+    if (event.key === "Enter") {
+      if (list.hidden) return false;
+      event.preventDefault();
+      const active = options.find((option) => option.classList.contains("active")) || options[0];
+      if (active) selectCastEntrySuggestion(active);
+      return true;
+    }
+    if (event.key === "Escape") {
+      if (list.hidden) return false;
+      event.preventDefault();
+      hideCastEntrySuggestions();
+      restoreCastEntryInputValue(input);
+      return true;
+    }
+    return false;
+  }
+
+  function renderCastRelationOptions(selectedRole, entryId = "") {
+    const role = normalizeCastRole(selectedRole);
+    const relations = getCodexRelationsForEntry(entryId, role);
+    return relations.map((relation) => `
+      <option value="${escapeAttr(relation)}" ${relation === role ? "selected" : ""}>${escapeHtml(getCastRelationLabel(relation))}</option>
     `).join("");
   }
 
-  function renderCastRelationOptions(selectedRole) {
-    const role = normalizeCastRole(selectedRole);
-    return CAST_RELATIONS.map((relation) => `
-      <option value="${escapeAttr(relation)}" ${relation === role ? "selected" : ""}>${escapeHtml(getCastRelationLabel(relation))}</option>
-    `).join("");
+  function getCodexRelationsForEntry(entryId, preservedRole = "") {
+    const entry = getCharacterById(entryId);
+    const kind = normalizeCodexKind(entry?.kind || "Character");
+    const relations = [...(CODEX_RELATIONS_BY_KIND[kind] || CODEX_RELATIONS_BY_KIND.Character)];
+    const role = normalizeCastRole(preservedRole);
+    if (preservedRole && !relations.includes(role)) relations.push(role);
+    return relations;
+  }
+
+  function getDefaultCodexRelation(entryOrKind) {
+    const kind = typeof entryOrKind === "string"
+      ? normalizeCodexKind(entryOrKind)
+      : normalizeCodexKind(entryOrKind?.kind || "Character");
+    return CODEX_DEFAULT_RELATION_BY_KIND[kind] || "Mentioned";
   }
 
   function getCastRelationLabel(role) {
@@ -12957,10 +25363,14 @@ function installNarrativeCanvasApp() {
   }
 
   function renderCastChip(link) {
-    const characterName = link.character?.name || getCharacterName(link.characterId) || "Character";
+    const character = link.character || getCharacterById(link.characterId);
+    const characterName = character?.name || getCharacterName(link.characterId) || "Character";
     const role = getCastRelationLabel(link.role);
-    const searchLabel = t("Search character: {name}", { name: characterName });
-    return `<button class="node-cast-chip node-cast-chip-button" type="button" data-action="open-character-search" data-character-id="${escapeAttr(link.characterId)}" data-no-drag="true" aria-label="${escapeAttr(searchLabel)}">${escapeHtml(characterName)} · ${escapeHtml(role)}</button>`;
+    const searchLabel = t("Open library entry: {name}", { name: characterName });
+    const kind = normalizeCodexKind(character?.kind || "Character");
+    const host = window.NarrativeCanvasHost;
+    const iconUrl = character?.icon && host?.getVaultResourceUrl ? host.getVaultResourceUrl(character.icon) : "";
+    return `<button class="node-cast-chip node-cast-chip-button" type="button" data-action="open-character-search" data-character-id="${escapeAttr(link.characterId)}" data-codex-kind="${escapeAttr(kind)}" data-no-drag="true" aria-label="${escapeAttr(searchLabel)}">${iconUrl ? `<img class="node-cast-chip-avatar" src="${escapeAttr(iconUrl)}" alt="" loading="lazy" draggable="false">` : ""}<span class="node-cast-chip-text"><span>${escapeHtml(characterName)}</span><small>${escapeHtml(t(kind))} · ${escapeHtml(role)}</small></span></button>`;
   }
 
   // Frame node properties render inline at the same level as every other property,
@@ -13497,7 +25907,7 @@ function installNarrativeCanvasApp() {
 
   function handleDocumentClickCapture(event) {
     if (event.__narrativeCanvasClickHandled) return;
-    const target = getCanvasCoveredFrameTarget(event) || event.target;
+    const target = getCanvasCoveredFrameTarget(event) || getComposedEventTarget(event);
     if (target?.closest?.("#aiFloatingButton, [data-action='close-ai-window']")) return;
     if (!isNarrativeCanvasClickDelegateTarget(target)) return;
     syncDomScopeForEventTarget(target);
@@ -13537,15 +25947,26 @@ function installNarrativeCanvasApp() {
     const mentionOption = target.closest("[data-mention-index]");
     if (mentionOption && state.mention) {
       const index = Number(mentionOption.dataset.mentionIndex);
-      const character = state.mention.characters[index];
-      if (character) {
-        insertMention(character);
+      const entry = state.mention.entries[index];
+      if (entry) {
+        insertMention(entry);
         event.preventDefault();
         return true;
       }
     }
+    const codexTagEditor = target.closest("[data-character-tag-editor]");
+    if (codexTagEditor && target === codexTagEditor) {
+      codexTagEditor.querySelector("[data-character-tag-input]")?.focus?.({ preventScroll: true });
+      event.preventDefault();
+      return true;
+    }
     if (state.mention && !dom.mentionPopover?.contains(target) && target !== state.mention.target) {
       hideMentionPopover();
+    }
+    if (state.vaultFileSuggestions
+      && target !== state.vaultFileSuggestions.target
+      && !target.closest?.("[data-vault-file-suggestions]")) {
+      hideVaultFileSuggestions();
     }
     if (getFormControlTarget(target)) return false;
 
@@ -13640,7 +26061,9 @@ function installNarrativeCanvasApp() {
         toggleNodeSelection(nodeId);
         return true;
       }
-      focusCanvasNode(nodeId);
+      // Single click only selects; the view stays put. Double-click centers the node
+      // (focusCanvasNodeForInlineEdit above).
+      selectNode(nodeId);
       return true;
     } else {
       state.lastNodeClick = { id: null, time: 0 };
@@ -13687,7 +26110,7 @@ function installNarrativeCanvasApp() {
     event.stopPropagation();
     if (typeof control.focus === "function") {
       requestAnimationFrame(() => {
-        if (document.activeElement !== control) control.focus({ preventScroll: true });
+        if (getScopeActiveElement() !== control) control.focus({ preventScroll: true });
       });
     }
   }
@@ -13698,11 +26121,11 @@ function installNarrativeCanvasApp() {
   }
 
   function handleGlobalMenuDismiss(event) {
-    if (isCanvasRadialMenuOpen() && !dom.canvasRadialMenu.contains(event.target)) {
+    if (isCanvasRadialMenuOpen() && !dom.canvasRadialMenu.contains(getComposedEventTarget(event))) {
       hideCanvasRadialMenu();
     }
     if (!isNodeContextMenuOpen()) return;
-    if (dom.nodeContextMenu.contains(event.target)) return;
+    if (dom.nodeContextMenu.contains(getComposedEventTarget(event))) return;
     hideNodeContextMenu();
   }
 
@@ -13721,11 +26144,11 @@ function installNarrativeCanvasApp() {
   }
 
   function handleGlobalAppPointerContext(event) {
-    state.lastAppInteractionAt = isNarrativeCanvasTarget(event.target) ? performance.now() : 0;
+    state.lastAppInteractionAt = isNarrativeCanvasTarget(getComposedEventTarget(event)) ? performance.now() : 0;
   }
 
   function handleGlobalAppFocusContext(event) {
-    if (!isNarrativeCanvasTarget(event.target)) return;
+    if (!isNarrativeCanvasTarget(getComposedEventTarget(event))) return;
     state.lastAppInteractionAt = performance.now();
   }
 
@@ -13736,7 +26159,7 @@ function installNarrativeCanvasApp() {
   function handleHistoryShortcutEvent(event) {
     if (event.defaultPrevented || !isHistoryShortcut(event)) return false;
     if (!isNarrativeCanvasShortcutContext(event.target)) return false;
-    const editTarget = getNativeEditingTarget(event.target) || getNativeEditingTarget(document.activeElement);
+    const editTarget = getNativeEditingTarget(event.target) || getNativeEditingTarget(getScopeActiveElement());
     if (editTarget && shouldPreserveNativeHistoryShortcut(editTarget)) return false;
     return applyHistoryShortcut(event);
   }
@@ -13775,7 +26198,7 @@ function installNarrativeCanvasApp() {
 
   function isNarrativeCanvasShortcutContext(target) {
     if (isNarrativeCanvasTarget(target)) return true;
-    if (isNarrativeCanvasTarget(document.activeElement)) return true;
+    if (isNarrativeCanvasTarget(getScopeActiveElement())) return true;
     return Boolean(state.lastAppInteractionAt && performance.now() - state.lastAppInteractionAt <= APP_SHORTCUT_CONTEXT_MS);
   }
 
@@ -13823,6 +26246,12 @@ function installNarrativeCanvasApp() {
 
   function handleContextMenu(event) {
     if (!isNarrativeCanvasTarget(event.target)) return;
+    const visionTile = event.target.closest?.("#visionBoardDialog [data-vision-board-tile]");
+    if (visionTile) {
+      event.preventDefault();
+      showVisionBoardLayerMenu(event, visionTile);
+      return;
+    }
     if (!isCanvasFileActive()) {
       hideNodeContextMenu();
       return;
@@ -13985,6 +26414,30 @@ function installNarrativeCanvasApp() {
       exitFrameCanvas();
       return;
     }
+    if (action === "open-node-vault-file") { void openNodeVaultFile(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex)); return; }
+    if (action === "clear-node-vault-file") { clearNodeVaultFile(Number(target.dataset.nodeVaultFileIndex)); return; }
+    if (action === "toggle-node-vault-preview") { toggleNodeVaultFilePreview(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex)); return; }
+    if (action === "select-vault-file-suggestion") { selectVaultFileSuggestion(target.dataset.vaultFilePath); return; }
+    if (action === "select-cast-entry-suggestion") { selectCastEntrySuggestion(target); return; }
+    if (action === "toggle-cast-entry-suggestions") { toggleCastEntrySuggestions(target); return; }
+    if (action === "choose-codex-image-file") { void chooseCodexImageFile(target.dataset.characterId); return; }
+    if (action === "import-local-codex-images") { openLocalCodexImageInput(target.dataset.characterId); return; }
+    if (action === "close-codex-image-picker") { closeCodexImagePicker(target.dataset.characterId); return; }
+    if (action === "open-vision-board") { openVisionBoard(target.dataset.visionBoardKind, target.dataset.visionBoardId); return; }
+    if (action === "close-vision-board") { closeVisionBoard(); return; }
+    if (action === "open-codex-reference") { void openCodexReference(target.dataset.vaultFileReference); return; }
+    if (action === "remove-codex-image") { removeCodexImage(target.dataset.characterId, Number(target.dataset.codexImageIndex)); return; }
+    if (action === "remove-codex-vault-file") { removeCodexVaultFile(target.dataset.characterId, Number(target.dataset.codexVaultFileIndex)); return; }
+    if (action === "create-codex-canvas") { void createCodexCanvasForCharacter(target.dataset.characterId); return; }
+    if (action === "clear-codex-icon") { setCodexIcon(target.dataset.characterId, ""); return; }
+    if (action === "detach-codex-canvas") { detachCodexCanvas(target.dataset.characterId); return; }
+    if (action === "clear-codex-image-file") { clearCodexImageFile(target.dataset.characterId); return; }
+    if (action === "set-codex-kind-filter") { setCodexKindFilter(target.dataset.codexKind); return; }
+    if (action === "set-codex-tag-filter") { setCodexTagFilter(target.dataset.codexTag); return; }
+    if (action === "clear-codex-tag-filter") { clearCodexTagFilter(); return; }
+    if (action === "select-codex-tag-suggestion") { selectCodexTagSuggestion(target); return; }
+    if (action === "open-codex-entry-detail") { openCodexEntryDetail(target.dataset.characterId); return; }
+    if (action === "close-codex-entry-detail") { closeCodexEntryDetail(); return; }
     const historyBefore = shouldRecordAction(action) ? getHistorySnapshot() : null;
     if (action === "add-node") addNode(target.dataset.type, readNodeSpawnPoint(target));
     if (action === "add-custom-node-type") addCustomNodeType();
@@ -14004,6 +26457,7 @@ function installNarrativeCanvasApp() {
     if (action === "clear-browser-storage") clearBrowserStorageFromUi();
     if (action === "open-sample-project") openSampleProjectFromUi();
     if (action === "add-character") addCharacter();
+    if (action === "add-codex-entry") addCodexEntry();
     if (action === "hide-character") hideCharacter(target.dataset.characterId);
     if (action === "show-character") showCharacter(target.dataset.characterId);
     if (action === "show-all-characters") showAllCharacters();
@@ -14012,7 +26466,14 @@ function installNarrativeCanvasApp() {
     if (action === "open-character-search") openCharacterSearch(target.dataset.characterId);
     if (action === "clear-character-focus") clearCharacterFocus();
     if (action === "clear-character-search") clearCharacterSearch();
-    if (action === "toggle-character-backlinks") toggleCharacterBacklinks(target.dataset.characterId);
+    if (action === "toggle-character-backlink-group") toggleCharacterBacklinkGroup(target.dataset.characterId, target.dataset.characterBacklinkGroup);
+    if (action === "remove-codex-tag") removeCodexTag(target);
+    if (action === "add-codex-extra-field") addCodexExtraField(target.dataset.characterId);
+    if (action === "remove-codex-extra-field") removeCodexExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex));
+    if (action === "add-codex-template-field") addCodexTemplateField();
+    if (action === "remove-codex-template-field") removeCodexTemplateField(target.dataset.codexTemplateKey);
+    if (action === "add-codex-kind") addCodexKind();
+    if (action === "remove-codex-kind") removeCodexKind(target.dataset.codexKind);
     if (action === "show-more-document") showMoreDocument(target.dataset.documentId);
     if (action === "add-node-cast") addNodeCast();
     if (action === "delete-node-cast") deleteNodeCast(Number(target.dataset.nodeCastIndex));
@@ -14132,6 +26593,7 @@ function installNarrativeCanvasApp() {
     if (action === "play-dialog-next") advanceDialogTurn(1);
     if (action === "play-dialog-prev") advanceDialogTurn(-1);
     if (action === "play-prev") previousPreview();
+    if (action === "play-history-jump") jumpToPreviewStep(target.dataset.playStepIndex);
     if (action === "play-manual") executePreviewManualAction(target.dataset.nodeId, target.dataset.playbookActionId);
     if (action === "restart-play") openPreview();
     commitHistoryFromSnapshot(historyBefore);
@@ -14432,7 +26894,7 @@ function installNarrativeCanvasApp() {
     dom.canvasRadialMenu.querySelectorAll("[data-radial-toggle]").forEach((toggle) => {
       toggle.setAttribute("aria-expanded", "false");
     });
-    const focused = document.activeElement;
+    const focused = getScopeActiveElement();
     if (focused && dom.canvasRadialMenu.contains(focused) && typeof focused.blur === "function") focused.blur();
     dom.canvasRadialMenu.hidden = true;
     dom.canvasRadialMenu.setAttribute("aria-hidden", "true");
@@ -14739,8 +27201,13 @@ function installNarrativeCanvasApp() {
 
   function selectFile(fileId) {
     if (!fileViews[fileId]) return;
-    if (state.activeFileId === fileId) return;
+    if (state.activeFileId === fileId) {
+      if (fileId === "characters" && state.codexSelectedEntryId) closeCodexEntryDetail();
+      return;
+    }
     state.activeFileId = fileId;
+    // Each page starts at its top; the back-to-top button resets with it.
+    dom.root?.classList.remove("workspace-scrolled");
 
     if (fileId === "adventure") {
       state.panel = state.selectedNodeId ? "node" : "project";
@@ -14750,8 +27217,10 @@ function installNarrativeCanvasApp() {
     }
 
     if (fileId === "characters") {
+      // Keep the last-opened entry detail when returning from another file;
+      // re-clicking the Library tab while already there returns to the overview (see above).
       renderDocumentFileSwitch();
-      setStatus("Characters.md opened.");
+      setStatus("Library.md opened.");
       return;
     }
 
@@ -14793,7 +27262,7 @@ function installNarrativeCanvasApp() {
     if (!target?.dataset) return "";
     if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
     const parts = [];
-    ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+    ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
       if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
     });
     ["nodeId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
@@ -14804,7 +27273,19 @@ function installNarrativeCanvasApp() {
 
   function handleEditFocusIn(event) {
     if (!isNarrativeCanvasTarget(event.target)) return;
+    if (event.target?.hasAttribute?.("data-character-tag-input")) updateCodexTagSuggestions(event.target);
+    if (event.target?.hasAttribute?.("data-cast-entry-input")) {
+      event.target.select?.();
+      openCastEntrySuggestions(event.target);
+    }
     beginNodeTitleReferenceEdit(event.target);
+    if (event.target?.dataset?.nodeVaultSizeSlider == null
+      && (event.target?.dataset?.nodeVaultFileIndex != null || event.target?.dataset?.characterImageFile || event.target?.dataset?.characterImagePickerInput || event.target?.dataset?.characterVaultFileInput != null || event.target?.dataset?.characterIconInput != null)) {
+      if (state.vaultFileSuggestionSuppressFocusOnce) state.vaultFileSuggestionSuppressFocusOnce = false;
+      // Force so an empty input lists every file on focus — the browse buttons are gone,
+      // the search input is the single entry point.
+      else void updateVaultFileSuggestions(event.target, { force: true });
+    }
     const key = getEditableHistoryKey(event.target);
     if (!key) return;
     state.editHistoryTarget = {
@@ -14815,11 +27296,28 @@ function installNarrativeCanvasApp() {
 
   function handleEditFocusOut(event) {
     const target = event.target;
+    if (target?.hasAttribute?.("data-character-tag-input")) {
+      const editor = target.closest("[data-character-tag-editor]");
+      if (!editor?.contains(event.relatedTarget)) hideCodexTagSuggestions(target);
+      return;
+    }
+    if (target?.hasAttribute?.("data-cast-entry-input")) {
+      const picker = target.closest("[data-cast-entry-picker]");
+      if (!picker?.contains(event.relatedTarget)) {
+        hideCastEntrySuggestions();
+        restoreCastEntryInputValue(target);
+      }
+      return;
+    }
     if (target?.dataset?.projectField === "variables") {
       setProjectField("variables", target.value);
     }
     commitFocusedEdit(event.target);
     finishNodeTitleReferenceEdit(target);
+    if ((target?.dataset?.nodeVaultFileIndex != null || target?.dataset?.characterImageFile || target?.dataset?.characterImagePickerInput || target?.dataset?.characterVaultFileInput != null || target?.dataset?.characterIconInput != null)
+      && !event.relatedTarget?.closest?.("[data-vault-file-suggestions]")) {
+      hideVaultFileSuggestions();
+    }
     if (target?.dataset?.inlineNodeField) {
       if (event.relatedTarget && dom.mentionPopover?.contains(event.relatedTarget)) return;
       if (shouldKeepInlineNodeEditOnFocusOut(target.dataset.nodeId, event.relatedTarget)) {
@@ -14846,8 +27344,45 @@ function installNarrativeCanvasApp() {
     }
     if (!isMentionTarget && !isNarrativeCanvasTarget(target)) return;
 
+    if (target.hasAttribute?.("data-character-tag-input")) {
+      handleCodexTagInput(target);
+      return;
+    }
+
+    if (target.hasAttribute?.("data-cast-entry-input")) {
+      openCastEntrySuggestions(target);
+      return;
+    }
+
     if (target.hasAttribute?.("data-ai-prompt")) {
       state.aiPromptDraft = target.value;
+      return;
+    }
+
+    if (target.dataset?.nodeVaultSizeSlider != null) {
+      setNodeVaultPreviewSize(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex), target.value, false);
+      return;
+    }
+
+    if (target.dataset?.nodeVaultFileIndex != null) {
+      setNodeVaultFile(Number(target.dataset.nodeVaultFileIndex), target.value);
+      void updateVaultFileSuggestions(target);
+      return;
+    }
+
+    if (target.dataset?.characterImageFile) {
+      setCharacterField(target.dataset.characterId, "imageFile", target.value, false);
+      void updateVaultFileSuggestions(target);
+      return;
+    }
+
+    if (target.dataset?.characterVaultFileInput != null || target.dataset?.characterIconInput != null) {
+      void updateVaultFileSuggestions(target, { force: true });
+      return;
+    }
+
+    if (target.dataset?.characterImagePickerInput) {
+      void updateVaultFileSuggestions(target, { force: true });
       return;
     }
 
@@ -14931,6 +27466,11 @@ function installNarrativeCanvasApp() {
 
     if (target.dataset.characterField) {
       setCharacterField(target.dataset.characterId, target.dataset.characterField, target.value, false);
+      return;
+    }
+
+    if (target.dataset.characterExtraPart) {
+      setCharacterExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex), target.dataset.characterExtraPart, target.value, false);
       return;
     }
 
@@ -15067,6 +27607,19 @@ function installNarrativeCanvasApp() {
     const target = event.target;
     if (!isNarrativeCanvasTarget(target)) return;
 
+    if (target.dataset?.nodeVaultSizeSlider != null) {
+      setNodeVaultPreviewSize(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex), target.value, true);
+      commitFocusedEdit(target);
+      return;
+    }
+
+    if (target.hasAttribute?.("data-codex-local-image-input")) {
+      const files = [...(target.files || [])];
+      target.value = "";
+      void importLocalCodexImages(target.dataset.characterId, files);
+      return;
+    }
+
     if (target.hasAttribute?.("data-document-source")) {
       state.documentDraft = target.value;
       state.documentDraftFormat = state.documentFormat;
@@ -15093,6 +27646,11 @@ function installNarrativeCanvasApp() {
       setCharacterField(target.dataset.characterId, target.dataset.characterField, target.value, true);
       commitFocusedEdit(target);
       finishNodeTitleReferenceEdit(target);
+      return;
+    }
+    if (target.dataset.characterExtraPart) {
+      setCharacterExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex), target.dataset.characterExtraPart, target.value, true);
+      commitFocusedEdit(target);
       return;
     }
     if (target.dataset.variableField) {
@@ -15288,8 +27846,59 @@ function installNarrativeCanvasApp() {
       if (!state.aiBusy) void sendAiMessage();
       return;
     }
+    if (handleVaultFileSuggestionKeyDown(event)) return;
     if (handleMentionKeyDown(event)) return;
     if (handleDocumentSourceKeyDown(event)) return;
+    if (handleCodexTagKeyDown(event)) return;
+    if (handleCastEntryPickerKeyDown(event)) return;
+    if (event.target?.hasAttribute?.("data-codex-template-input") && event.key === "Enter") {
+      event.preventDefault();
+      addCodexTemplateField();
+      return;
+    }
+    if (event.target?.dataset?.nodeCastDrag && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      const fromIndex = Number(event.target.dataset.nodeCastDrag);
+      const direction = event.key === "ArrowUp" ? -1 : 1;
+      const cast = normalizeNodeCast(getNode(state.selectedNodeId)?.cast);
+      const targetIndex = fromIndex + direction;
+      if (Number.isInteger(fromIndex) && targetIndex >= 0 && targetIndex < cast.length) {
+        const historyBefore = getHistorySnapshot();
+        if (moveNodeCastReference(fromIndex, targetIndex, direction < 0 ? "before" : "after")) {
+          commitHistoryFromSnapshot(historyBefore);
+          runAfterRender(() => dom.nodePanel?.querySelector(`[data-node-cast-drag="${targetIndex}"]`)?.focus?.({ preventScroll: true }));
+        }
+      }
+      event.preventDefault();
+      return;
+    }
+    if (event.target?.dataset?.codexVaultDrag != null && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      const fromIndex = Number(event.target.dataset.codexVaultDrag);
+      const characterId = event.target.dataset.characterId;
+      const direction = event.key === "ArrowUp" ? -1 : 1;
+      const targetIndex = fromIndex + direction;
+      const historyBefore = getHistorySnapshot();
+      if (moveCodexVaultFileReference(characterId, fromIndex, targetIndex, direction < 0 ? "before" : "after")) {
+        commitHistoryFromSnapshot(historyBefore);
+        runAfterRender(() => dom.charactersPanel?.querySelector(`[data-codex-vault-drag="${targetIndex}"]`)?.focus?.({ preventScroll: true }));
+      }
+      event.preventDefault();
+      return;
+    }
+    if (event.target?.dataset?.nodeVaultDrag && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      const fromIndex = Number(event.target.dataset.nodeVaultDrag);
+      const direction = event.key === "ArrowUp" ? -1 : 1;
+      const references = getNodeVaultFiles(getNode(state.selectedNodeId));
+      const targetIndex = fromIndex + direction;
+      if (Number.isInteger(fromIndex) && targetIndex >= 0 && targetIndex < references.length) {
+        const historyBefore = getHistorySnapshot();
+        if (moveNodeVaultFileReference(fromIndex, targetIndex, direction < 0 ? "before" : "after")) {
+          commitHistoryFromSnapshot(historyBefore);
+          runAfterRender(() => dom.nodePanel?.querySelector(`[data-node-vault-drag="${targetIndex}"]`)?.focus?.({ preventScroll: true }));
+        }
+      }
+      event.preventDefault();
+      return;
+    }
     if (event.target.dataset?.canvasChoiceOption) {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -15363,10 +27972,22 @@ function installNarrativeCanvasApp() {
     }
     const query = match[2] || "";
     const atOffset = caret - query.length - 1;
-    const characters = getCharacters();
-    const filtered = query
-      ? characters.filter((character) => (character.name || "").toLowerCase().includes(query.toLowerCase()))
-      : characters;
+    const entries = getCharacters();
+    const needle = query.toLowerCase();
+    const filtered = (query
+      ? entries.filter((entry) => (entry.name || "").toLowerCase().includes(needle))
+      : entries)
+      .slice()
+      .sort((a, b) => {
+        const aName = String(a.name || "").toLowerCase();
+        const bName = String(b.name || "").toLowerCase();
+        const aPrefix = needle && aName.startsWith(needle) ? 0 : 1;
+        const bPrefix = needle && bName.startsWith(needle) ? 0 : 1;
+        return aPrefix - bPrefix
+          || CODEX_KINDS.indexOf(a.kind) - CODEX_KINDS.indexOf(b.kind)
+          || aName.localeCompare(bName);
+      })
+      .slice(0, 60);
     if (!filtered.length) {
       hideMentionPopover();
       return;
@@ -15375,7 +27996,7 @@ function installNarrativeCanvasApp() {
       target,
       atOffset,
       queryLength: query.length,
-      characters: filtered,
+      entries: filtered,
       activeIndex: 0
     };
     renderMentionPopover();
@@ -15384,11 +28005,11 @@ function installNarrativeCanvasApp() {
 
   function renderMentionPopover() {
     if (!dom.mentionPopover || !state.mention) return;
-    const { characters, activeIndex } = state.mention;
-    dom.mentionPopover.innerHTML = characters.map((character, index) => `
+    const { entries, activeIndex } = state.mention;
+    dom.mentionPopover.innerHTML = entries.map((entry, index) => `
       <button type="button" class="mention-option ${index === activeIndex ? "active" : ""}" data-mention-index="${index}" role="option">
-        <strong>${escapeHtml(character.name || "Unnamed")}</strong>
-        ${character.role ? `<small>${escapeHtml(character.role)}</small>` : ""}
+        <span class="mention-option-main"><strong>${escapeHtml(entry.name || "Unnamed")}</strong>${entry.role ? `<small>${escapeHtml(entry.role)}</small>` : ""}</span>
+        <span class="mention-option-kind" data-codex-kind="${escapeAttr(entry.kind)}">${escapeHtml(t(entry.kind))}</span>
       </button>
     `).join("");
     dom.mentionPopover.hidden = false;
@@ -15445,16 +28066,16 @@ function installNarrativeCanvasApp() {
     }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       const dir = event.key === "ArrowDown" ? 1 : -1;
-      const length = state.mention.characters.length;
+      const length = state.mention.entries.length;
       state.mention.activeIndex = (state.mention.activeIndex + dir + length) % length;
       renderMentionPopover();
       event.preventDefault();
       return true;
     }
     if (event.key === "Enter" || event.key === "Tab") {
-      const character = state.mention.characters[state.mention.activeIndex];
-      if (character) {
-        insertMention(character);
+      const entry = state.mention.entries[state.mention.activeIndex];
+      if (entry) {
+        insertMention(entry);
         event.preventDefault();
         return true;
       }
@@ -15462,13 +28083,13 @@ function installNarrativeCanvasApp() {
     return false;
   }
 
-  function insertMention(character) {
+  function insertMention(entry) {
     if (!state.mention) return;
     const { target, atOffset, queryLength } = state.mention;
     const value = target.value || "";
     const before = value.slice(0, atOffset);
     const after = value.slice(atOffset + 1 + queryLength);
-    const insertion = `@${character.name || ""}`;
+    const insertion = `@${entry.name || ""}`;
     target.value = `${before}${insertion} ${after}`;
     const caret = (before + insertion + " ").length;
     if (typeof target.setSelectionRange === "function") target.setSelectionRange(caret, caret);
@@ -15482,8 +28103,8 @@ function installNarrativeCanvasApp() {
       const node = getNode(target.dataset.nodeId || state.selectedNodeId);
       if (node && !isEventSheetNode(node)) {
         const cast = normalizeNodeCast(node.cast);
-        if (!cast.some((entry) => entry.characterId === character.id && entry.role === "Mentioned")) {
-          cast.push({ characterId: character.id, role: "Mentioned" });
+        if (!cast.some((link) => link.characterId === entry.id && link.role === "Mentioned")) {
+          cast.push({ characterId: entry.id, role: "Mentioned" });
           node.cast = cast;
           if (target.dataset.inlineNodeField) {
             invalidateCharacterRenderContext();
@@ -15501,6 +28122,54 @@ function installNarrativeCanvasApp() {
   }
 
   function handleStoryPointerDown(event) {
+    const castDragHandle = event.target.closest && event.target.closest("[data-node-cast-drag]");
+    if (castDragHandle && dom.nodePanel?.contains(castDragHandle)) {
+      const index = Number(castDragHandle.dataset.nodeCastDrag);
+      const node = getNode(state.selectedNodeId);
+      if (!node || !Number.isInteger(index) || !normalizeNodeCast(node.cast)[index]) return;
+      state.nodeCastDrag = {
+        nodeId: node.id,
+        fromIndex: index,
+        startX: event.clientX,
+        startY: event.clientY,
+        active: false,
+        historyBefore: getHistorySnapshot()
+      };
+      event.preventDefault();
+      return;
+    }
+    const codexVaultHandle = event.target.closest && event.target.closest("[data-codex-vault-drag]");
+    if (codexVaultHandle && dom.charactersPanel?.contains(codexVaultHandle)) {
+      const index = Number(codexVaultHandle.dataset.codexVaultDrag);
+      const characterId = codexVaultHandle.dataset.characterId;
+      if (!getCharacterById(characterId) || !Number.isInteger(index)) return;
+      state.codexVaultFileDrag = {
+        characterId,
+        fromIndex: index,
+        startX: event.clientX,
+        startY: event.clientY,
+        active: false,
+        historyBefore: getHistorySnapshot()
+      };
+      event.preventDefault();
+      return;
+    }
+    const vaultDragHandle = event.target.closest && event.target.closest("[data-node-vault-drag]");
+    if (vaultDragHandle && dom.nodePanel?.contains(vaultDragHandle)) {
+      const index = Number(vaultDragHandle.dataset.nodeVaultDrag);
+      const node = getNode(state.selectedNodeId);
+      if (!node || !Number.isInteger(index) || !getNodeVaultFiles(node)[index]) return;
+      state.nodeVaultFileDrag = {
+        nodeId: node.id,
+        fromIndex: index,
+        startX: event.clientX,
+        startY: event.clientY,
+        active: false,
+        historyBefore: getHistorySnapshot()
+      };
+      event.preventDefault();
+      return;
+    }
     const columnResizeHandle = event.target.closest && event.target.closest("[data-event-column-resize]");
     if (columnResizeHandle && dom.eventsPanel?.contains(columnResizeHandle)) {
       const key = columnResizeHandle.dataset.eventColumnResize;
@@ -15661,6 +28330,18 @@ function installNarrativeCanvasApp() {
   }
 
   function handleStoryPointerMove(event) {
+    if (state.nodeCastDrag) {
+      handleNodeCastPointerMove(event);
+      return;
+    }
+    if (state.nodeVaultFileDrag) {
+      handleNodeVaultFilePointerMove(event);
+      return;
+    }
+    if (state.codexVaultFileDrag) {
+      handleCodexVaultFilePointerMove(event);
+      return;
+    }
     if (state.eventColumnResize) {
       handleEventColumnResizeMove(event);
       return;
@@ -15681,6 +28362,18 @@ function installNarrativeCanvasApp() {
   }
 
   function handleStoryPointerUp(event) {
+    if (state.nodeCastDrag) {
+      handleNodeCastPointerUp(event);
+      return;
+    }
+    if (state.nodeVaultFileDrag) {
+      handleNodeVaultFilePointerUp(event);
+      return;
+    }
+    if (state.codexVaultFileDrag) {
+      handleCodexVaultFilePointerUp(event);
+      return;
+    }
     if (state.eventColumnResize) {
       handleEventColumnResizeUp(event);
       return;
@@ -15698,6 +28391,167 @@ function installNarrativeCanvasApp() {
     if (placement && canMoveStoryNode(drag.id, placement)) {
       moveStoryNode(drag.id, placement);
     }
+  }
+
+  function handleNodeCastPointerMove(event) {
+    const drag = state.nodeCastDrag;
+    if (!drag) return;
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (distance < 5 && !drag.active) return;
+    drag.active = true;
+    const placement = getNodeCastDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+    clearNodeCastDropMarkers();
+    if (placement) {
+      const row = dom.nodePanel?.querySelector(`[data-node-cast-row-index="${placement.targetIndex}"]`);
+      row?.classList.add(placement.placement === "after" ? "cast-row-drop-after" : "cast-row-drop-before");
+    }
+    event.preventDefault();
+  }
+
+  function handleNodeCastPointerUp(event) {
+    const drag = state.nodeCastDrag;
+    if (!drag) return;
+    const placement = drag.active && event.type !== "pointercancel"
+      ? getNodeCastDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+      : null;
+    state.nodeCastDrag = null;
+    clearNodeCastDropMarkers();
+    if (!placement || drag.nodeId !== state.selectedNodeId) return;
+    if (moveNodeCastReference(drag.fromIndex, placement.targetIndex, placement.placement)) {
+      commitHistoryFromSnapshot(drag.historyBefore);
+    }
+  }
+
+  function handleNodeVaultFilePointerMove(event) {
+    const drag = state.nodeVaultFileDrag;
+    if (!drag) return;
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (distance < 5 && !drag.active) return;
+    drag.active = true;
+    const placement = getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+    clearNodeVaultFileDropMarkers();
+    if (placement) {
+      const row = dom.nodePanel?.querySelector(`[data-node-vault-row-index="${placement.targetIndex}"]`);
+      row?.classList.add(placement.placement === "after" ? "cast-row-drop-after" : "cast-row-drop-before");
+    }
+    event.preventDefault();
+  }
+
+  function handleNodeVaultFilePointerUp(event) {
+    const drag = state.nodeVaultFileDrag;
+    if (!drag) return;
+    const placement = drag.active && event.type !== "pointercancel"
+      ? getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+      : null;
+    state.nodeVaultFileDrag = null;
+    clearNodeVaultFileDropMarkers();
+    if (!placement || drag.nodeId !== state.selectedNodeId) return;
+    if (moveNodeVaultFileReference(drag.fromIndex, placement.targetIndex, placement.placement)) {
+      commitHistoryFromSnapshot(drag.historyBefore);
+    }
+  }
+
+  function handleCodexVaultFilePointerMove(event) {
+    const drag = state.codexVaultFileDrag;
+    if (!drag) return;
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (distance < 5 && !drag.active) return;
+    drag.active = true;
+    const placement = getCodexVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+    clearCodexVaultFileDropMarkers();
+    if (placement) {
+      const row = dom.charactersPanel?.querySelector(`[data-codex-vault-row-index="${placement.targetIndex}"]`);
+      row?.classList.add(placement.placement === "after" ? "cast-row-drop-after" : "cast-row-drop-before");
+    }
+    event.preventDefault();
+  }
+
+  function handleCodexVaultFilePointerUp(event) {
+    const drag = state.codexVaultFileDrag;
+    if (!drag) return;
+    const placement = drag.active && event.type !== "pointercancel"
+      ? getCodexVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+      : null;
+    state.codexVaultFileDrag = null;
+    clearCodexVaultFileDropMarkers();
+    if (!placement) return;
+    if (moveCodexVaultFileReference(drag.characterId, drag.fromIndex, placement.targetIndex, placement.placement)) {
+      commitHistoryFromSnapshot(drag.historyBefore);
+    }
+  }
+
+  function getCodexVaultFileDropPlacement(x, y, fromIndex) {
+    const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+    const target = root.elementFromPoint(x, y);
+    const row = target?.closest?.("[data-codex-vault-row-index]");
+    if (!row || !dom.charactersPanel?.contains(row)) return null;
+    const targetIndex = Number(row.dataset.codexVaultRowIndex);
+    if (!Number.isInteger(targetIndex) || targetIndex === fromIndex) return null;
+    const rect = row.getBoundingClientRect();
+    const placement = y - rect.top > rect.height / 2 ? "after" : "before";
+    return { targetIndex, placement };
+  }
+
+  function clearCodexVaultFileDropMarkers() {
+    dom.charactersPanel?.querySelectorAll("[data-codex-vault-row-index].cast-row-drop-before, [data-codex-vault-row-index].cast-row-drop-after")
+      .forEach((row) => row.classList.remove("cast-row-drop-before", "cast-row-drop-after"));
+  }
+
+  function moveCodexVaultFileReference(characterId, fromIndex, targetIndex, placement = "before") {
+    const character = getCharacterById(characterId);
+    if (!character || !Number.isInteger(fromIndex) || !Number.isInteger(targetIndex)) return false;
+    const files = normalizeCodexVaultFiles(character.vaultFiles);
+    if (fromIndex < 0 || fromIndex >= files.length || targetIndex < 0 || targetIndex >= files.length || fromIndex === targetIndex) return false;
+    const insertionBeforeRemoval = targetIndex + (placement === "after" ? 1 : 0);
+    const [entry] = files.splice(fromIndex, 1);
+    const insertionIndex = clamp(insertionBeforeRemoval - (fromIndex < insertionBeforeRemoval ? 1 : 0), 0, files.length);
+    if (insertionIndex === fromIndex) {
+      files.splice(fromIndex, 0, entry);
+      return false;
+    }
+    files.splice(insertionIndex, 0, entry);
+    character.vaultFiles = files;
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderWorkspaceFile();
+    setStatus(t("Linked files reordered."));
+    return true;
+  }
+
+  function getNodeVaultFileDropPlacement(x, y, fromIndex) {
+    const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+    const target = root.elementFromPoint(x, y);
+    const row = target?.closest?.("[data-node-vault-row-index]");
+    if (!row || !dom.nodePanel?.contains(row)) return null;
+    const targetIndex = Number(row.dataset.nodeVaultRowIndex);
+    if (!Number.isInteger(targetIndex)) return null;
+    if (targetIndex === fromIndex) return null;
+    const rect = row.getBoundingClientRect();
+    const placement = y - rect.top > rect.height / 2 ? "after" : "before";
+    return { targetIndex, placement };
+  }
+
+  function clearNodeVaultFileDropMarkers() {
+    dom.nodePanel?.querySelectorAll("[data-node-vault-row-index].cast-row-drop-before, [data-node-vault-row-index].cast-row-drop-after")
+      .forEach((row) => row.classList.remove("cast-row-drop-before", "cast-row-drop-after"));
+  }
+
+  function getNodeCastDropPlacement(x, y, fromIndex) {
+    const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+    const target = root.elementFromPoint(x, y);
+    const row = target?.closest?.("[data-node-cast-row-index]");
+    if (!row || !dom.nodePanel?.contains(row)) return null;
+    const targetIndex = Number(row.dataset.nodeCastRowIndex);
+    if (!Number.isInteger(targetIndex)) return null;
+    if (targetIndex === fromIndex) return null;
+    const rect = row.getBoundingClientRect();
+    const placement = y - rect.top > rect.height / 2 ? "after" : "before";
+    return { targetIndex, placement };
+  }
+
+  function clearNodeCastDropMarkers() {
+    dom.nodePanel?.querySelectorAll(".cast-row-drop-before, .cast-row-drop-after")
+      .forEach((row) => row.classList.remove("cast-row-drop-before", "cast-row-drop-after"));
   }
 
   function getStoryDropPlacementFromPoint(x, y) {
@@ -15787,6 +28641,7 @@ function installNarrativeCanvasApp() {
       || dom.playbookHelpDialog?.contains(target)
       || dom.playRuleDialog?.contains(target)
       || dom.nodeRequiredDialog?.contains(target)
+      || dom.visionBoardDialog?.contains(target)
       || dom.aiFloatingWindow?.contains(target)
     );
   }
@@ -15854,6 +28709,13 @@ function installNarrativeCanvasApp() {
 
   function getNarrativeCanvasScopeForTarget(target) {
     if (!target?.closest) return null;
+    // Shadow mount: the app tree lives inside a shadow root on the plugin host element.
+    const rootNode = target.getRootNode?.();
+    if (typeof ShadowRoot === "function" && rootNode instanceof ShadowRoot
+      && rootNode.host?.classList?.contains("narrative-canvas-plugin-host")
+      && rootNode.querySelector?.(".app-shell")) {
+      return rootNode;
+    }
     const host = target.closest(".narrative-canvas-plugin-host");
     if (host?.querySelector?.(".app-shell")) return host;
     if (dom.root?.contains(target)) return dom.scope || document;
@@ -15866,7 +28728,8 @@ function installNarrativeCanvasApp() {
     const nextScope = getNarrativeCanvasScopeForTarget(target);
     if (!nextScope || nextScope === dom.scope) return;
     eventController?.abort();
-    if (window.NarrativeCanvasHost && nextScope.classList?.contains("narrative-canvas-plugin-host")) {
+    const scopeHostElement = typeof ShadowRoot === "function" && nextScope instanceof ShadowRoot ? nextScope.host : nextScope;
+    if (window.NarrativeCanvasHost && scopeHostElement?.classList?.contains("narrative-canvas-plugin-host")) {
       window.NarrativeCanvasHost.root = nextScope;
     }
     bindDom(nextScope);
@@ -16937,19 +29800,29 @@ function installNarrativeCanvasApp() {
     }
   }
 
-  function addCharacter() {
+  function addCharacter(kind = "Character", codexMode = false) {
     const characters = getCharacters();
     const wasEmpty = characters.length === 0;
-    const nextNumber = characters.length + 1;
+    const normalizedKind = normalizeCodexKind(kind);
+    const nextNumber = characters.filter((entry) => entry.kind === normalizedKind).length + 1;
     const character = {
       id: nextId("c", characters),
-      name: uniqueCharacterName(`Character ${nextNumber}`),
+      name: uniqueCharacterName(`${normalizedKind} ${nextNumber}`),
+      kind: normalizedKind,
       role: "",
       voice: "",
-      notes: ""
+      tags: "",
+      notes: "",
+      extraFields: [],
+      codexFile: "",
+      images: [],
+      imageFile: "",
+      imagePreview: false
     };
+    applyCodexTemplateToCharacter(character);
     characters.push(character);
     state.project.characters = characters;
+    state.codexSelectedEntryId = character.id;
     invalidateCharacterRenderContext();
     if (wasEmpty) {
       state.characterSearch = "";
@@ -16961,11 +29834,22 @@ function installNarrativeCanvasApp() {
     if (shouldSwitchToCharacters) renderDocumentFileSwitch();
     else renderCharacterListSurfaces();
     revealCharacterCard(character.id);
-    setStatus("Character added.");
+    setStatus(codexMode ? t("Library entry added.") : t("Character added."));
+  }
+
+  function addCodexEntry() {
+    const kind = normalizeCodexKindFilter(state.codexKindFilter) === CODEX_ALL_FILTER
+      ? "Character"
+      : normalizeCodexKind(state.codexKindFilter);
+    state.characterSearch = "";
+    state.codexTagFilter = "";
+    state.codexKindFilter = kind;
+    if (dom.characterSearchInput) dom.characterSearchInput.value = "";
+    addCharacter(kind, true);
   }
 
   function revealCharacterCard(id) {
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const card = dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(id)}"]`);
       if (!card) return;
       card.scrollIntoView?.({ behavior: "smooth", block: "center" });
@@ -16978,13 +29862,22 @@ function installNarrativeCanvasApp() {
     const characters = getCharacters();
     const character = characters.find((item) => item.id === id);
     state.project.characters = characters.filter((item) => item.id !== id);
+    if (state.codexSelectedEntryId === id) state.codexSelectedEntryId = "";
     invalidateCharacterRenderContext();
     state.project.nodes.forEach((node) => {
       node.cast = normalizeNodeCast(node.cast).filter((entry) => entry.characterId !== id);
       if (!node.cast.length) delete node.cast;
     });
     if (state.characterFocusId === id || !getCharacterById(state.characterFocusId)) state.characterFocusId = null;
-    state.characterBacklinkExpandedIds?.delete(id);
+    if (state.characterBacklinkGroupCollapsedKeys instanceof Set) {
+      [...state.characterBacklinkGroupCollapsedKeys].forEach((key) => {
+        try {
+          if (JSON.parse(key)?.[0] === id) state.characterBacklinkGroupCollapsedKeys.delete(key);
+        } catch (_error) {
+          state.characterBacklinkGroupCollapsedKeys.delete(key);
+        }
+      });
+    }
     if (!state.project.characters.length) {
       state.characterSearch = "";
       resetDocumentRenderLimit("characters");
@@ -16992,13 +29885,14 @@ function installNarrativeCanvasApp() {
     state.activeFileId = "characters";
     setProjectDirty(true);
     renderCharacterListSurfaces();
-    setStatus(character ? `${character.name} deleted.` : "Character deleted.");
+    setStatus(character ? `${character.name} deleted.` : "Library entry deleted.");
   }
 
   function hideCharacter(id) {
     const character = getCharacters().find((item) => item.id === id);
     if (!character) return;
     character.hidden = true;
+    if (state.codexSelectedEntryId === id) state.codexSelectedEntryId = "";
     if (state.characterFocusId === id) state.characterFocusId = null;
     invalidateCharacterRenderContext();
     state.activeFileId = "characters";
@@ -17032,7 +29926,7 @@ function installNarrativeCanvasApp() {
     state.activeFileId = "characters";
     setProjectDirty(true);
     renderCharacterListSurfaces();
-    setStatus("All characters visible.");
+    setStatus("All entries visible.");
   }
 
   function setCharacterField(id, field, value, rerender) {
@@ -17043,13 +29937,13 @@ function installNarrativeCanvasApp() {
       const previousName = character.name;
       const nextName = normalizeOptionalString(value).trim();
       if (!nextName) {
-        setStatus("Character name is required.");
+        setStatus("Entry name is required.");
         if (rerender) renderCharacterListSurfaces();
         return;
       }
       character.name = nextName;
       state.project.nodes.forEach((node) => {
-        if (isDialogNode(node) && node.title === previousName) {
+        if (character.kind === "Character" && isDialogNode(node) && node.title === previousName) {
           node.title = nextName;
         }
       });
@@ -17062,11 +29956,167 @@ function installNarrativeCanvasApp() {
         renderStoryPanel();
       }
     } else {
-      character[field] = value;
+      if (field === "kind") {
+        const nextKind = normalizeCodexKind(value);
+        character.kind = nextKind;
+        applyCodexTemplateToCharacter(character);
+        state.project.nodes.forEach((node) => {
+          const cast = normalizeNodeCast(node.cast);
+          let changed = false;
+          cast.forEach((entry) => {
+            if (entry.characterId !== character.id) return;
+            if ((CODEX_RELATIONS_BY_KIND[nextKind] || []).includes(entry.role)) return;
+            entry.role = getDefaultCodexRelation(nextKind);
+            changed = true;
+          });
+          if (changed) node.cast = normalizeNodeCast(cast);
+        });
+      } else if (field === "imageFile") {
+        syncCharacterImageAliases(character, normalizeVisionBoardImages([], value));
+      } else if (field === "imagePreview") {
+        character.imagePreview = Boolean(value);
+      } else {
+        character[field] = value;
+      }
     }
     setProjectDirty(true);
     if (rerender) updateStatus();
     if (rerender) renderWorkspaceFile();
+  }
+
+  function setCharacterExtraField(id, index, part, value, rerender) {
+    const character = getCharacters().find((item) => item.id === id);
+    if (!character) return;
+    const fields = normalizeCodexExtraFields(character.extraFields);
+    if (!Number.isInteger(index) || index < 0 || index >= fields.length) return;
+    if (part === "key") {
+      const nextKey = String(value || "").trim();
+      if (CODEX_RESERVED_FRONTMATTER_KEYS.has(nextKey.toLowerCase())) {
+        setStatus(t("Field name {key} is reserved.", { key: nextKey }));
+        if (rerender) renderWorkspaceFile();
+        return;
+      }
+      fields[index].key = nextKey;
+    } else {
+      fields[index].value = String(value ?? "");
+    }
+    character.extraFields = fields;
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    if (rerender) renderWorkspaceFile();
+  }
+
+  function addCodexExtraField(id) {
+    const character = getCharacters().find((item) => item.id === id);
+    if (!character) return;
+    const fields = normalizeCodexExtraFields(character.extraFields);
+    fields.push({ key: "", value: "" });
+    character.extraFields = fields;
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderWorkspaceFile();
+    runAfterRender(() => {
+      const inputs = dom.charactersPanel?.querySelectorAll(`[data-character-id="${CSS.escape(id)}"][data-character-extra-part="key"]`);
+      inputs?.[inputs.length - 1]?.focus?.();
+    });
+  }
+
+  function addCodexKind() {
+    showGenericTextInput({
+      kicker: "Library",
+      title: t("Add category"),
+      label: t("Category name"),
+      confirmLabel: t("Add"),
+      onConfirm: (value) => {
+        const name = String(value || "").trim();
+        if (!name) return;
+        const kinds = getCodexKindsList();
+        if (name.toLowerCase() === "all" || kinds.some((kind) => kind.toLowerCase() === name.toLowerCase())) {
+          setStatus(t("Category {name} already exists.", { name }));
+          return;
+        }
+        state.project.customCodexKinds = normalizeCustomCodexKinds([...(state.project.customCodexKinds || []), name]);
+        state.codexKindFilter = name;
+        setProjectDirty(true);
+        renderCharactersPage();
+        setStatus(t("Category {name} added.", { name }));
+      }
+    });
+  }
+
+  function removeCodexKind(kindValue) {
+    const name = String(kindValue || "").trim();
+    if (!name) return;
+    const count = getCharacters().filter((entry) => entry.kind.toLowerCase() === name.toLowerCase()).length;
+    if (count) {
+      setStatus(t("Category {name} still has {count} entries. Move or remove them first.", { name, count }));
+      return;
+    }
+    state.project.customCodexKinds = normalizeCustomCodexKinds(
+      (state.project.customCodexKinds || []).filter((kind) => String(kind).toLowerCase() !== name.toLowerCase())
+    );
+    if (String(state.codexKindFilter).toLowerCase() === name.toLowerCase()) state.codexKindFilter = CODEX_ALL_FILTER;
+    setProjectDirty(true);
+    renderCharactersPage();
+    setStatus(t("Category {name} removed.", { name }));
+  }
+
+  function addCodexTemplateField() {
+    const kind = normalizeCodexKindFilter(state.codexKindFilter);
+    if (kind === CODEX_ALL_FILTER) return;
+    const input = dom.charactersPanel?.querySelector("[data-codex-template-input]");
+    const key = String(input?.value || "").trim();
+    if (!key) {
+      input?.focus?.({ preventScroll: true });
+      return;
+    }
+    if (CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase())) {
+      setStatus(t("Field name {key} is reserved.", { key }));
+      return;
+    }
+    const templates = normalizeCodexFieldTemplates(state.project.codexFieldTemplates);
+    if (templates[kind].some((existing) => existing.toLowerCase() === key.toLowerCase())) {
+      setStatus(t("Field {key} already in the template.", { key }));
+      return;
+    }
+    templates[kind] = [...templates[kind], key];
+    state.project.codexFieldTemplates = templates;
+    let updated = 0;
+    getCharacters().forEach((character) => {
+      if (character.kind !== kind) return;
+      if (applyCodexTemplateToCharacter(character)) updated += 1;
+    });
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderCharactersPage();
+    runAfterRender(() => dom.charactersPanel?.querySelector("[data-codex-template-input]")?.focus?.({ preventScroll: true }));
+    setStatus(t("Field {key} added to {count} entries.", { key, count: updated }));
+  }
+
+  function removeCodexTemplateField(keyValue) {
+    const kind = normalizeCodexKindFilter(state.codexKindFilter);
+    if (kind === CODEX_ALL_FILTER) return;
+    const key = String(keyValue || "").trim();
+    const templates = normalizeCodexFieldTemplates(state.project.codexFieldTemplates);
+    const next = templates[kind].filter((existing) => existing.toLowerCase() !== key.toLowerCase());
+    if (next.length === templates[kind].length) return;
+    templates[kind] = next;
+    state.project.codexFieldTemplates = templates;
+    setProjectDirty(true);
+    renderCharactersPage();
+    setStatus(t("Field {key} removed from the template. Entry values are kept.", { key }));
+  }
+
+  function removeCodexExtraField(id, index) {
+    const character = getCharacters().find((item) => item.id === id);
+    if (!character) return;
+    const fields = normalizeCodexExtraFields(character.extraFields);
+    if (!Number.isInteger(index) || index < 0 || index >= fields.length) return;
+    fields.splice(index, 1);
+    character.extraFields = fields;
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderWorkspaceFile();
   }
 
   function focusCharacter(id) {
@@ -17084,23 +30134,24 @@ function installNarrativeCanvasApp() {
     const character = getCharacters().find((item) => item.id === id);
     if (!character) return;
     state.characterFocusId = null;
+    state.codexSelectedEntryId = "";
     state.characterSearch = character.name;
     state.characterSearchIndex = -1;
     resetDocumentRenderLimit("characters");
     state.activeFileId = "characters";
     renderDocumentFileSwitch();
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       dom.characterSearchInput?.focus?.({ preventScroll: true });
       dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(character.id)}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
     });
-    setStatus(t("Search character: {name}", { name: character.name }));
+    setStatus(t("Search library: {name}", { name: character.name }));
   }
 
   function clearCharacterFocus() {
     state.characterFocusId = null;
     invalidateDocumentSurfaces("characters");
     renderAll();
-    setStatus("Character focus cleared.");
+    setStatus("Library focus cleared.");
   }
 
   function clearCharacterSearch() {
@@ -17108,40 +30159,90 @@ function installNarrativeCanvasApp() {
     resetDocumentRenderLimit("characters");
     if (dom.characterSearchInput) dom.characterSearchInput.value = "";
     renderCharacterGridForSearch();
-    setStatus("Character search cleared.");
+    setStatus("Library search cleared.");
   }
 
-  function toggleCharacterBacklinks(id) {
-    if (!id || !getCharacterById(id)) return;
-    if (!state.characterBacklinkExpandedIds || !(state.characterBacklinkExpandedIds instanceof Set)) {
-      state.characterBacklinkExpandedIds = new Set();
+  function setCodexKindFilter(value) {
+    state.codexKindFilter = normalizeCodexKindFilter(value);
+    state.codexTagFilter = "";
+    resetDocumentRenderLimit("characters");
+    renderCharactersPage();
+    setStatus(state.codexKindFilter === CODEX_ALL_FILTER
+      ? t("Library category filter cleared.")
+      : `${t("Category")}: ${t(state.codexKindFilter)}`);
+  }
+
+  function setCodexTagFilter(value) {
+    const tag = normalizeOptionalString(value).trim();
+    if (!tag) return clearCodexTagFilter();
+    state.codexTagFilter = tag;
+    resetDocumentRenderLimit("characters");
+    renderCharactersPage();
+    setStatus(`${t("Tags")}: ${tag}`);
+  }
+
+  function clearCodexTagFilter() {
+    if (!state.codexTagFilter) return;
+    state.codexTagFilter = "";
+    resetDocumentRenderLimit("characters");
+    renderCharactersPage();
+    setStatus(t("Library tag filter cleared."));
+  }
+
+  function openCodexEntryDetail(id) {
+    const character = getCharacters().find((entry) => entry.id === id);
+    if (!character) return;
+    state.codexSelectedEntryId = id;
+    state.codexImagePickerCharacterId = "";
+    renderCharactersPage();
+    runAfterRender(() => dom.charactersPanel?.scrollTo?.({ top: 0, behavior: "smooth" }));
+    setStatus(t("Open entry: {name}", { name: character.name }));
+  }
+
+  function closeCodexEntryDetail() {
+    state.codexSelectedEntryId = "";
+    state.codexImagePickerCharacterId = "";
+    renderCharactersPage();
+    setStatus(t("All entries"));
+  }
+
+  function toggleCharacterBacklinkGroup(characterId, groupId) {
+    if (!characterId || !groupId || !getCharacterById(characterId)) return;
+    if (!(state.characterBacklinkGroupCollapsedKeys instanceof Set)) {
+      state.characterBacklinkGroupCollapsedKeys = new Set();
     }
-    if (state.characterBacklinkExpandedIds.has(id)) {
-      state.characterBacklinkExpandedIds.delete(id);
-      setStatus("Character links collapsed.");
-    } else {
-      state.characterBacklinkExpandedIds.add(id);
-      setStatus("Character links expanded.");
-    }
+    const key = getCharacterBacklinkGroupKey(characterId, groupId);
+    const expanded = state.characterBacklinkGroupCollapsedKeys.has(key);
+    if (expanded) state.characterBacklinkGroupCollapsedKeys.delete(key);
+    else state.characterBacklinkGroupCollapsedKeys.add(key);
     renderCharacterGridForSearch();
+    runAfterRender(() => {
+      const selector = `[data-character-id="${CSS.escape(characterId)}"][data-character-backlink-group="${CSS.escape(groupId)}"]`;
+      dom.charactersPanel?.querySelector(selector)?.focus?.({ preventScroll: true });
+    });
+    setStatus(expanded ? "Library links expanded." : "Library links collapsed.");
   }
 
   function addNodeCast() {
     const node = getNode(state.selectedNodeId);
     if (!node) return;
-    const characterId = dom.nodePanel?.querySelector("[data-new-cast-character]")?.value || "";
+    const characterId = dom.nodePanel?.querySelector("[data-cast-entry-context='new']")?.dataset?.castEntryId || "";
     if (!characterId) {
-      setStatus("Select a character first.");
+      setStatus("Select a library entry first.");
       return;
     }
-    const role = normalizeCastRole(dom.nodePanel?.querySelector("[data-new-cast-role]")?.value);
+    const codexEntry = getCharacterById(characterId);
+    if (!codexEntry) return;
+    const requestedRole = dom.nodePanel?.querySelector("[data-new-cast-role]")?.value;
+    const allowedRoles = getCodexRelationsForEntry(characterId);
+    const role = allowedRoles.includes(requestedRole) ? requestedRole : getDefaultCodexRelation(codexEntry);
     const cast = normalizeNodeCast(node.cast);
     if (!cast.some((entry) => entry.characterId === characterId && entry.role === role)) {
       cast.push({ characterId, role });
     }
     node.cast = cast;
     renderCharacterAwareSurfaces(node);
-    setStatus("Cast link added.");
+    setStatus("Library reference added.");
   }
 
   function deleteNodeCast(index) {
@@ -17153,7 +30254,7 @@ function installNarrativeCanvasApp() {
     if (cast.length) node.cast = cast;
     else delete node.cast;
     renderCharacterAwareSurfaces(node);
-    setStatus("Cast link removed.");
+    setStatus("Library reference removed.");
   }
 
   function setNodeCastField(index, field, value, rerender) {
@@ -17163,15 +30264,38 @@ function installNarrativeCanvasApp() {
     const entry = cast[index];
     if (!entry) return;
     if (field === "characterId") {
-      if (!getCharacters().some((character) => character.id === value)) return;
+      const codexEntry = getCharacterById(value);
+      if (!codexEntry) return;
       entry.characterId = value;
+      if (!getCodexRelationsForEntry(value).includes(entry.role)) {
+        entry.role = getDefaultCodexRelation(codexEntry);
+      }
     }
     if (field === "role") {
-      entry.role = normalizeCastRole(value);
+      const normalizedRole = normalizeCastRole(value);
+      if (!getCodexRelationsForEntry(entry.characterId, entry.role).includes(normalizedRole)) return;
+      entry.role = normalizedRole;
     }
     node.cast = normalizeNodeCast(cast);
     setProjectDirty(true);
     renderCharacterAwareSurfaces(rerender ? node : null);
+  }
+
+  function moveNodeCastReference(fromIndex, targetIndex, placement = "before") {
+    const node = getNode(state.selectedNodeId);
+    if (!node || !Number.isInteger(fromIndex) || !Number.isInteger(targetIndex)) return false;
+    const cast = normalizeNodeCast(node.cast);
+    if (fromIndex < 0 || fromIndex >= cast.length || targetIndex < 0 || targetIndex >= cast.length || fromIndex === targetIndex) return false;
+    const insertionBeforeRemoval = targetIndex + (placement === "after" ? 1 : 0);
+    const [entry] = cast.splice(fromIndex, 1);
+    const insertionIndex = clamp(insertionBeforeRemoval - (fromIndex < insertionBeforeRemoval ? 1 : 0), 0, cast.length);
+    if (insertionIndex === fromIndex) return false;
+    cast.splice(insertionIndex, 0, entry);
+    node.cast = cast;
+    setProjectDirty(true);
+    renderCharacterAwareSurfaces(node);
+    setStatus("Library references reordered.");
+    return true;
   }
 
   function renderCharacterAwareSurfaces(nodeForPanel = null) {
@@ -18030,7 +31154,7 @@ function installNarrativeCanvasApp() {
     const nonSpeakerCast = (Array.isArray(sourceCast) ? sourceCast : [])
       .filter((entry) => entry?.role !== "Speaker")
       .map((entry) => cloneProject(entry));
-    const characterByName = new Map(getCharacters().map((character) => [character.name, character]));
+    const characterByName = new Map(getCastCharacters().map((character) => [character.name, character]));
     const speakerIds = new Set();
     (node.turns || []).forEach((turn) => {
       const character = characterByName.get(normalizeOptionalString(turn.speaker).trim());
@@ -18231,7 +31355,7 @@ function installNarrativeCanvasApp() {
 
   function focusInspectorTarget(selector) {
     if (typeof document === "undefined") return;
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const el = dom.nodePanel?.querySelector(selector);
       if (el && typeof el.focus === "function") {
         el.focus();
@@ -18469,7 +31593,7 @@ function installNarrativeCanvasApp() {
     state.activeFileId = "variables";
     state.playbookTab = "gates";
     renderPlaybookSurfaces();
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const selector = `.effect-draft-row[data-draft-id="${CSS.escape(gateId)}"] [data-draft-field="key"]`;
       const element = dom.variablesPanel?.querySelector(selector);
       element?.focus?.({ preventScroll: true });
@@ -18663,7 +31787,7 @@ function installNarrativeCanvasApp() {
     state.activeFileId = "variables";
     state.playbookTab = "actions";
     renderPlaybookSurfaces();
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const element = dom.variablesPanel?.querySelector(`.playbook-action-draft-row [data-draft-field="target"]`);
       element?.focus?.({ preventScroll: true });
     });
@@ -19093,7 +32217,7 @@ function installNarrativeCanvasApp() {
     state.selectedLinkId = null;
     state.panel = "story";
     renderAll();
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const found = scrollStoryNodeIntoView(id);
       const label = node.title || getNodeDisplayId(node);
       setStatus(found
@@ -19228,14 +32352,14 @@ function installNarrativeCanvasApp() {
     }
     if (scope === "characters") {
       focusCharacter(match);
-      requestAnimationFrame(() => {
+      runAfterRender(() => {
         const card = dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(match)}"]`);
         if (card?.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "center" });
       });
       return;
     }
     if (scope === "events") {
-      requestAnimationFrame(() => {
+      runAfterRender(() => {
         const row = dom.eventsPanel?.querySelector(`[data-event-row-id="${CSS.escape(match)}"]`);
         if (row?.scrollIntoView) row.scrollIntoView({ behavior: "smooth", block: "center" });
       });
@@ -19255,7 +32379,7 @@ function installNarrativeCanvasApp() {
     state.playbookJsonOpen = true;
     if (!wasOpen) renderVariablesPage();
     const searchInput = dom.playbookSearchInput;
-    const restoreSearchFocus = document.activeElement === searchInput;
+    const restoreSearchFocus = getScopeActiveElement() === searchInput;
     const searchCaretStart = restoreSearchFocus ? searchInput.selectionStart : null;
     const searchCaretEnd = restoreSearchFocus ? searchInput.selectionEnd : null;
     const searchDirection = restoreSearchFocus ? searchInput.selectionDirection : "none";
@@ -19296,7 +32420,7 @@ function installNarrativeCanvasApp() {
       }
       const length = (state.playbookSearch || "").length;
       showPlaybookJsonSearchHighlight(textarea, offset, offset + Math.max(0, length));
-      if (document.activeElement === dom.playbookSearchInput) {
+      if (getScopeActiveElement() === dom.playbookSearchInput) {
         centerPlaybookJsonSearchMatch(textarea, offset);
       }
     });
@@ -19429,7 +32553,7 @@ function installNarrativeCanvasApp() {
     centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
     focusInlineNodeEditor(id);
     setStatus(`${node.title || getNodeDisplayId(node)} focused for editing.`);
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       focusInlineNodeEditor(id);
     });
   }
@@ -19444,7 +32568,7 @@ function installNarrativeCanvasApp() {
     state.panel = "story";
     renderAll();
     centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       scrollStoryNodeIntoView(id);
       setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
     });
@@ -19493,7 +32617,7 @@ function installNarrativeCanvasApp() {
         dom.nodeTypeEventHiddenInput.closest("label").hidden = !isFrameKind(typeDef.kind);
       }
       dom.nodeTypeDialog.showModal();
-      requestAnimationFrame(() => {
+      runAfterRender(() => {
         dom.nodeTypeNameInput.focus();
         dom.nodeTypeNameInput.select();
       });
@@ -19775,6 +32899,873 @@ function installNarrativeCanvasApp() {
       scheduleStoryPanelRender();
     }
     updateStatus();
+  }
+
+  function setNodeVaultFile(index, value) {
+    const node = getNode(state.selectedNodeId);
+    if (!node || !Number.isInteger(index) || index < 0) return;
+    const references = getNodeVaultFiles(node);
+    const previousReference = references[index]?.path || "";
+    const nextReference = normalizeNodeVaultFileReference(value);
+    if (index < references.length) {
+      if (nextReference) references[index] = { ...references[index], path: nextReference };
+      else references.splice(index, 1);
+    } else if (nextReference) {
+      references.push({ path: nextReference, preview: false });
+    }
+    if (references.length) node.vaultFiles = references;
+    else delete node.vaultFiles;
+    delete node.vaultFile;
+    delete node.vaultFilePreview;
+    if (previousReference) state.vaultFilePreviewCache.delete(previousReference);
+    if (nextReference) state.vaultFilePreviewCache.delete(nextReference);
+    nodeLayoutSizeCache.delete(node);
+    setProjectDirty(true);
+    renderNodes();
+    renderLinks();
+    renderMinimap();
+    scheduleStoryPanelRender();
+    updateStatus();
+  }
+
+  function normalizeNodeVaultFileReference(value) {
+    const source = String(value || "").trim();
+    const wikiMatch = source.match(/^\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]$/);
+    return (wikiMatch ? wikiMatch[1] : source).trim().replace(/^\/+/, "");
+  }
+
+  // Preview height in pixels for image previews on node cards. Accepts the legacy
+  // s/m/l names and clamps numbers into the slider range.
+  function normalizeVaultPreviewSize(value) {
+    if (value === "s") return 64;
+    if (value === "l") return 292;
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return Math.round(Math.min(320, Math.max(48, number)));
+    return 132;
+  }
+
+  function normalizeNodeVaultFiles(value, legacyReference = "", legacyPreview = false) {
+    const source = Array.isArray(value) ? value : [];
+    const normalized = [];
+    source.forEach((entry) => {
+      const path = normalizeNodeVaultFileReference(typeof entry === "string" ? entry : entry?.path || entry?.reference || entry?.vaultFile);
+      if (!path || normalized.some((item) => item.path === path)) return;
+      const fallback = getDefaultVisionBoardPlacement(normalized.length);
+      normalized.push({
+        path,
+        preview: Boolean(typeof entry === "object" && entry?.preview),
+        previewSize: normalizeVaultPreviewSize(typeof entry === "object" ? entry?.previewSize : null),
+        x: clampVisionBoardNumber(entry?.x, fallback.x, 0, 82),
+        y: clampVisionBoardNumber(entry?.y, fallback.y, 0, 76),
+        w: clampVisionBoardNumber(entry?.w, fallback.w, 14, 48)
+      });
+    });
+    const legacyPath = normalizeNodeVaultFileReference(legacyReference);
+    if (legacyPath && !normalized.some((entry) => entry.path === legacyPath)) {
+      normalized.unshift({ path: legacyPath, preview: Boolean(legacyPreview), previewSize: 132, ...getDefaultVisionBoardPlacement(0) });
+    }
+    return normalized;
+  }
+
+  function getNodeVaultFiles(node) {
+    return normalizeNodeVaultFiles(node?.vaultFiles, node?.vaultFile, node?.vaultFilePreview);
+  }
+
+  function normalizeVaultFileSuggestionQuery(value) {
+    return String(value || "")
+      .trim()
+      .replace(/^\[\[/, "")
+      .replace(/^\[/, "")
+      .replace(/\]\]$/, "")
+      .split(/[|#]/, 1)[0]
+      .trim();
+  }
+
+  async function updateVaultFileSuggestions(target, options = {}) {
+    const host = window.NarrativeCanvasHost;
+    const source = String(target?.value || "").trim();
+    if (!target?.isConnected || !host?.searchVaultFiles || (!source && !options.force)) {
+      hideVaultFileSuggestions();
+      return;
+    }
+    const requestId = ++state.vaultFileSuggestionRequestId;
+    const query = normalizeVaultFileSuggestionQuery(source);
+    const imageOnly = Boolean(target.dataset?.characterImageFile || target.dataset?.characterImagePickerInput || target.dataset?.characterIconInput != null);
+    try {
+      const result = await host.searchVaultFiles(query, imageOnly ? 80 : 40, { imageOnly });
+      if (requestId !== state.vaultFileSuggestionRequestId || !target.isConnected) return;
+      let paths = Array.isArray(result)
+        ? result.map((path) => String(path || "").trim()).filter(Boolean)
+        : [];
+      if (imageOnly) {
+        paths = paths.filter((path) => CODEX_IMAGE_FILE_PATTERN.test(path));
+      }
+      if (!paths.length) {
+        hideVaultFileSuggestions();
+        return;
+      }
+      state.vaultFileSuggestions = { target, paths, activeIndex: 0 };
+      renderVaultFileSuggestions();
+    } catch (error) {
+      console.error(error);
+      hideVaultFileSuggestions();
+    }
+  }
+
+  function renderVaultFileSuggestions() {
+    const current = state.vaultFileSuggestions;
+    const target = current?.target;
+    const container = getVaultFileSuggestionContainer(target);
+    if (!current || !target?.isConnected || !container) {
+      hideVaultFileSuggestions();
+      return;
+    }
+    const imagePicker = Boolean(target.dataset?.characterImagePickerInput) || target.dataset?.characterIconInput != null;
+    const host = window.NarrativeCanvasHost;
+    container.innerHTML = current.paths.map((path, index) => {
+      const parts = path.split("/");
+      const name = parts.pop() || path;
+      const folder = parts.join("/");
+      const thumbnailUrl = imagePicker && host?.getVaultResourceUrl ? host.getVaultResourceUrl(path) : "";
+      return `
+        <button class="vault-file-suggestion${imagePicker ? " codex-image-suggestion" : ""}${index === current.activeIndex ? " active" : ""}" type="button" role="option" aria-selected="${index === current.activeIndex ? "true" : "false"}" data-action="select-vault-file-suggestion" data-vault-file-path="${escapeAttr(path)}">
+          ${thumbnailUrl ? `<img src="${escapeAttr(thumbnailUrl)}" alt="" loading="lazy">` : ""}
+          <span>
+            <strong>${escapeHtml(name)}</strong>
+            ${folder ? `<small>${escapeHtml(folder)}</small>` : ""}
+          </span>
+        </button>
+      `;
+    }).join("");
+    container.hidden = false;
+    target.setAttribute("aria-expanded", "true");
+    container.querySelector(".vault-file-suggestion.active")?.scrollIntoView?.({ block: "nearest" });
+  }
+
+  function hideVaultFileSuggestions() {
+    state.vaultFileSuggestionRequestId += 1;
+    const target = state.vaultFileSuggestions?.target;
+    const container = getVaultFileSuggestionContainer(target);
+    if (container) {
+      container.hidden = true;
+      container.replaceChildren();
+    }
+    target?.setAttribute?.("aria-expanded", "false");
+    state.vaultFileSuggestions = null;
+  }
+
+  function getVaultFileSuggestionContainer(target) {
+    return target?.closest?.(".node-vault-file-input-wrap, .codex-image-picker, .codex-vault-file-input-wrap")
+      ?.querySelector?.("[data-vault-file-suggestions]") || null;
+  }
+
+  function handleVaultFileSuggestionPointerDown(event) {
+    if (!event.target.closest?.("[data-vault-file-path]")) return;
+    event.preventDefault();
+  }
+
+  function handleVaultFileSuggestionKeyDown(event) {
+    const current = state.vaultFileSuggestions;
+    if (!current || event.target !== current.target) return false;
+    if (event.key === "Escape") {
+      if (current.target?.dataset?.characterImagePickerInput) {
+        closeCodexImagePicker(current.target.dataset.characterId);
+        event.preventDefault();
+        return true;
+      }
+      hideVaultFileSuggestions();
+      event.preventDefault();
+      return true;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      current.activeIndex = (current.activeIndex + direction + current.paths.length) % current.paths.length;
+      renderVaultFileSuggestions();
+      event.preventDefault();
+      return true;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      const path = current.paths[current.activeIndex];
+      if (path) {
+        selectVaultFileSuggestion(path);
+        event.preventDefault();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function selectVaultFileSuggestion(path) {
+    const target = state.vaultFileSuggestions?.target
+      || dom.nodePanel?.querySelector?.("[data-node-vault-file-index]");
+    const reference = normalizeNodeVaultFileReference(path);
+    if (!target || !reference) return;
+    if (target.dataset?.characterImageFile || target.dataset?.characterImagePickerInput) {
+      const characterId = target.dataset.characterId;
+      hideVaultFileSuggestions();
+      assignCodexImageFile(characterId, reference);
+      return;
+    }
+    if (target.dataset?.characterVaultFileInput != null) {
+      addCodexVaultFile(target.dataset.characterId, reference);
+      return;
+    }
+    if (target.dataset?.characterIconInput != null) {
+      hideVaultFileSuggestions();
+      setCodexIcon(target.dataset.characterId, reference);
+      return;
+    }
+    const index = Number(target.dataset.nodeVaultFileIndex);
+    const node = getNode(state.selectedNodeId);
+    const references = getNodeVaultFiles(node);
+    if (references.some((entry, entryIndex) => entry.path === reference && entryIndex !== index)) {
+      hideVaultFileSuggestions();
+      setStatus("File already linked.");
+      return;
+    }
+    target.value = reference;
+    setNodeVaultFile(index, reference);
+    commitFocusedEdit(target);
+    hideVaultFileSuggestions();
+    state.vaultFileSuggestionSuppressFocusOnce = true;
+    renderInspector();
+    runAfterRender(() => {
+      const input = dom.nodePanel?.querySelector?.(`[data-node-vault-file-index="${Math.min(index, getNodeVaultFiles(getNode(state.selectedNodeId)).length)}"]`);
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange?.(input.value.length, input.value.length);
+    });
+  }
+
+  async function chooseCodexImageFile(characterId) {
+    const host = window.NarrativeCanvasHost;
+    if (!getCharacterById(characterId) || !host?.searchVaultFiles) return;
+    state.codexImagePickerCharacterId = characterId;
+    renderCharacterGridForSearch();
+    // Timer instead of requestAnimationFrame: rAF can be starved under headless/virtual-time
+    // test runs and throttled iframes, leaving the picker without its suggestion list.
+    window.setTimeout(() => {
+      const input = dom.charactersPanel?.querySelector?.(`[data-character-card-id="${CSS.escape(characterId)}"] [data-character-image-picker-input]`);
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      void updateVaultFileSuggestions(input, { force: true });
+    }, 0);
+  }
+
+  function closeCodexImagePicker(characterId = state.codexImagePickerCharacterId) {
+    if (characterId && state.codexImagePickerCharacterId !== characterId) return;
+    hideVaultFileSuggestions();
+    state.codexImagePickerCharacterId = "";
+    renderCharacterGridForSearch();
+  }
+
+  async function openCodexReference(reference) {
+    const host = window.NarrativeCanvasHost;
+    const normalized = normalizeNodeVaultFileReference(reference);
+    if (!normalized || !host?.openVaultFile) return;
+    try {
+      await leaveImmersiveFullscreenForVaultNavigation();
+      await host.openVaultFile(normalized);
+    } catch (error) {
+      console.error(error);
+      setStatus(t("Could not open the linked vault file."));
+    }
+  }
+
+  function clearCodexImageFile(characterId) {
+    const character = getCharacterById(characterId);
+    if (!getCharacterImages(character).length) return;
+    const historyBefore = getHistorySnapshot();
+    syncCharacterImageAliases(character, []);
+    if (state.codexImagePickerCharacterId === characterId) state.codexImagePickerCharacterId = "";
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderCharacterGridForSearch();
+    commitHistoryFromSnapshot(historyBefore);
+    setStatus("Library image removed.");
+  }
+
+  function assignCodexImageFile(characterId, reference) {
+    return assignCodexImageFiles(characterId, [reference]);
+  }
+
+  function assignCodexImageFiles(characterId, references) {
+    const character = getCharacterById(characterId);
+    const normalized = (references || [])
+      .map(normalizeNodeVaultFileReference)
+      .filter((path) => CODEX_IMAGE_FILE_PATTERN.test(path));
+    if (!character || !normalized.length) {
+      setStatus("Drop an image file.");
+      return false;
+    }
+    const images = getCharacterImages(character);
+    const existing = new Set(images.map((image) => image.path));
+    normalized.forEach((path) => {
+      if (existing.has(path)) return;
+      existing.add(path);
+      images.push({ path, ...getDefaultVisionBoardPlacement(images.length) });
+    });
+    const historyBefore = getHistorySnapshot();
+    syncCharacterImageAliases(character, images);
+    state.codexImagePickerCharacterId = "";
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderCharacterGridForSearch();
+    commitHistoryFromSnapshot(historyBefore);
+    setStatus("Library image assigned.");
+    return true;
+  }
+
+  function removeCodexImage(characterId, index) {
+    const character = getCharacterById(characterId);
+    const images = getCharacterImages(character);
+    if (!character || !images[index]) return;
+    const historyBefore = getHistorySnapshot();
+    images.splice(index, 1);
+    syncCharacterImageAliases(character, images);
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderCharacterGridForSearch();
+    if (state.visionBoardContext?.kind === "character" && state.visionBoardContext.id === characterId) renderFocusedVisionBoard();
+    commitHistoryFromSnapshot(historyBefore);
+    setStatus("Library image removed.");
+  }
+
+  function openLocalCodexImageInput(characterId) {
+    const input = dom.charactersPanel?.querySelector?.(`[data-codex-local-image-input][data-character-id="${CSS.escape(characterId || "")}"]`);
+    input?.click?.();
+  }
+
+  async function importLocalCodexImages(characterId, files) {
+    const host = window.NarrativeCanvasHost;
+    const images = (files || []).filter(isCodexImageFile);
+    if (!getCharacterById(characterId) || !images.length || !host?.importCodexImage) return;
+    try {
+      const references = [];
+      for (const file of images) {
+        references.push(await host.importCodexImage(file, getCharacterById(characterId)?.name || ""));
+      }
+      assignCodexImageFiles(characterId, references);
+    } catch (error) {
+      console.error(error);
+      setStatus("Could not import image.");
+    }
+  }
+
+  function getVisionBoardContextImages(context = state.visionBoardContext) {
+    if (!context) return [];
+    if (context.kind === "character") return getCharacterImages(getCharacterById(context.id));
+    if (context.kind === "node") return getNodeVaultFiles(getNode(context.id)).filter((entry) => CODEX_IMAGE_FILE_PATTERN.test(entry.path));
+    return [];
+  }
+
+  function openVisionBoard(kind, id) {
+    const normalizedKind = kind === "node" ? "node" : "character";
+    const context = { kind: normalizedKind, id: String(id || "") };
+    if (!getVisionBoardContextImages(context).length || !dom.visionBoardDialog?.showModal) return;
+    state.visionBoardContext = context;
+    renderFocusedVisionBoard();
+    if (!dom.visionBoardDialog.open) dom.visionBoardDialog.showModal();
+  }
+
+  function closeVisionBoard() {
+    state.visionBoardDrag = null;
+    state.visionBoardContext = null;
+    if (dom.visionBoardDialog?.open) dom.visionBoardDialog.close();
+  }
+
+  function renderFocusedVisionBoard() {
+    const context = state.visionBoardContext;
+    if (!context || !dom.visionBoardCanvas) return;
+    const images = getVisionBoardContextImages(context);
+    if (!images.length) {
+      closeVisionBoard();
+      return;
+    }
+    const title = context.kind === "node"
+      ? getNode(context.id)?.title || t("Linked images")
+      : getCharacterById(context.id)?.name || t("Preview images");
+    if (dom.visionBoardTitle) dom.visionBoardTitle.textContent = title;
+    dom.visionBoardCanvas.outerHTML = renderVisionBoard(context.kind, context.id, images, { focused: true });
+    dom.visionBoardCanvas = dom.visionBoardDialog.querySelector(".vision-board-canvas");
+  }
+
+  function handleVisionBoardPointerDown(event) {
+    const tile = event.target?.closest?.("#visionBoardDialog [data-vision-board-tile]");
+    if (!tile || event.target.closest?.("button") || event.button !== 0) return;
+    const board = tile.closest(".vision-board-canvas");
+    if (!board) return;
+    const rect = board.getBoundingClientRect();
+    state.visionBoardDrag = {
+      pointerId: event.pointerId,
+      // Dragging the corner grip resizes the tile; dragging anywhere else moves it.
+      mode: event.target.closest?.("[data-vision-board-resize]") ? "resize" : "move",
+      tile,
+      board,
+      kind: board.dataset.visionBoardKind,
+      id: board.dataset.visionBoardId,
+      index: Number(tile.dataset.visionBoardIndex),
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: Number(tile.style.getPropertyValue("--vision-x")) || 0,
+      startY: Number(tile.style.getPropertyValue("--vision-y")) || 0,
+      startW: Number(tile.style.getPropertyValue("--vision-w")) || 28,
+      rect
+    };
+    tile.setPointerCapture?.(event.pointerId);
+    tile.classList.add("is-moving");
+    event.preventDefault();
+  }
+
+  function handleVisionBoardPointerMove(event) {
+    const drag = state.visionBoardDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (drag.mode === "resize") {
+      const w = Math.max(10, Math.min(90, drag.startW + (event.clientX - drag.startClientX) / Math.max(1, drag.rect.width) * 100));
+      drag.tile.style.setProperty("--vision-w", w.toFixed(2));
+    } else {
+      const x = Math.max(0, Math.min(90, drag.startX + (event.clientX - drag.startClientX) / Math.max(1, drag.rect.width) * 100));
+      const y = Math.max(0, Math.min(88, drag.startY + (event.clientY - drag.startClientY) / Math.max(1, drag.rect.height) * 100));
+      drag.tile.style.setProperty("--vision-x", x.toFixed(2));
+      drag.tile.style.setProperty("--vision-y", y.toFixed(2));
+    }
+    event.preventDefault();
+  }
+
+  function handleVisionBoardPointerUp(event) {
+    const drag = state.visionBoardDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.tile.releasePointerCapture?.(event.pointerId);
+    drag.tile.classList.remove("is-moving");
+    const x = Number(drag.tile.style.getPropertyValue("--vision-x"));
+    const y = Number(drag.tile.style.getPropertyValue("--vision-y"));
+    const w = Number(drag.tile.style.getPropertyValue("--vision-w"));
+    persistVisionBoardPosition(drag.kind, drag.id, drag.index, x, y, Number.isFinite(w) ? w : undefined);
+    state.visionBoardDrag = null;
+    event.preventDefault();
+  }
+
+  // Right-click layer menu for focused vision-board tiles: stacking follows the image
+  // array order, so layer actions are array reorders.
+  function closeVisionBoardLayerMenu() {
+    if (state.visionBoardLayerMenuDismiss) {
+      document.removeEventListener("pointerdown", state.visionBoardLayerMenuDismiss, { capture: true });
+      state.visionBoardLayerMenuDismiss = null;
+    }
+    state.visionBoardLayerMenu?.remove?.();
+    state.visionBoardLayerMenu = null;
+  }
+
+  function showVisionBoardLayerMenu(event, tile) {
+    closeVisionBoardLayerMenu();
+    const board = tile.closest(".vision-board-canvas");
+    if (!board || !dom.visionBoardDialog) return;
+    const kind = board.dataset.visionBoardKind;
+    const id = board.dataset.visionBoardId;
+    const index = Number(tile.dataset.visionBoardIndex);
+    const menu = document.createElement("div");
+    menu.className = "vision-board-layer-menu";
+    menu.innerHTML = [
+      ["front", t("Bring to front")],
+      ["forward", t("Bring forward")],
+      ["backward", t("Send backward")],
+      ["back", t("Send to back")]
+    ].map(([action, label]) => `<button type="button" data-vision-layer-action="${action}">${escapeHtml(label)}</button>`).join("");
+    const dialogRect = dom.visionBoardDialog.getBoundingClientRect();
+    menu.style.left = `${Math.round(event.clientX - dialogRect.left)}px`;
+    menu.style.top = `${Math.round(event.clientY - dialogRect.top)}px`;
+    menu.addEventListener("click", (clickEvent) => {
+      const button = clickEvent.target.closest("[data-vision-layer-action]");
+      if (!button) return;
+      clickEvent.preventDefault();
+      clickEvent.stopPropagation();
+      moveVisionBoardImageLayer(kind, id, index, button.dataset.visionLayerAction);
+      closeVisionBoardLayerMenu();
+    });
+    dom.visionBoardDialog.append(menu);
+    state.visionBoardLayerMenu = menu;
+    // Owned by state so closeVisionBoardLayerMenu() always tears it down — including
+    // when a menu item is chosen, not only when the pointer lands outside.
+    const dismiss = (pointerEvent) => {
+      if (menu.contains(getComposedEventTarget(pointerEvent))) return;
+      closeVisionBoardLayerMenu();
+    };
+    state.visionBoardLayerMenuDismiss = dismiss;
+    document.addEventListener("pointerdown", dismiss, { capture: true });
+  }
+
+  function moveVisionBoardImageLayer(kind, id, index, action) {
+    if (kind !== "character") return;
+    const character = getCharacterById(id);
+    const images = getCharacterImages(character);
+    if (!character || !images[index]) return;
+    const historyBefore = getHistorySnapshot();
+    const [entry] = images.splice(index, 1);
+    const target = action === "front"
+      ? images.length
+      : action === "back"
+        ? 0
+        : action === "forward"
+          ? Math.min(images.length, index + 1)
+          : Math.max(0, index - 1);
+    images.splice(target, 0, entry);
+    syncCharacterImageAliases(character, images);
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderFocusedVisionBoard();
+    renderCharacterGridForSearch();
+    commitHistoryFromSnapshot(historyBefore);
+    setStatus(t("Image layer updated."));
+  }
+
+  function persistVisionBoardPosition(kind, id, index, x, y, w) {
+    const historyBefore = getHistorySnapshot();
+    const sizePatch = Number.isFinite(w) ? { w } : {};
+    if (kind === "character") {
+      const character = getCharacterById(id);
+      const images = getCharacterImages(character);
+      if (!character || !images[index]) return;
+      images[index] = { ...images[index], x, y, ...sizePatch };
+      syncCharacterImageAliases(character, images);
+      invalidateCharacterRenderContext();
+      renderCharacterGridForSearch();
+    } else {
+      const node = getNode(id);
+      const references = getNodeVaultFiles(node);
+      const image = references.filter((entry) => CODEX_IMAGE_FILE_PATTERN.test(entry.path))[index];
+      const referenceIndex = references.findIndex((entry) => entry.path === image?.path);
+      if (!node || referenceIndex < 0) return;
+      references[referenceIndex] = { ...references[referenceIndex], x, y, ...sizePatch };
+      node.vaultFiles = references;
+      if (state.selectedNodeId === node.id) renderNodePanel(node);
+    }
+    setProjectDirty(true);
+    renderFocusedVisionBoard();
+    commitHistoryFromSnapshot(historyBefore);
+  }
+
+  function getCodexImageDropElement(event) {
+    return event?.target?.closest?.("[data-codex-image-drop]") || null;
+  }
+
+  function handleCodexImageDragOver(event) {
+    const dropElement = getCodexImageDropElement(event);
+    if (!dropElement) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    dropElement.classList.add("drag-over");
+  }
+
+  function handleCodexImageDragLeave(event) {
+    const dropElement = getCodexImageDropElement(event);
+    if (!dropElement || dropElement.contains(event.relatedTarget)) return;
+    dropElement.classList.remove("drag-over");
+  }
+
+  async function handleCodexImageDrop(event) {
+    const dropElement = getCodexImageDropElement(event);
+    if (!dropElement) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dropElement.classList.remove("drag-over");
+    const characterId = dropElement.dataset.characterId;
+    const transfer = event.dataTransfer;
+    const localImages = [...(transfer?.files || [])].filter((file) => isCodexImageFile(file));
+    try {
+      const references = [];
+      if (localImages.length && window.NarrativeCanvasHost?.importCodexImage) {
+        for (const file of localImages) {
+          references.push(await window.NarrativeCanvasHost.importCodexImage(file, getCharacterById(characterId)?.name || ""));
+        }
+      }
+      if (!references.length) references.push(getCodexImageReferenceFromDataTransfer(transfer));
+      if (!assignCodexImageFiles(characterId, references)) setStatus("Drop an image file.");
+    } catch (error) {
+      console.error(error);
+      setStatus("Could not import image.");
+    }
+  }
+
+  function isCodexImageFile(file) {
+    return Boolean(file && (String(file.type || "").toLowerCase().startsWith("image/") || CODEX_IMAGE_FILE_PATTERN.test(String(file.name || ""))));
+  }
+
+  function getCodexImageReferenceFromDataTransfer(transfer) {
+    if (!transfer) return "";
+    const preferredTypes = ["application/vnd.obsidian.file", "application/json", "text/plain", "text/uri-list"];
+    for (const type of preferredTypes) {
+      let value = "";
+      try {
+        value = transfer.getData(type);
+      } catch (_error) {
+        value = "";
+      }
+      const reference = findCodexImageReference(value);
+      if (reference) return reference;
+    }
+    return "";
+  }
+
+  function findCodexImageReference(value, depth = 0) {
+    if (depth > 4 || value == null) return "";
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const reference = findCodexImageReference(item, depth + 1);
+        if (reference) return reference;
+      }
+      return "";
+    }
+    if (typeof value === "object") {
+      const preferredKeys = ["path", "filePath", "filepath", "source", "value"];
+      for (const key of preferredKeys) {
+        const reference = findCodexImageReference(value[key], depth + 1);
+        if (reference) return reference;
+      }
+      for (const item of Object.values(value)) {
+        const reference = findCodexImageReference(item, depth + 1);
+        if (reference) return reference;
+      }
+      return "";
+    }
+    const source = String(value || "").trim();
+    if (!source) return "";
+    if ((source.startsWith("{") && source.endsWith("}")) || (source.startsWith("[") && source.endsWith("]"))) {
+      try {
+        const reference = findCodexImageReference(JSON.parse(source), depth + 1);
+        if (reference) return reference;
+      } catch (_error) {
+        // Continue with plain-text parsing for non-JSON drag payloads.
+      }
+    }
+    const wikiMatch = source.match(/\[\[([^\]|#]+\.(?:avif|bmp|gif|jpe?g|png|svg|webp))(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/i);
+    if (wikiMatch) return normalizeNodeVaultFileReference(wikiMatch[1]);
+    for (const line of source.split(/\r?\n/)) {
+      const candidate = line.trim().replace(/^file:\/\//i, "").replace(/^['\"]|['\"]$/g, "");
+      if (CODEX_IMAGE_FILE_PATTERN.test(candidate)) {
+        try {
+          return normalizeNodeVaultFileReference(decodeURIComponent(candidate));
+        } catch (_error) {
+          return normalizeNodeVaultFileReference(candidate);
+        }
+      }
+    }
+    return "";
+  }
+
+  function toggleCodexImagePreview(characterId) {
+    const character = getCharacters().find((entry) => entry.id === characterId);
+    if (!character?.imageFile) return;
+    setCharacterField(characterId, "imagePreview", !character.imagePreview, true);
+  }
+
+  async function openNodeVaultFile(nodeId = state.selectedNodeId, index = 0) {
+    const node = getNode(nodeId || state.selectedNodeId);
+    const host = window.NarrativeCanvasHost;
+    const reference = getNodeVaultFiles(node)[Number.isInteger(index) && index >= 0 ? index : 0]?.path;
+    if (!reference) {
+      setStatus("No linked vault file.");
+      return;
+    }
+    if (!host?.openVaultFile) {
+      setStatus("Vault links open only in Obsidian.");
+      return;
+    }
+    try {
+      await leaveImmersiveFullscreenForVaultNavigation();
+      await host.openVaultFile(reference);
+    } catch (error) {
+      console.error(error);
+      setStatus("Could not open the linked vault file.");
+    }
+  }
+
+  async function leaveImmersiveFullscreenForVaultNavigation() {
+    const nativeFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!state.immersiveFullscreen && !nativeFullscreen) return;
+    if (nativeFullscreen) {
+      const exited = await exitNativeFullscreen();
+      if (!exited && (document.fullscreenElement || document.webkitFullscreenElement)) {
+        throw new Error("Could not exit fullscreen before opening the vault file.");
+      }
+    }
+    if (state.immersiveFullscreen) {
+      state.immersiveFullscreen = false;
+      renderShellState();
+      handleWindowResize();
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  function clearNodeVaultFile(index = 0) {
+    const node = getNode(state.selectedNodeId);
+    const references = getNodeVaultFiles(node);
+    if (!node || !references[index]) return;
+    const historyBefore = getHistorySnapshot();
+    const [removed] = references.splice(index, 1);
+    if (references.length) node.vaultFiles = references;
+    else delete node.vaultFiles;
+    delete node.vaultFile;
+    delete node.vaultFilePreview;
+    if (removed?.path) state.vaultFilePreviewCache.delete(removed.path);
+    nodeLayoutSizeCache.delete(node);
+    setProjectDirty(true);
+    renderInspector();
+    renderNodes();
+    renderLinks();
+    renderMinimap();
+    setStatus("Vault file link cleared.");
+    commitHistoryFromSnapshot(historyBefore);
+  }
+
+  function moveNodeVaultFileReference(fromIndex, targetIndex, placement = "before") {
+    const node = getNode(state.selectedNodeId);
+    if (!node || !Number.isInteger(fromIndex) || !Number.isInteger(targetIndex)) return false;
+    const references = getNodeVaultFiles(node);
+    if (fromIndex < 0 || fromIndex >= references.length || targetIndex < 0 || targetIndex >= references.length || fromIndex === targetIndex) return false;
+    const insertionBeforeRemoval = targetIndex + (placement === "after" ? 1 : 0);
+    const [entry] = references.splice(fromIndex, 1);
+    const insertionIndex = clamp(insertionBeforeRemoval - (fromIndex < insertionBeforeRemoval ? 1 : 0), 0, references.length);
+    if (insertionIndex === fromIndex) {
+      references.splice(fromIndex, 0, entry);
+      return false;
+    }
+    references.splice(insertionIndex, 0, entry);
+    node.vaultFiles = references;
+    nodeLayoutSizeCache.delete(node);
+    setProjectDirty(true);
+    renderInspector();
+    renderNodes();
+    renderLinks();
+    renderMinimap();
+    setStatus(t("Linked files reordered."));
+    return true;
+  }
+
+  // Slider on the node card: `input` events resize the preview live without a re-render
+  // (the slider must survive its own drag); the final `change` commits and reflows.
+  // --- Dropping a vault file from Obsidian's UI onto a node -----------------------
+  // Valid drop zones: a node card on the canvas, or the inspector's Vault file section.
+  function getVaultFileDropZone(target) {
+    if (!target?.closest) return null;
+    const nodeElement = target.closest(".node[data-node-id]");
+    if (nodeElement && dom.nodeLayer?.contains(nodeElement)) {
+      const node = getNode(nodeElement.dataset.nodeId);
+      if (node && !isFrameNode(node)) return { nodeId: node.id, element: nodeElement };
+    }
+    const section = target.closest(".node-vault-file-field");
+    if (section && dom.nodePanel?.contains(section)) {
+      const node = getNode(state.selectedNodeId);
+      if (node && !isFrameNode(node)) return { nodeId: node.id, element: section };
+    }
+    return null;
+  }
+
+  function parseVaultPathFromDataTransfer(dataTransfer) {
+    const text = dataTransfer?.getData?.("text/plain") || "";
+    const uri = text.match(/obsidian:\/\/open\?[^\s]*file=([^&\s]+)/);
+    if (uri) {
+      try { return decodeURIComponent(uri[1]); } catch (_error) { /* fall through */ }
+    }
+    const wiki = text.match(/^!?\[\[([^\]|#]+)/);
+    if (wiki) return wiki[1].trim();
+    return "";
+  }
+
+  function clearVaultDropHighlights() {
+    dom.scope?.querySelectorAll?.(".vault-file-drop-ready")
+      .forEach((element) => element.classList.remove("vault-file-drop-ready"));
+  }
+
+  function handleVaultFileDragOver(event) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.searchVaultFiles) return;
+    const zone = getVaultFileDropZone(event.target);
+    if (!zone) {
+      clearVaultDropHighlights();
+      return;
+    }
+    // During dragover the DataTransfer payload is unreadable; accept when Obsidian's
+    // drag manager reports a file or when any payload types are present.
+    if (!host.getDraggedVaultFile?.() && !(event.dataTransfer?.types || []).length) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "link";
+    if (!zone.element.classList.contains("vault-file-drop-ready")) {
+      clearVaultDropHighlights();
+      zone.element.classList.add("vault-file-drop-ready");
+    }
+  }
+
+  function handleVaultFileDrop(event) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.searchVaultFiles) return;
+    const zone = getVaultFileDropZone(event.target);
+    clearVaultDropHighlights();
+    if (!zone) return;
+    const path = host.getDraggedVaultFile?.() || parseVaultPathFromDataTransfer(event.dataTransfer);
+    if (!path) return;
+    event.preventDefault();
+    event.stopPropagation();
+    linkVaultFileToNode(zone.nodeId, path);
+  }
+
+  function linkVaultFileToNode(nodeId, pathValue) {
+    const node = getNode(nodeId);
+    const path = normalizeNodeVaultFileReference(pathValue);
+    if (!node || isFrameNode(node) || !path) return;
+    const references = getNodeVaultFiles(node);
+    if (references.some((entry) => entry.path === path)) {
+      setStatus("File already linked.");
+      return;
+    }
+    const historyBefore = getHistorySnapshot();
+    references.push({ path, preview: false, previewSize: 132, ...getDefaultVisionBoardPlacement(references.length) });
+    node.vaultFiles = references;
+    nodeLayoutSizeCache.delete(node);
+    selectNode(nodeId, false);
+    setProjectDirty(true);
+    renderInspector();
+    renderNodes();
+    renderLinks();
+    renderMinimap();
+    commitHistoryFromSnapshot(historyBefore);
+    setStatus(t("Vault file linked."));
+  }
+
+  function setNodeVaultPreviewSize(nodeId, index, sizeValue, commit) {
+    const node = getNode(nodeId);
+    const references = getNodeVaultFiles(node);
+    if (!node || !references[index]) return;
+    const size = normalizeVaultPreviewSize(sizeValue);
+    references[index].previewSize = size;
+    node.vaultFiles = references;
+    const preview = getNodeElementById(node.id)?.querySelector?.(`[data-node-vault-preview-index="${index}"]`);
+    preview?.style?.setProperty("--vault-preview-h", `${size}px`);
+    if (!commit) return;
+    nodeLayoutSizeCache.delete(node);
+    setProjectDirty(true);
+    renderNodes();
+    renderLinks();
+    renderMinimap();
+  }
+
+  function toggleNodeVaultFilePreview(nodeId = state.selectedNodeId, index = 0) {
+    const node = getNode(nodeId || state.selectedNodeId);
+    const references = getNodeVaultFiles(node);
+    if (!references[index] || !window.NarrativeCanvasHost?.readVaultFile) return;
+    const historyBefore = getHistorySnapshot();
+    references[index] = { ...references[index], preview: !references[index].preview };
+    node.vaultFiles = references;
+    delete node.vaultFile;
+    delete node.vaultFilePreview;
+    nodeLayoutSizeCache.delete(node);
+    setProjectDirty(true);
+    renderNodes();
+    renderLinks();
+    renderMinimap();
+    if (state.selectedNodeId === node.id) renderNodePanel(node);
+    setStatus(references[index].preview ? t("Linked file preview enabled.") : t("Linked file preview disabled."));
+    commitHistoryFromSnapshot(historyBefore);
   }
 
   function setNodeCustomField(key, value, rerender) {
@@ -20370,7 +34361,7 @@ function installNarrativeCanvasApp() {
     if (dom.confirmDialog?.showModal) {
       dom.confirmDialog.returnValue = "";
       dom.confirmDialog.showModal();
-      requestAnimationFrame(() => {
+      runAfterRender(() => {
         dom.newProjectNameInput?.focus();
         dom.newProjectNameInput?.select();
       });
@@ -20450,6 +34441,7 @@ function installNarrativeCanvasApp() {
         if (host.saveProject) {
           const projectTarget = await host.saveProject(savedStateJson);
           if (projectTarget) targets.push(projectTarget);
+          await reloadCodexFiles({ render: state.activeFileId === "characters", silent: true, markDirty: false });
         } else if (host.saveState) {
           const stateTarget = await host.saveState(savedState);
           if (stateTarget) targets.push(stateTarget);
@@ -20494,6 +34486,7 @@ function installNarrativeCanvasApp() {
         filenameProjectTitle: projectTitle
       });
       if (target) {
+        await reloadCodexFiles({ render: state.activeFileId === "characters", silent: true, markDirty: false });
         setProjectDirty(false);
         renderProjectFileStatus();
         setStatus(`New project created at ${target}.`);
@@ -20556,6 +34549,44 @@ function installNarrativeCanvasApp() {
     return true;
   }
 
+  async function reloadCodexFiles(options = {}) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.loadCodexEntries) return false;
+    try {
+      const loaded = await host.loadCodexEntries();
+      if (!Array.isArray(loaded) || !loaded.length) return false;
+      const current = getCharacters();
+      const currentById = new Map(current.map((entry) => [entry.id, entry]));
+      let changed = false;
+      loaded.forEach((source, index) => {
+        const external = normalizeCharacter(source, index);
+        if (!external) return;
+        const existing = currentById.get(external.id);
+        if (existing) {
+          if (JSON.stringify(existing) !== JSON.stringify(external)) {
+            Object.assign(existing, external);
+            changed = true;
+          }
+          return;
+        }
+        current.push(external);
+        currentById.set(external.id, external);
+        changed = true;
+      });
+      if (!changed) return false;
+      state.project.characters = normalizeCharacters(current);
+      invalidateCharacterRenderContext();
+      if (options.markDirty !== false) setProjectDirty(true);
+      if (options.render !== false) renderCharacterAwareSurfaces();
+      if (!options.silent) setStatus(t("Library files reloaded."));
+      return true;
+    } catch (error) {
+      console.error(error);
+      if (!options.silent) setStatus(t("Could not reload library files."));
+      return false;
+    }
+  }
+
   async function loadSavedState(announce = true) {
     const host = window.NarrativeCanvasHost;
     if (host?.loadProject) {
@@ -20611,8 +34642,12 @@ function installNarrativeCanvasApp() {
       exportImageScale: state.exportImageScale,
       view: { ...state.view },
       sidebar: getSavedSidebarState(),
+      aiButtonPos: state.aiButtonPos ? { ...state.aiButtonPos } : null,
+      codexBacklinkCollapsed: state.characterBacklinkGroupCollapsedKeys instanceof Set ? [...state.characterBacklinkGroupCollapsedKeys] : [],
       search: state.search,
       characterSearch: state.characterSearch,
+      codexKindFilter: state.codexKindFilter,
+      codexTagFilter: state.codexTagFilter,
       eventSearch: state.eventSearch,
       playbookSearch: state.playbookSearch,
       playbookJsonOpen: state.playbookJsonOpen,
@@ -20634,8 +34669,12 @@ function installNarrativeCanvasApp() {
         exportImageScale: state.exportImageScale,
         view: { x: 0, y: 0, scale: DEFAULT_CANVAS_ZOOM },
         sidebar: getSavedSidebarState(),
+        aiButtonPos: null,
+        codexBacklinkCollapsed: [],
         search: "",
         characterSearch: "",
+        codexKindFilter: CODEX_ALL_FILTER,
+        codexTagFilter: "",
         eventSearch: "",
         playbookSearch: "",
         playbookJsonOpen: false,
@@ -20660,8 +34699,15 @@ function installNarrativeCanvasApp() {
     state.theme = ui.theme === "light" ? "light" : "dark";
     state.exportImageScale = normalizeExportImageScale(ui.exportImageScale);
     applySavedSidebarState(ui.sidebar);
+    state.aiButtonPos = ui.aiButtonPos && Number.isFinite(ui.aiButtonPos.left) && Number.isFinite(ui.aiButtonPos.top)
+      ? { left: ui.aiButtonPos.left, top: ui.aiButtonPos.top }
+      : null;
+    applyAiButtonPosition();
+    state.characterBacklinkGroupCollapsedKeys = new Set(Array.isArray(ui.codexBacklinkCollapsed) ? ui.codexBacklinkCollapsed.filter((key) => typeof key === "string") : []);
     state.search = typeof ui.search === "string" ? ui.search : "";
     state.characterSearch = typeof ui.characterSearch === "string" ? ui.characterSearch : "";
+    state.codexKindFilter = normalizeCodexKindFilter(ui.codexKindFilter);
+    state.codexTagFilter = normalizeOptionalString(ui.codexTagFilter).trim();
     state.eventSearch = typeof ui.eventSearch === "string" ? ui.eventSearch : "";
     state.playbookSearch = typeof ui.playbookSearch === "string" ? ui.playbookSearch : "";
     state.searchIndex = -1;
@@ -20745,6 +34791,7 @@ function installNarrativeCanvasApp() {
       const restoredView = applySavedState(payload);
       if (!state.selectedNodeId) state.selectedNodeId = state.project.nodes[0]?.id || null;
       setProjectDirty(false);
+      await reloadCodexFiles({ render: false, silent: true });
       if (announce) setStatus(`Loaded ${getHostProjectFileLabel()}.`);
       return restoredView;
     } catch (error) {
@@ -20861,13 +34908,13 @@ function installNarrativeCanvasApp() {
   }
 
   function exportCharactersMarkdown() {
-    downloadBlob(new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }), "Characters.md");
-    setStatus("Characters Markdown exported.");
+    downloadBlob(new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }), "Narrative-Library.md");
+    setStatus(t("Narrative Library Markdown exported."));
   }
 
   function exportCharactersJson() {
-    downloadJsonFile(buildCharactersJsonDocument(), "Characters.json");
-    setStatus("Characters JSON exported.");
+    downloadJsonFile(buildCharactersJsonDocument(), "Narrative-Library.json");
+    setStatus(t("Narrative Library JSON exported."));
   }
 
   function exportVariablesJson() {
@@ -20922,8 +34969,8 @@ function installNarrativeCanvasApp() {
         { name: "Events Sheet.csv", blob: new Blob([buildEventSheetCsv()], { type: "text/csv;charset=utf-8" }) },
         { name: `${slug}-events.json`, blob: new Blob([JSON.stringify(buildEventSheetJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
         { name: "Node Fields.csv", blob: new Blob([buildNodeFieldsCsv()], { type: "text/csv;charset=utf-8" }) },
-        { name: "Characters.md", blob: new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }) },
-        { name: "Characters.json", blob: new Blob([JSON.stringify(buildCharactersJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
+        { name: "Narrative-Library.md", blob: new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }) },
+        { name: "Narrative-Library.json", blob: new Blob([JSON.stringify(buildCharactersJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
         { name: PLAYBOOK_FILE_NAME, blob: new Blob([buildVariablesJson()], { type: "application/json" }) }
       ];
       const svg = buildExportSvg();
@@ -21122,12 +35169,21 @@ function installNarrativeCanvasApp() {
       startNode: model.startNode ? model.nodeNameMap[model.startNode.id] : "",
       variables: model.variables,
       variableNames: Object.values(model.variableNameMap),
-      characters: getCharacters().map((character) => ({
+      characters: getCastCharacters().map((character) => ({
         id: character.id,
         name: character.name,
         role: character.role,
         voice: character.voice,
         notes: character.notes
+      })),
+      codex: getCharacters().map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        kind: entry.kind,
+        role: entry.role,
+        voice: entry.voice,
+        tags: entry.tags,
+        notes: entry.notes
       })),
       nodes,
       links,
@@ -21285,14 +35341,16 @@ function installNarrativeCanvasApp() {
   }
 
   function getRuntimeExportCast(node) {
-    const characters = new Map(getCharacters().map((character) => [character.id, character]));
-    return (Array.isArray(node?.cast) ? node.cast : [])
+    const entries = new Map(getCharacters().map((entry) => [entry.id, entry]));
+    return normalizeNodeCast(node?.cast)
       .map((entry) => {
-        const character = characters.get(entry.characterId);
-        if (!character) return null;
+        const codexEntry = entries.get(entry.characterId);
+        if (!codexEntry) return null;
         return {
-          characterId: character.id,
-          name: character.name,
+          codexId: codexEntry.id,
+          characterId: codexEntry.id,
+          name: codexEntry.name,
+          kind: codexEntry.kind,
           role: entry.role || "Present"
         };
       })
@@ -22810,11 +36868,16 @@ function installNarrativeCanvasApp() {
   function buildCharactersMarkdown() {
     const characters = getCharacters();
     const backlinkIndex = buildCharacterBacklinkIndex(characters);
-    const lines = [`# Characters`, ""];
+    const lines = [`# Narrative Library`, ""];
     characters.forEach((character) => {
       lines.push(`## ${character.name || "Unnamed Character"}`);
+      lines.push(`- Category: ${character.kind || "Character"}`);
+      if (character.tags) lines.push(`- Tags: ${parseCodexTags(character.tags).join(", ")}`);
       if (character.role) lines.push(`- Role: ${character.role}`);
       if (character.voice) lines.push(`- Voice: ${character.voice}`);
+      normalizeCodexExtraFields(character.extraFields)
+        .filter((field) => field.key)
+        .forEach((field) => lines.push(`- ${field.key}: ${field.value}`));
       if (character.notes) lines.push("", character.notes);
       getCharacterBacklinkGroups(character, backlinkIndex)
         .filter((group) => group.items.length)
@@ -24660,6 +38723,8 @@ function installNarrativeCanvasApp() {
       eventRowOrder: normalizeEventRowOrder(project.eventRowOrder),
       nodeTypes: nodeTypesList,
       customNodeTypes: [],
+      codexFieldTemplates: normalizeCodexFieldTemplates(project.codexFieldTemplates),
+      customCodexKinds: normalizeCustomCodexKinds(project.customCodexKinds),
       characters: normalizeProjectCharacters(project),
       deletedNodes: Array.isArray(project.deletedNodes) ? project.deletedNodes : [],
       nodes: Array.isArray(project.nodes) ? project.nodes.map((node) => normalizeNode(node, eventFrameTypes, eventSheet.columns, nodeTypeTemplates)) : [],
@@ -24755,8 +38820,9 @@ function installNarrativeCanvasApp() {
     });
   }
 
-  function syncDialogCastFromTurns(node, characters = getCharacters()) {
+  function syncDialogCastFromTurns(node, characters = getCastCharacters()) {
     if (!node || !Array.isArray(node.turns) || !Array.isArray(characters) || !characters.length) return;
+    characters = characters.filter((character) => normalizeCodexKind(character?.kind) === "Character");
     const cast = Array.isArray(node.cast) ? node.cast : [];
     const existingSpeakerCharIds = new Set(cast.filter((c) => c.role === "Speaker").map((c) => c.characterId));
     const speakerNames = new Set(node.turns.map((t) => String(t.speaker || "").trim()).filter(Boolean));
@@ -25246,6 +39312,10 @@ function installNarrativeCanvasApp() {
       delete normalized.storyOrder;
     }
     normalized.choices = parseChoiceLines(normalized.choices);
+    normalized.vaultFiles = normalizeNodeVaultFiles(normalized.vaultFiles, normalized.vaultFile, normalized.vaultFilePreview);
+    delete normalized.vaultFile;
+    delete normalized.vaultFilePreview;
+    if (!normalized.vaultFiles.length) delete normalized.vaultFiles;
     normalized.customFields = normalizeNodeCustomFields(normalized.customFields);
     normalized.cast = normalizeNodeCast(normalized.cast);
     if (!normalized.cast.length) delete normalized.cast;
@@ -25788,6 +39858,16 @@ function installNarrativeCanvasApp() {
     renderPreviewNode(state.playNodeId, { skipVisit: true });
   }
 
+  function jumpToPreviewStep(stepIndexValue) {
+    const stepIndex = Number(stepIndexValue);
+    const currentIndex = getPreviewCurrentPathIndex();
+    if (!Number.isInteger(stepIndex) || stepIndex < 0 || stepIndex >= currentIndex) return;
+    if (!restorePreviewStep(stepIndex)) return;
+    renderPreviewNode(state.playNodeId, { skipVisit: true });
+    scrollPreviewToCurrentCard();
+    setStatus(t("Returned to card {number}.", { number: stepIndex + 1 }));
+  }
+
   function executePreviewManualAction(nodeId, actionIdValue) {
     const node = getNode(nodeId);
     if (!node) return;
@@ -25803,6 +39883,104 @@ function installNarrativeCanvasApp() {
       capturePreviewStep(node.id);
     }
     renderPreviewNode(node.id, { skipVisit: true });
+  }
+
+  // Play keeps a scrollable log of the cards the reader just passed; older cards fall out
+  // of the visible span so long sessions stay light.
+  const PLAY_HISTORY_CARD_LIMIT = 30;
+
+  function renderPreviewHistoryCards() {
+    const index = getPreviewCurrentPathIndex();
+    if (index <= 0) return "";
+    const start = Math.max(0, index - PLAY_HISTORY_CARD_LIMIT);
+    const cards = [];
+    for (let i = start; i < index; i += 1) {
+      const node = getNode(state.playPath[i]);
+      if (!node) continue;
+      const step = Array.isArray(state.playSteps) ? state.playSteps[i] : null;
+      cards.push(renderPreviewHistoryCard(node, step, i));
+    }
+    if (!cards.length) return "";
+    const trimmedNotice = start > 0
+      ? `<div class="play-history-trimmed">${escapeHtml(t("Showing the last {count} cards.", { count: PLAY_HISTORY_CARD_LIMIT }))}</div>`
+      : "";
+    return `<section class="play-history" aria-label="${escapeAttr(t("Recent cards"))}">${trimmedNotice}${cards.join("")}</section>`;
+  }
+
+  // Linked image previews (the ones enabled on the node card) also show on play cards.
+  function renderPlayCardImages(node) {
+    const host = window.NarrativeCanvasHost;
+    if (!host?.getVaultResourceUrl) return "";
+    const images = getNodeVaultFiles(node).filter((entry) => entry.preview && CODEX_IMAGE_FILE_PATTERN.test(entry.path));
+    if (!images.length) return "";
+    return `<div class="play-card-images">${images.map((entry) => `<img src="${escapeAttr(host.getVaultResourceUrl(entry.path))}" alt="" loading="lazy" draggable="false">`).join("")}</div>`;
+  }
+
+  // Runs `callback` with `state.playVariables` temporarily swapped to a snapshot, so
+  // templated text renders against the values of that moment.
+  function withPreviewVariables(variables, callback) {
+    const activeVariables = state.playVariables;
+    if (variables) state.playVariables = variables;
+    try {
+      return callback();
+    } finally {
+      state.playVariables = activeVariables;
+    }
+  }
+
+  function renderPreviewHistoryCard(node, step, index) {
+    // Render each past card against the variable snapshot captured at that step, so
+    // templated text shows what the reader actually saw back then.
+    return withPreviewVariables(step?.variables, () => {
+      const runtimeScript = getNodeRuntimeScript(node);
+      const title = renderRuntimeTemplate(runtimeScript.title, node, getNodeDisplayTitle(node, node.type));
+      const turns = getRuntimeDialogTurns(node);
+      const body = turns.length
+        ? turns.map((turn) => formatRuntimeDialogTurn(turn)).join("\n")
+        : renderRuntimeTemplate(runtimeScript.body, node, displayBody(node));
+      // A step can only be restored when its snapshot exists; without one the jump
+      // button is omitted rather than silently failing.
+      const canRestore = Boolean(step?.nodeId);
+      return `
+        <article class="play-history-card">
+          <div class="play-meta">
+            <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
+            <span>${index + 1}</span>
+          </div>
+          <h4>${escapeHtml(title)}</h4>
+          <p>${escapeHtml(body)}</p>
+          ${renderPlayCardImages(node)}
+          ${canRestore ? `
+            <button class="play-history-jump" type="button" data-action="play-history-jump" data-play-step-index="${index}" title="${escapeAttr(t("Rewind the story to this card. Later steps are discarded."))}">
+              ↩ ${escapeHtml(t("Return to this card"))}
+            </button>
+          ` : ""}
+        </article>
+      `;
+    });
+  }
+
+  function getPreviewScroller() {
+    return dom.playDialog?.querySelector?.(".play-scroll") || null;
+  }
+
+  function isPreviewScrollerNearBottom() {
+    const scroller = getPreviewScroller();
+    if (!scroller) return true;
+    return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+  }
+
+  function scrollPreviewToCurrentCard() {
+    // Scroll synchronously right after the DOM swap, then once more on a short timer to
+    // absorb late layout shifts (images, debug details). Timer instead of rAF: rAF can be
+    // starved under headless/virtual-time test runs.
+    const scroller = getPreviewScroller();
+    if (!scroller) return;
+    scroller.scrollTop = scroller.scrollHeight;
+    window.setTimeout(() => {
+      const settled = getPreviewScroller();
+      if (settled) settled.scrollTop = settled.scrollHeight;
+    }, 50);
   }
 
   function renderPreviewNode(nodeId, options = {}) {
@@ -25846,17 +40024,25 @@ function installNarrativeCanvasApp() {
     dom.playTitle.textContent = runtimeTitle;
     const customFields = renderPreviewCustomFields(node);
     const debugDetails = renderPreviewDebugDetails(node, { requirementsSource, branchConditionSource: "" });
+    // Measure before the DOM swap: a reader parked at the bottom follows the story;
+    // one scrolled up into history keeps their place on passive refreshes.
+    const followStory = !options.skipVisit || isPreviewScrollerNearBottom();
     dom.playBody.innerHTML = `
-      <div class="play-meta">
-        <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
-        <span>${pageNumber} / ${pageTotal}</span>
+      ${renderPreviewHistoryCards()}
+      <div class="play-current-card">
+        <div class="play-meta">
+          <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
+          <span>${pageNumber} / ${pageTotal}</span>
+        </div>
+        <h3>${escapeHtml(runtimeTitle)}</h3>
+        <p>${escapeHtml(runtimeBody)}</p>
+        ${renderPlayCardImages(node)}
+        ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
+        ${customFields}
+        ${debugDetails}
       </div>
-      <h3>${escapeHtml(runtimeTitle)}</h3>
-      <p>${escapeHtml(runtimeBody)}</p>
-      ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
-      ${customFields}
-      ${debugDetails}
     `;
+    if (followStory) scrollPreviewToCurrentCard();
     if (!options.skipCanvasFocus) focusCanvasOnPreviewNode(node);
 
     if (dialogTurns.length && dialogTurnIndex < dialogTurns.length - 1) {
@@ -26945,6 +41131,10 @@ function installNarrativeCanvasApp() {
     return state.project.characters;
   }
 
+  function getCastCharacters() {
+    return getCharacters().filter((entry) => entry.kind === "Character");
+  }
+
   function normalizeCharacters(characters) {
     if (!Array.isArray(characters)) return [];
     const seen = new Set();
@@ -26960,14 +41150,186 @@ function installNarrativeCanvasApp() {
   function normalizeCharacter(character, index) {
     if (!character || typeof character !== "object") return null;
     const name = String(character.name || `Character ${index + 1}`).trim() || `Character ${index + 1}`;
+    const images = normalizeVisionBoardImages(character.images, character.imageFile || character.image || "");
     return {
       id: String(character.id || `c${index}`).trim() || `c${index}`,
       name,
+      kind: normalizeCodexKind(character.kind || character.category || "Character"),
       role: String(character.role || ""),
       voice: String(character.voice || ""),
+      tags: String(character.tags || ""),
       notes: String(character.notes || ""),
+      extraFields: normalizeCodexExtraFields(character.extraFields),
+      vaultFiles: normalizeCodexVaultFiles(character.vaultFiles ?? character.files),
+      canvasFile: normalizeNodeVaultFileReference(character.canvasFile ?? character.canvas ?? ""),
+      icon: normalizeNodeVaultFileReference(character.icon ?? ""),
+      codexFile: normalizeNodeVaultFileReference(character.codexFile || ""),
+      images,
+      imageFile: images[0]?.path || "",
+      imagePreview: images.length ? Boolean(character.imagePreview ?? true) : false,
       hidden: Boolean(character.hidden)
     };
+  }
+
+  // Frontmatter keys managed by the built-in fields; custom fields may not shadow them.
+  const CODEX_RESERVED_FRONTMATTER_KEYS = new Set([
+    "narrative_canvas_codex", "id", "name", "category", "kind", "role", "voice",
+    "tags", "notes", "images", "image", "image_preview", "hidden", "files", "canvas", "icon"
+  ]);
+
+  function normalizeCodexVaultFiles(value) {
+    const source = Array.isArray(value) ? value : [];
+    const seen = new Set();
+    return source
+      .map((entry) => normalizeNodeVaultFileReference(typeof entry === "string" ? entry : entry?.path || ""))
+      .filter((path) => {
+        if (!path || seen.has(path)) return false;
+        seen.add(path);
+        return true;
+      });
+  }
+
+  function normalizeCodexExtraFields(value) {
+    const source = Array.isArray(value)
+      ? value
+      : (value && typeof value === "object" ? Object.entries(value).map(([key, entry]) => ({ key, value: entry })) : []);
+    const normalized = [];
+    source.forEach((entry) => {
+      const key = String(entry?.key ?? "").trim();
+      if (CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase())) return;
+      const raw = entry?.value;
+      const fieldValue = raw == null ? "" : (typeof raw === "object" ? JSON.stringify(raw) : String(raw));
+      normalized.push({ key, value: fieldValue });
+    });
+    return normalized;
+  }
+
+  // Per-category custom-field templates: { Character: ["faction", ...], Location: [...], ... }.
+  // Template keys are prefilled on new entries of that category and merged into existing ones
+  // when a key is added; removing a template key never deletes entry values.
+  function normalizeCodexFieldTemplates(value) {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const normalized = {};
+    const kinds = [...new Set([...CODEX_KINDS, ...Object.keys(source).map((kind) => String(kind || "").trim()).filter(Boolean)])];
+    kinds.forEach((kind) => {
+      const seen = new Set();
+      normalized[kind] = (Array.isArray(source[kind]) ? source[kind] : [])
+        .map((key) => String(key || "").trim())
+        .filter((key) => {
+          const lower = key.toLowerCase();
+          if (!key || CODEX_RESERVED_FRONTMATTER_KEYS.has(lower) || seen.has(lower)) return false;
+          seen.add(lower);
+          return true;
+        });
+    });
+    return normalized;
+  }
+
+  function getCodexFieldTemplate(kind) {
+    const templates = normalizeCodexFieldTemplates(state.project.codexFieldTemplates);
+    state.project.codexFieldTemplates = templates;
+    return templates[normalizeCodexKind(kind)] || [];
+  }
+
+  function applyCodexTemplateToCharacter(character) {
+    const template = getCodexFieldTemplate(character.kind);
+    if (!template.length) return false;
+    const fields = normalizeCodexExtraFields(character.extraFields);
+    const present = new Set(fields.map((field) => field.key.toLowerCase()).filter(Boolean));
+    let changed = false;
+    template.forEach((key) => {
+      if (present.has(key.toLowerCase())) return;
+      fields.push({ key, value: "" });
+      changed = true;
+    });
+    if (changed) character.extraFields = fields;
+    return changed;
+  }
+
+  function normalizeVisionBoardImages(value, legacyReference = "") {
+    const source = Array.isArray(value) ? value : [];
+    const normalized = [];
+    source.forEach((entry, index) => {
+      const path = normalizeNodeVaultFileReference(typeof entry === "string" ? entry : entry?.path || entry?.image || entry?.reference);
+      if (!path || !CODEX_IMAGE_FILE_PATTERN.test(path) || normalized.some((item) => item.path === path)) return;
+      const fallback = getDefaultVisionBoardPlacement(index);
+      normalized.push({
+        path,
+        x: clampVisionBoardNumber(entry?.x, fallback.x, 0, 90),
+        y: clampVisionBoardNumber(entry?.y, fallback.y, 0, 88),
+        w: clampVisionBoardNumber(entry?.w, fallback.w, 10, 90)
+      });
+    });
+    const legacyPath = normalizeNodeVaultFileReference(legacyReference);
+    if (legacyPath && CODEX_IMAGE_FILE_PATTERN.test(legacyPath) && !normalized.some((entry) => entry.path === legacyPath)) {
+      const fallback = getDefaultVisionBoardPlacement(normalized.length);
+      normalized.unshift({ path: legacyPath, ...fallback });
+    }
+    return normalized.map((entry, index) => ({ ...getDefaultVisionBoardPlacement(index), ...entry }));
+  }
+
+  function clampVisionBoardNumber(value, fallback, minimum, maximum) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+  }
+
+  function getDefaultVisionBoardPlacement(index) {
+    const column = index % 3;
+    const row = Math.floor(index / 3) % 3;
+    return { x: 4 + column * 31, y: 5 + row * 30, w: 28 };
+  }
+
+  function getCharacterImages(character) {
+    return normalizeVisionBoardImages(character?.images, character?.imageFile || character?.image || "");
+  }
+
+  function syncCharacterImageAliases(character, images = getCharacterImages(character)) {
+    character.images = images;
+    character.imageFile = images[0]?.path || "";
+    character.imagePreview = images.length > 0;
+  }
+
+  function normalizeCodexKind(value) {
+    const raw = String(value || "").trim();
+    const normalized = raw.toLowerCase();
+    if (normalized === "character") return "Character";
+    if (normalized === "location") return "Location";
+    if (normalized === "item") return "Item";
+    if (normalized === "lore") return "Lore";
+    // Custom categories keep their name; only an empty value falls back.
+    return raw || "Character";
+  }
+
+  function normalizeCustomCodexKinds(value) {
+    const seen = new Set(CODEX_KINDS.map((kind) => kind.toLowerCase()));
+    return (Array.isArray(value) ? value : [])
+      .map((kind) => String(kind || "").trim())
+      .filter((kind) => {
+        const lower = kind.toLowerCase();
+        if (!kind || lower === "all" || seen.has(lower)) return false;
+        seen.add(lower);
+        return true;
+      });
+  }
+
+  // Built-in categories plus user-defined ones plus any category already used by an
+  // entry (e.g. typed straight into a markdown frontmatter `category`).
+  function getCodexKindsList() {
+    const kinds = [...CODEX_KINDS];
+    const push = (kind) => {
+      const name = String(kind || "").trim();
+      if (name && !kinds.some((existing) => existing.toLowerCase() === name.toLowerCase())) kinds.push(name);
+    };
+    (Array.isArray(state.project?.customCodexKinds) ? state.project.customCodexKinds : []).forEach(push);
+    getCharacters().forEach((entry) => push(entry.kind));
+    return kinds;
+  }
+
+  function normalizeCodexKindFilter(value) {
+    const normalized = String(value || "").trim();
+    if (!normalized || normalized.toLowerCase() === CODEX_ALL_FILTER.toLowerCase()) return CODEX_ALL_FILTER;
+    const kind = normalizeCodexKind(normalized);
+    return getCodexKindsList().some((existing) => existing.toLowerCase() === kind.toLowerCase()) ? kind : CODEX_ALL_FILTER;
   }
 
   function inferCharacters(project) {
@@ -26988,7 +41350,7 @@ function installNarrativeCanvasApp() {
     const seen = new Set();
     return cast
       .map((entry) => {
-        const characterId = String(entry?.characterId || entry?.id || "").trim();
+        const characterId = String(entry?.codexId || entry?.characterId || entry?.id || "").trim();
         if (!characterId) return null;
         const role = normalizeCastRole(entry?.role || entry?.relation);
         return { characterId, role };
@@ -27000,7 +41362,7 @@ function installNarrativeCanvasApp() {
         seen.add(key);
         return true;
       })
-      .slice(0, 24);
+      .slice(0, 64);
   }
 
   function normalizeCastRole(value) {
@@ -27061,14 +41423,14 @@ function installNarrativeCanvasApp() {
     }
 
     const dialogSpeaker = isDialogNode(node) && node.title
-      ? getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase())
+      ? getUniqueCastCharacterByName(node.title)
       : null;
     if (dialogSpeaker) links.push(createCharacterLink(dialogSpeaker, "Speaker", "dialog"));
 
     const fieldText = getNodeCharacterFieldText(node);
     if (fieldText) {
-      getCharactersMentionedInText(fieldText, dialogSpeaker?.id).forEach((character) => {
-        links.push(createCharacterLink(character, "Present", "field"));
+      getCharactersMentionedInText(fieldText, dialogSpeaker?.id).forEach((entry) => {
+        links.push(createCharacterLink(entry, getDefaultCodexRelation(entry), "field"));
       });
     }
 
@@ -27152,18 +41514,31 @@ function installNarrativeCanvasApp() {
     const cached = state.derived.characterMentionContext;
     const characters = getCharacters();
     if (cached?.characters === characters && cached.length === characters.length) return cached;
-    const byName = new Map();
+    const candidatesByName = new Map();
     characters.forEach((character) => {
-      const name = String(character.name || "").trim();
-      if (name) byName.set(name.toLowerCase(), character);
+      const name = String(character.name || "").trim().toLowerCase();
+      if (!name) return;
+      if (!candidatesByName.has(name)) candidatesByName.set(name, []);
+      candidatesByName.get(name).push(character);
+    });
+    const byName = new Map();
+    candidatesByName.forEach((entries, name) => {
+      if (entries.length === 1) byName.set(name, entries[0]);
     });
     const alternatives = [...byName.keys()]
       .sort((a, b) => b.length - a.length)
       .map(escapeRegExp);
     const pattern = alternatives.length ? new RegExp(alternatives.join("|"), "gi") : null;
-    const context = { characters, length: characters.length, byName, pattern };
+    const context = { characters, length: characters.length, byName, candidatesByName, pattern };
     state.derived.characterMentionContext = context;
     return context;
+  }
+
+  function getUniqueCastCharacterByName(value) {
+    const normalizedName = String(value || "").trim().toLowerCase();
+    if (!normalizedName) return null;
+    const matches = getCastCharacters().filter((entry) => String(entry.name || "").trim().toLowerCase() === normalizedName);
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function isNodeRelatedToCharacter(node, characterId) {
@@ -27242,14 +41617,15 @@ function installNarrativeCanvasApp() {
       });
 
       if (isDialogNode(node) && node.title) {
-        const speaker = getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase());
+        const speaker = getUniqueCastCharacterByName(node.title);
         if (speaker) addDirectLink(speaker.id, "Speaker", getCastRelationLabel("Speaker"), "dialog");
       }
 
       const fieldText = getNodeCharacterFieldText(node);
       if (fieldText) {
-        getCharactersMentionedInText(fieldText).forEach((character) => {
-          addDirectLink(character.id, "Present", getCastRelationLabel("Present"), "field");
+        getCharactersMentionedInText(fieldText).forEach((entry) => {
+          const role = getDefaultCodexRelation(entry);
+          addDirectLink(entry.id, role, getCastRelationLabel(role), "field");
         });
       }
 
@@ -27270,7 +41646,7 @@ function installNarrativeCanvasApp() {
         directCharacterIdsByNodeId.get(child.id)?.forEach((characterId) => eventCharacterIds.add(characterId));
       });
       eventCharacterIds.forEach((characterId) => {
-        if (characterIds.has(characterId)) addIndexedCharacterBacklink(index, characterId, "EventFrames", node, "Characters", "event");
+        if (characterIds.has(characterId)) addIndexedCharacterBacklink(index, characterId, "EventFrames", node, t("Library references"), "event");
       });
     });
 
@@ -27624,7 +42000,7 @@ function installNarrativeCanvasApp() {
     state.panel = "story";
     markProjectStructureChanged();
     renderAll();
-    requestAnimationFrame(() => scrollStoryNodeIntoView(nodeId));
+    runAfterRender(() => scrollStoryNodeIntoView(nodeId));
     setStatus(parent
       ? `${node.title || getNodeDisplayId(node)} moved inside ${parent.title || getNodeDisplayId(parent)}.`
       : `${node.title || getNodeDisplayId(node)} moved in Story.`);
@@ -28489,7 +42865,16 @@ function installNarrativeCanvasApp() {
     const choiceFollowupLines = choiceFollowupLabels.length
       ? Math.min(3, Math.max(1, estimateWrappedLineCount(choiceFollowupLabels.join(" · "), width - 28, 7)))
       : 0;
-    const contentHeight = 34 + 26 + titleLines * 17 + bodyLines * 17 + castLine * 24 + choicesLine * 24 + choiceFollowupLines * 23;
+    const vaultFileHeight = window.NarrativeCanvasHost?.readVaultFile
+      ? getNodeVaultFiles(node).reduce((height, entry) => {
+        if (!entry.preview) return height + 42;
+        if (CODEX_IMAGE_FILE_PATTERN.test(entry.path)) {
+          return height + normalizeVaultPreviewSize(entry.previewSize) + 46;
+        }
+        return height + 174;
+      }, 0)
+      : 0;
+    const contentHeight = 34 + 26 + titleLines * 17 + bodyLines * 17 + castLine * 24 + choicesLine * 24 + choiceFollowupLines * 23 + vaultFileHeight;
     return Math.round(clamp(contentHeight, minNodeHeight(node), maxNodeHeight(node)));
   }
 
@@ -28517,6 +42902,7 @@ function installNarrativeCanvasApp() {
       displayBody(node),
       parseChoiceLines(node?.choices).join("\n"),
       normalizeNodeCast(node?.cast).map((entry) => `${entry.role}:${entry.characterId}`).join("|"),
+      getNodeVaultFiles(node).map((entry) => `${entry.path}:${entry.preview ? "preview" : "link"}`).join("|"),
       getNodeCustomFieldEntries(node).map((field) => `${field.key}:${field.value}`).join("|")
     ].join("\u001f");
   }
@@ -28592,7 +42978,9 @@ function installNarrativeCanvasApp() {
   }
 
   function maxNodeHeight(node) {
-    return isFrameNode(node) ? Number.POSITIVE_INFINITY : 620;
+    // Nodes with several previews legitimately grow tall; the reader can always
+    // resize smaller by hand.
+    return isFrameNode(node) ? Number.POSITIVE_INFINITY : 1400;
   }
 
   // DOM-measuring size, for the few callers that want the actual rendered box
@@ -28905,7 +43293,7 @@ function installNarrativeCanvasApp() {
     if (!dom.statusText) return;
     if (!state.statusOverride) {
       if (state.activeFileId === "characters") {
-        dom.statusText.textContent = `${getFileViewLabel("characters")} - ${t("{characters} characters, {links} character links", { characters: getCharacters().length, links: getTotalCharacterLinkCount() })}`;
+        dom.statusText.textContent = `${getFileViewLabel("characters")} - ${t("{entries} library entries, {links} node links", { entries: getCharacters().length, links: getTotalCharacterLinkCount() })}`;
         return;
       }
       if (state.activeFileId === "variables") {

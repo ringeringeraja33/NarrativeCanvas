@@ -156,15 +156,24 @@ function scopeCss(source) {
   return output;
 }
 
-const current = fs.readFileSync(targetPath, "utf8").replace(/\r\n/g, "\n");
-const pluginSource = fs.readFileSync(pluginSourcePath, "utf8").replace(/\r\n/g, "\n").trim();
-const prelude = `${pluginSource}\n${marker}`;
-const source = fs.readFileSync(sourcePath, "utf8").replace(/\r\n/g, "\n");
-const scoped = scopeCss(source).trim();
-const next = `${prelude}\n${scoped}\n`;
-if (next === current) process.exit(0);
-if (checkOnly) {
-  console.error("styles.css is stale. Run: node scripts/build-plugin-styles.cjs");
-  process.exit(1);
+// Since the shadow-DOM mount, the app stylesheet ships inside main.js and the
+// document-level styles.css only carries the plugin chrome (plugin.css). The
+// scoping transform is kept exported so the artifact verifier can validate the
+// app stylesheet in its historically scoped form.
+function buildStylesOutput() {
+  const pluginSource = fs.readFileSync(pluginSourcePath, "utf8").replace(/\r\n/g, "\n").trim();
+  return `${pluginSource}\n${marker}\n/* App styles are bundled into main.js and injected into the view's shadow root. */\n`;
 }
-fs.writeFileSync(targetPath, next, "utf8");
+
+module.exports = { scopeCss, scopeSelectorList };
+
+if (require.main === module) {
+  const current = fs.readFileSync(targetPath, "utf8").replace(/\r\n/g, "\n");
+  const next = buildStylesOutput();
+  if (next === current) process.exit(0);
+  if (checkOnly) {
+    console.error("styles.css is stale. Run: node scripts/build-plugin-styles.cjs");
+    process.exit(1);
+  }
+  fs.writeFileSync(targetPath, next, "utf8");
+}

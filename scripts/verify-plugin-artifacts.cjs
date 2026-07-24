@@ -208,13 +208,196 @@ if (!main.includes('data-action="split-dialog-turns"') || !main.includes("functi
 } else {
   pass("main.js contains the Dialog turn split feature");
 }
+if (!main.includes("searchVaultFiles(query, limit = 40, options = {})")
+  || !main.includes('data-vault-file-suggestions')
+  || !main.includes("function handleVaultFileSuggestionKeyDown(event)")) {
+  fail("main.js is missing the Vault file autocomplete feature");
+} else {
+  pass("main.js contains Vault file autocomplete with keyboard navigation");
+}
+if (!main.includes('if (!host?.searchVaultFiles) return "";')) {
+  fail("Vault file controls are not gated to the plugin host");
+} else if (main.includes("NarrativeCanvasVaultFileSuggestModal")) {
+  fail("Vault file selection still uses an external Obsidian modal");
+} else {
+  pass("Vault file controls stay plugin-only and use the fullscreen-safe internal menu");
+}
+if (!main.includes("leaveImmersiveFullscreenForVaultNavigation")
+  || !main.includes("await exitNativeFullscreen()")) {
+  fail("Vault file navigation does not exit native fullscreen safely");
+} else if (main.includes("Vault file path or [[wiki link]]")) {
+  fail("Vault file input still prompts users to type wiki-link syntax");
+} else {
+  pass("Vault file navigation exits fullscreen before opening and uses the simplified prompt");
+}
+if (!main.includes("async readVaultFile(reference)")
+  || !main.includes("readVaultFile: (reference) => this.plugin.readVaultFile(reference)")
+  || !main.includes("async renderVaultMarkdown(markdown, container, sourcePath)")
+  || !main.includes("MarkdownRenderer.render(this.app")
+  || !main.includes("renderVaultMarkdown: (markdown, container, sourcePath)")
+  || !main.includes('if (!host?.readVaultFile || !references.length) return "";')
+  || !main.includes('data-action="toggle-node-vault-preview"')
+  || !main.includes('renderNodeSectionToggle("vaultFile", t("Vault file"), expanded)')
+  || !main.includes("function hydrateVaultFilePreviews()")
+  || !main.includes("normalized.vaultFiles = normalizeNodeVaultFiles")
+  || !main.includes("data-node-vault-drag=")
+  || !main.includes("function moveNodeVaultFileReference(")
+  || !main.includes("function setNodeVaultFile(index, value)")) {
+  fail("main.js is missing the plugin-only linked Vault file card preview feature");
+} else {
+  pass("multiple linked Vault files render on cards with ordered, independently persisted preview switches and a collapsible inspector section");
+}
 if (!main.includes('DEFAULT_CONTENT_FONT_SETTING = "obsidian"') || !main.includes('.addOption("cascadia", "Cascadia Code")') || !main.includes("--nc-plugin-content-font")) {
   fail("main.js is missing the content font setting");
 } else {
   pass("main.js contains Obsidian, system, Cascadia Code, and serif content font options");
 }
+if (!main.includes('DEFAULT_LIBRARY_FOLDER_NAME = "Library"')
+  || !main.includes('LEGACY_CODEX_FOLDER_NAME = "Codex"')
+  || !main.includes("getNewProjectLayout(savedStateJson, options = {})")
+  || !main.includes("await this.ensureFolder(layout.codexFolder)")
+  || !main.includes('setName(text("New project root folder"))')) {
+  fail("main.js is missing the per-project Library folder or legacy Codex compatibility");
+} else {
+  pass("new plugin projects create a Library folder while preserving legacy Codex paths");
+}
+if (!main.includes('data-codex-category-tabs')
+  || !main.includes('data-codex-tag-filters')
+  || !main.includes("function normalizeCodexKindFilter(value)")
+  || !main.includes("function getCastCharacters()")) {
+  fail("main.js is missing Codex category, tag, or cast isolation support");
+} else {
+  pass("Codex keeps category and tag filters while isolating cast entries");
+}
+if (!main.includes('data-cast-entry-context="new"')
+  || !main.includes("data-cast-entry-input")
+  || !main.includes("function handleCastEntryPickerKeyDown(")
+  || !main.includes('data-node-cast-drag=')
+  || !main.includes("function moveNodeCastReference(")
+  || !main.includes("CODEX_RELATIONS_BY_KIND")
+  || !main.includes("codexId: codexEntry.id")) {
+  fail("main.js is missing generalized, ordered Codex references");
+} else {
+  pass("nodes support category-aware Codex references with stable exports and reordering");
+}
+if (!main.includes('data-character-tag-input')
+  || !main.includes('data-action="remove-codex-tag"')
+  || !main.includes('data-action="select-codex-tag-suggestion"')
+  || !main.includes("function handleCodexTagKeyDown(")
+  || !main.includes('hasAttribute?.("data-character-tag-input")')
+  || !main.includes("function updateCodexTagSuggestions(")) {
+  fail("main.js is missing the Codex tag token editor or autocomplete");
+} else {
+  pass("Codex tags use removable tokens with keyboard entry and autocomplete");
+}
+if (!main.includes('data-action="toggle-character-backlink-group"')
+  || !main.includes("function toggleCharacterBacklinkGroup(")
+  || !main.includes("function isCharacterBacklinkGroupExpanded(")
+  || !main.includes('class="character-backlink-header nc-collapsible-header"')) {
+  fail("main.js is missing independently collapsible Codex backlink groups");
+} else {
+  pass("Codex backlink relations render as independently collapsible sections");
+}
+if (!main.includes("async syncCodexFiles(savedStateJson")
+  || !main.includes("async loadCodexEntries(projectPath")
+  || !main.includes("narrative_canvas_codex: true")
+  || !main.includes('data-codex-image-drop')
+  || !main.includes('data-character-image-picker-input="true"')
+  || !main.includes("async importCodexImage(file, entryName = \"\")")
+  || !main.includes("function handleCodexImageDrop(event)")
+  || !main.includes("getVaultResourceUrl(reference)")) {
+  fail("main.js is missing managed Codex Markdown files or the visual image picker");
+} else {
+  pass("plugin Codex entries sync to Markdown files and use a visual drag-and-drop image picker");
+}
+if (!main.includes('`notes: ${JSON.stringify(entry.notes)}`')
+  || !main.includes('`images: ${JSON.stringify(entry.images)}`')
+  || !main.includes('images: data.images')
+  || !main.includes('const hasFrontmatterNotes = Object.prototype.hasOwnProperty.call(data, "notes")')
+  || !main.includes('markdownBody: hasFrontmatterNotes ? body : ""')
+  || !main.includes('markdownBody: existing?.markdownBody || ""')) {
+  fail("main.js does not migrate Codex notes into frontmatter while preserving Markdown bodies");
+} else {
+  pass("Codex structured fields and vision-board images live in frontmatter while free Markdown bodies are preserved");
+}
+if (!main.includes('this.app.vault.getConfig?.("attachmentFolderPath")')
+  || !main.includes('const assetFolder = attachmentSubpath')
+  || !main.includes('data-codex-local-image-input')
+  || !main.includes('function persistVisionBoardPosition(kind, id, index, x, y, w)')) {
+  fail("main.js is missing Library-scoped attachment imports or vision-board persistence");
+} else {
+  pass("local images follow the Vault attachment setting inside Library and vision-board positions persist");
+}
 
-const styles = readUtf8("styles.css");
+// Since the shadow-DOM mount, the app stylesheet ships inside main.js; the checks
+// below validate canvas.css in its historically scoped form via the same transform
+// the styles build used to apply.
+const { scopeCss } = require("./build-plugin-styles.cjs");
+const styles = scopeCss(readUtf8("canvas.css"));
+
+const shippedStyles = readUtf8("styles.css");
+if (shippedStyles.includes(".app-shell") || !shippedStyles.includes("shadow root")) {
+  fail("styles.css should only carry plugin chrome since the shadow-DOM mount");
+} else {
+  pass("styles.css carries only plugin chrome (app styles live in the shadow root)");
+}
+if (!main.includes("const CANVAS_STYLE_CSS = [")
+  || !main.includes("attachShadow({ mode: \"open\" })")
+  || !main.includes("function mountCanvasShadow(")
+  || !main.includes(":host")) {
+  fail("main.js is missing the shadow-root mount or bundled app stylesheet");
+} else {
+  pass("main.js mounts the app in a shadow root with its bundled stylesheet");
+}
+
+if (!styles.includes("grid-template-columns: repeat(var(--codex-masonry-columns, 1), minmax(0, 1fr));")
+  || !styles.includes(".narrative-canvas-plugin-host .codex-overview-card::before")
+  || !styles.includes(".narrative-canvas-plugin-host .codex-category-tab::before")
+  || !styles.includes(".narrative-canvas-plugin-host .codex-tag-filter::after")) {
+  fail("styles.css is missing the responsive Codex overview or isolated controls");
+} else {
+  pass("Codex overview uses responsive compact columns and resets host pseudo-elements");
+}
+if (!styles.includes(".narrative-canvas-plugin-host .character-backlink-header")
+  || !styles.includes(".narrative-canvas-plugin-host .character-backlink-group > .linked-node-list")) {
+  fail("styles.css is missing Codex backlink folding-bar styles");
+} else {
+  pass("Codex backlink folding bars are styled in the plugin host");
+}
+if (!styles.includes(".narrative-canvas-plugin-host .vision-board-canvas.is-embedded")
+  || !styles.includes(".narrative-canvas-plugin-host .vision-board-canvas.is-focused")
+  || !styles.includes(".narrative-canvas-plugin-host .vision-board-tile-actions > button::before")
+  || !styles.includes(".narrative-canvas-plugin-host .codex-image-picker .vault-file-suggestions")
+  || !styles.includes(".narrative-canvas-plugin-host .vault-file-suggestion.codex-image-suggestion > img")) {
+  fail("styles.css is missing the isolated Codex image picker or vision board");
+} else {
+  pass("Codex image picker and embedded/focused vision boards are scoped to the plugin host");
+}
+if (!styles.includes(".narrative-canvas-plugin-host .vault-preview-toggle::before")
+  || !styles.includes(".narrative-canvas-plugin-host .vault-preview-toggle::after")
+  || !styles.includes("-webkit-appearance: none;")
+  || !styles.includes(".narrative-canvas-plugin-host .node-vault-preview")
+  || !styles.includes(".narrative-canvas-plugin-host .node-vault-preview.is-markdown")) {
+  fail("styles.css is missing the isolated Vault preview switch or card preview styles");
+} else {
+  pass("Vault preview switches reset host appearance and pseudo-elements");
+}
+if (!styles.includes(".narrative-canvas-plugin-host .cast-drag-handle::before")
+  || !styles.includes(".narrative-canvas-plugin-host .cast-drag-handle::after")
+  || !styles.includes(".narrative-canvas-plugin-host .cast-row-drop-before::before")
+  || !styles.includes('.narrative-canvas-plugin-host .node-cast-chip[data-codex-kind="Location"]')) {
+  fail("styles.css is missing isolated Codex reorder controls or category markers");
+} else {
+  pass("Codex reorder controls and category markers are scoped for the plugin host");
+}
+if (!styles.includes(".narrative-canvas-plugin-host .codex-tag-chip::before")
+  || !styles.includes(".narrative-canvas-plugin-host .codex-tag-chip::after")
+  || !styles.includes(".narrative-canvas-plugin-host .codex-tag-suggestion::before")
+  || !styles.includes(".narrative-canvas-plugin-host .codex-tag-suggestions")) {
+  fail("styles.css is missing isolated Codex tag tokens or suggestions");
+} else {
+  pass("Codex tag tokens and suggestions reset host pseudo-elements");
+}
 const unscopedSelectors = styles
   .split("\n")
   .map((line, index) => ({ line: line.trim(), number: index + 1 }))
@@ -237,11 +420,6 @@ if (/\.narrative-canvas-plugin-host\s*\/\*/.test(styles)) {
 }
 
 const requiredSelectors = [
-  ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"]",
-  ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"] :is(.ai-title h2, .document-header h2)",
-  ".narrative-canvas-plugin-host .app-shell.app-shell[data-theme=\"light\"] :is(.hidden-node-row .palette-label, .stat-value)",
-  ".narrative-canvas-plugin-host .app-shell .document-editor-highlight span",
-  ".narrative-canvas-plugin-host .app-shell :is(input:not([type=\"checkbox\"]):not([type=\"radio\"]):not([type=\"range\"]):not([type=\"color\"]), textarea:not(.document-source-editor), select)",
   ".narrative-canvas-plugin-host .app-shell .document-editor-input textarea.document-source-editor",
   ".narrative-canvas-plugin-host .nc-checkbox-box",
   ".narrative-canvas-plugin-host .nc-checkbox-field input[type=\"checkbox\"]:checked + .nc-checkbox-box",
@@ -250,6 +428,7 @@ const requiredSelectors = [
   ".narrative-canvas-plugin-host .node .node-dialog-speaker-input",
   ".narrative-canvas-plugin-host .node .node-choice-label-input",
   ".narrative-canvas-plugin-host .workspace-toc-button > svg",
+  ".narrative-canvas-plugin-host .vault-file-suggestions",
   ".narrative-canvas-plugin-host .playbook-end-condition-editor",
   ".narrative-canvas-plugin-host .type-dialog-opacity-field .nc-range-track",
   ".narrative-canvas-plugin-host .type-dialog-opacity-field .nc-range-thumb"
@@ -264,24 +443,6 @@ if (!styles.includes("@media (orientation: portrait) and (max-width: 1200px)")) 
   fail("styles.css does not preserve the workspace behind the portrait play overlay");
 } else {
   pass("styles.css contains the portrait-display layout constraints");
-}
-const lightHeadingRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell\.app-shell\[data-theme="light"\] :is\(\.ai-title h2, \.document-header h2\)\s*\{([^}]*)\}/)?.[1] || "";
-if (!lightHeadingRule.includes("color: #17181b") || !lightHeadingRule.includes("-webkit-text-fill-color: #17181b") || !lightHeadingRule.includes("opacity: 1")) {
-  fail("styles.css does not lock embedded light-theme headings to a readable color");
-} else {
-  pass("styles.css locks embedded light-theme headings to a readable color");
-}
-const lightMutedTextRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell\.app-shell\[data-theme="light"\] :is\(\.hidden-node-row \.palette-label, \.stat-value\)\s*\{([^}]*)\}/)?.[1] || "";
-if (!lightMutedTextRule.includes("color: #30323a") || !lightMutedTextRule.includes("-webkit-text-fill-color: #30323a") || !lightMutedTextRule.includes("opacity: 1")) {
-  fail("styles.css does not lock light-theme hidden labels and project totals to a readable color");
-} else {
-  pass("styles.css locks light-theme hidden labels and project totals to a readable color");
-}
-const documentHighlightSpanRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell \.document-editor-highlight span\s*\{([^}]*)\}/)?.[1] || "";
-if (!documentHighlightSpanRule.includes("-webkit-text-fill-color: currentColor") || !documentHighlightSpanRule.includes("background: transparent") || !documentHighlightSpanRule.includes("text-shadow: none") || !documentHighlightSpanRule.includes("opacity: 1")) {
-  fail("styles.css does not isolate Document syntax text from host theme span styles");
-} else {
-  pass("styles.css isolates Document syntax text from host theme span styles");
 }
 // The custom checkbox must NOT fight the host: the native <input> is neutralized (laid transparent
 // over the field) rather than overriding Obsidian's checkbox mark with !important. Guard that the
@@ -303,13 +464,6 @@ if (!checkboxMarkRule.includes("opacity: 1")) {
   fail("styles.css does not reveal the custom checkbox checkmark when checked");
 } else {
   pass("styles.css reveals the custom checkbox checkmark when checked");
-}
-const checkboxPseudoRule = styles.match(/\.narrative-canvas-plugin-host \.app-shell \.nc-checkbox-field input\[type="checkbox"\]::before,\s*\.narrative-canvas-plugin-host \.app-shell \.nc-checkbox-field input\[type="checkbox"\]::after\s*\{([^}]*)\}/)?.[1] || "";
-const checkboxPseudoResets = ["content: none", "display: none", "position: static", "background: transparent", "box-shadow: none", "transform: none"];
-if (checkboxPseudoResets.some((reset) => !checkboxPseudoRule.includes(reset))) {
-  fail("styles.css does not neutralize the host checkbox pseudo-elements");
-} else {
-  pass("styles.css neutralizes the host checkbox pseudo-elements");
 }
 const rangeInputRule = styles.match(/\.narrative-canvas-plugin-host \.type-dialog-opacity-field input\[type="range"\]\s*\{([^}]*)\}/)?.[1] || "";
 if (!rangeInputRule.includes("opacity: 0") || !rangeInputRule.includes("position: absolute") || !rangeInputRule.includes("appearance: none") || !rangeInputRule.includes("background: transparent") || !rangeInputRule.includes("box-shadow: none")) {

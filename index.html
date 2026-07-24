@@ -10,7 +10,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32x32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png">
     <link rel="manifest" href="./site.webmanifest">
-    <link rel="stylesheet" href="./canvas.css?v=20260716m-1.2.7">
+    <link rel="stylesheet" href="./canvas.css?v=1.3.0-09c35339">
   </head>
   <body>
     <div class="app-shell">
@@ -55,17 +55,17 @@
             <span class="file-dot"></span>
             <span class="nc-file-item-label">Narrative.canvas</span>
           </button>
+          <button class="nc-file-item" data-file-id="document">
+            <span class="file-dot muted"></span>
+            <span class="nc-file-item-label">Document.md</span>
+          </button>
           <button class="nc-file-item" data-file-id="events">
             <span class="file-dot muted"></span>
             <span class="nc-file-item-label">Events Sheet.csv</span>
           </button>
           <button class="nc-file-item" data-file-id="characters">
             <span class="file-dot muted"></span>
-            <span class="nc-file-item-label">Characters.md</span>
-          </button>
-          <button class="nc-file-item" data-file-id="document">
-            <span class="file-dot muted"></span>
-            <span class="nc-file-item-label">Document.md</span>
+            <span class="nc-file-item-label">Library.md</span>
           </button>
           <button class="nc-file-item" data-file-id="variables">
             <span class="file-dot muted"></span>
@@ -158,7 +158,7 @@
             <div id="minimap" class="minimap" role="button" aria-label="Move canvas viewport"></div>
           </div>
         </section>
-        <section id="charactersPanel" class="canvas-workspace-view document-panel" aria-label="Characters"></section>
+        <section id="charactersPanel" class="canvas-workspace-view document-panel" aria-label="Narrative Library"></section>
         <section id="variablesPanel" class="canvas-workspace-view document-panel" aria-label="Variables"></section>
         <section id="eventsPanel" class="canvas-workspace-view document-panel event-sheet-panel" aria-label="Events Sheet"></section>
         <section id="documentPanel" class="canvas-workspace-view document-panel document-source-panel" aria-label="Document"></section>
@@ -289,7 +289,7 @@
       </aside>
 
       <div id="inspectorFloatOverlay" class="inspector-float-overlay" hidden>
-        <section class="inspector-float-window" role="dialog" aria-modal="false" aria-labelledby="inspectorFloatTitle">
+        <section class="inspector-float-window" role="dialog" aria-modal="true" aria-labelledby="inspectorFloatTitle">
           <header class="inspector-float-header" data-floating-window-drag="inspector">
             <div>
               <span class="pane-kicker">Inspector</span>
@@ -553,6 +553,16 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=20260716m-1.2.7"></script>
+    <dialog id="visionBoardDialog" class="vision-board-dialog" aria-label="Vision board">
+      <section class="vision-board-dialog-shell">
+        <header class="vision-board-dialog-header">
+          <div><span class="pane-kicker">VISION BOARD</span><h2 id="visionBoardTitle">Linked files</h2></div>
+          <button class="icon-button" type="button" data-action="close-vision-board" aria-label="Close vision board" title="Close vision board">×</button>
+        </header>
+        <div id="visionBoardCanvas" class="vision-board-canvas is-focused" aria-label="Move linked images"></div>
+      </section>
+    </dialog>
+
+    <script src="./app.js?v=1.3.0-09c35339"></script>
   </body>
 </html>

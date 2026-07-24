@@ -21,6 +21,8 @@ const DEFAULT_EVENT_FRAME_COLOR = "#b48cff";
 const NODE_TYPE_ICON_MAX_UNITS = 3;
 const RETIRED_NODE_TYPES = new Set(["Condition", "Set"]);
 const SAVED_STATE_VERSION = 1;
+const CODEX_KINDS = ["Character", "Location", "Item", "Lore"];
+const CODEX_ALL_FILTER = "All";
 const WEB_STORAGE_KEY = "narrative-canvas-state-v1";
 const WEB_LANGUAGE_STORAGE_KEY = "narrative-canvas-language-v1";
 const FRAME_CONTAINMENT_INDEX_CELL_SIZE = 1024;
@@ -155,14 +157,31 @@ const LEGACY_DEFAULT_NODE_BADGES = { Content: "T", Choice: "?", Event: "EV" };
 const LEGACY_EVENT_FRAME_COLORS = new Set(["#98c379"]);
 const DIRECT_NODE_FIELD_KEYS = new Set(["choices"]);
 const INLINE_NODE_FIELD_KEYS = new Set(["title", "body"]);
-const CAST_RELATIONS = ["POV", "Speaker", "Present", "Mentioned", "Target", "Owner"];
+const CAST_RELATIONS = ["POV", "Speaker", "Present", "Mentioned", "Target", "Owner", "Setting", "Featured", "Used", "Referenced", "Revealed"];
 const CAST_RELATION_LABELS = {
   POV: "POV",
   Speaker: "Speaker",
   Present: "Present",
   Mentioned: "Mentioned",
   Target: "Target",
-  Owner: "Owner"
+  Owner: "Owner",
+  Setting: "Setting",
+  Featured: "Featured",
+  Used: "Used",
+  Referenced: "Referenced",
+  Revealed: "Revealed"
+};
+const CODEX_RELATIONS_BY_KIND = {
+  Character: ["POV", "Speaker", "Present", "Mentioned", "Target", "Owner"],
+  Location: ["Setting", "Mentioned"],
+  Item: ["Featured", "Used", "Owner", "Target", "Mentioned"],
+  Lore: ["Referenced", "Revealed", "Mentioned"]
+};
+const CODEX_DEFAULT_RELATION_BY_KIND = {
+  Character: "Present",
+  Location: "Setting",
+  Item: "Featured",
+  Lore: "Referenced"
 };
 const CHARACTER_BACKLINK_GROUP_DEFS = [
   { id: "Speaker", label: "Speaker scenes" },
@@ -171,9 +190,14 @@ const CHARACTER_BACKLINK_GROUP_DEFS = [
   { id: "POV", label: "POV scenes" },
   { id: "Target", label: "Target scenes" },
   { id: "Owner", label: "Owned nodes" },
+  { id: "Setting", label: "Set at" },
+  { id: "Featured", label: "Featured in" },
+  { id: "Used", label: "Used in" },
+  { id: "Referenced", label: "Referenced in" },
+  { id: "Revealed", label: "Revealed in" },
   { id: "EventFrames", label: "Frames" }
 ];
-const CHARACTER_BACKLINK_PREVIEW_LIMIT = 6;
+const CODEX_IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i;
 const DOCUMENT_RENDER_INITIAL_LIMIT = 80;
 const DOCUMENT_RENDER_INCREMENT = 80;
 const CANVAS_RENDER_PADDING = 420;
@@ -327,7 +351,7 @@ const eventSheetColumns = [
   { key: "eventType", label: "Event Type", width: "170px" },
   { key: "beatList", label: "Beat", width: "180px" },
   { key: "eventDescription", label: "Description", width: "360px" },
-  { key: "characterEncountered", label: "Characters", width: "320px" }
+  { key: "characterEncountered", label: "Library references", width: "320px" }
 ];
 
 // Canonical order of the built-in event columns. Each event-frame type carries
@@ -449,9 +473,9 @@ function createSampleProject(language = "en") {
       reason: "原因"
     },
     characters: [
-      { id: "c0", name: "你", role: "第一次使用者", voice: "按节点顺序阅读说明。", notes: "正文里的 {protagonist} 显示为这个角色名；角色页按出场顺序列出相关节点。" },
+      { id: "c0", name: "你", role: "第一次使用者", voice: "按节点顺序阅读说明。", notes: "正文里的 {protagonist} 显示为这个角色名；资料库按出场顺序列出相关节点。" },
       { id: "c1", name: "向导", role: "解说", voice: "在对话节点里说明下一步操作。", notes: "演示对话节点的发言者，以及 Speaker / Present 角色关系。" },
-      { id: "c2", name: "作者", role: "内容创作者", voice: "从写作角度说明节点和对白如何使用。", notes: "在对话节点发言，并演示角色页反链。" },
+      { id: "c2", name: "作者", role: "内容创作者", voice: "从写作角度说明节点和对白如何使用。", notes: "在对话节点发言，并演示资料库反链。" },
       { id: "c3", name: "编辑", role: "内容编辑", voice: "关注结构、可达性和信息是否清楚。", notes: "在复核节点发言，并演示 Mentioned 关系。" },
       { id: "c4", name: "校对员", role: "状态复核", voice: "指出变量、条件和效果的读写位置。", notes: "关联校验、演示预览和状态复核节点。" },
       { id: "c5", name: "读者", role: "未来的读者", voice: "最终会读到这个故事的人。", notes: "演示“被提及”这一角色关系。" }
@@ -469,7 +493,7 @@ function createSampleProject(language = "en") {
         { id: "opt_open_playbook", label: "先看演示设置如何门控选项", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
       ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
       n5: { title: "效果改变了变量", body: "所选选项已执行效果，workflow_progress 变为第 {workflow_progress} 步。后续节点和选项可以读取该变量，决定是否出现。", cast: [{ characterId: "c0", role: "POV" }] },
-      n6: { title: "对话节点", body: "这是对话分支的独立反馈。每轮包含说话者和台词；说话者与角色同名时，角色页会自动建立反链。", turns: [{ speaker: "向导", line: "你选择了对话分支，所以这里展示多轮发言。" }, { speaker: "作者", line: "我的名字与角色表一致，角色页会列出这次出场。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+      n6: { title: "对话节点", body: "这是对话分支的独立反馈。每轮包含说话者和台词；说话者与人物条目同名时，资料库会自动建立反链。", turns: [{ speaker: "向导", line: "你选择了对话分支，所以这里展示多轮发言。" }, { speaker: "作者", line: "我的名字与人物条目一致，资料库会列出这次出场。" }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
       n20: { title: "演示设置反馈", body: "这个分支展示门控选项：上一选项只有在 script_builder_seen 为 true 时才可用。条件决定能不能选，选择后效果负责写入 data_integrity 和 route；两者分工清楚，后续校验也更容易定位。", customFields: { evidence: "选项条件 / 选择后效果", owner: "演示设置", outcome: "确认门控条件与状态写入" }, cast: [{ characterId: "c4", role: "Owner" }] },
       e2: { title: "第二章：条件和效果", body: "这一段说明条件和效果的配合方式：选项用「选择后效果」改变变量，节点用「条件要求」决定能否通过。", beatList: "选项效果 / 节点效果 / 变量动作", eventType: "状态逻辑", eventDescription: "选项、节点和变量动作都能写状态；校验页汇总每个变量的写入位置和读取位置。", location: "演示设置", timeWeather: "梳理逻辑", questEpisode: "导览-02", status: "进行中" },
       cf1: { title: "对话框", body: "这是对话框（会话框）。可用于圈定一组对话或状态说明节点；折叠后仍保留为画布结构。", customFields: { participants: "向导 / 作者 / 校对员", summary: "变量确定后，检查每条路线在预览中是否可达。" }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
@@ -479,7 +503,7 @@ function createSampleProject(language = "en") {
         { id: "opt_action_rules", label: "由变量动作写入状态", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
       ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
       n8: { title: "变量命名", body: "状态键建议使用小写英文下划线，例如 data_integrity。命名保持一致后，条件、效果、文本模板和校验页会更容易对应。", customFields: { evidence: "状态键命名", owner: "状态逻辑", outcome: "统一条件和效果里的变量名" }, cast: [{ characterId: "c4", role: "Owner" }] },
-      n9: { title: "角色和反链", body: "记录节点可保存来源、备注和相关角色。校对员负责确认变量的读写位置，编辑负责检查角色名是否一致；角色页会按出场顺序归并他们发言、在场或被提及的节点。", customFields: { recorder: "校对员", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
+      n9: { title: "资料库和反链", body: "记录节点可保存来源、备注和相关人物。校对员负责确认变量的读写位置，编辑负责检查人物名是否一致；资料库会按出场顺序归并他们发言、在场或被提及的节点。", customFields: { recorder: "校对员", reliability: "用于路线检查" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
       n23: { title: "变量动作反馈", body: "变量动作适合处理不依附某个选项或节点行的状态写入。这个分支把一条记录追加到 walkthrough_notes，并提高 review_pressure；随后与其它路线一起进入条件门。", customFields: { evidence: "变量动作", owner: "演示设置", outcome: "写入复核记录并继续主线" }, cast: [{ characterId: "c4", role: "Owner" }] },
       n10: { title: "条件门（节点要求）", body: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
       e3: { title: "第三章：整理和复核", body: "这一段使用分支—收束结构：三种复核操作分别给出反馈，然后汇合到最后练习。事件表字段记录状态、风险和说明对象。", beatList: "状态索引 / 三种复核 / 收束", eventType: "内容复核", eventDescription: "确认变量、条件、文本模板和节点备注是否一致。", location: "复核面板", timeWeather: "整理阶段", questEpisode: "导览-03", status: "待检查", clueStatus: "进行中", risk: "中", evidenceOwner: "校对员" },
@@ -594,7 +618,7 @@ function createSampleProject(language = "en") {
       reason: "Reason"
     },
     characters: [
-      { id: "c0", name: "You", role: "First-time user", voice: "Read each node in order.", notes: "Body text renders {protagonist} as this character name; the Characters page lists related nodes in story order." },
+      { id: "c0", name: "You", role: "First-time user", voice: "Read each node in order.", notes: "Body text renders {protagonist} as this character name; Narrative Library lists related nodes in story order." },
       { id: "c1", name: "Guide", role: "Narrator", voice: "Explains the next operation in dialog nodes.", notes: "Demonstrates a Dialog speaker and the Speaker / Present roles." },
       { id: "c2", name: "Writer", role: "Content creator", voice: "Explains nodes and dialog from a writing perspective.", notes: "Speaks in a Dialog node and demonstrates character backlinks." },
       { id: "c3", name: "Editor", role: "Content editor", voice: "Checks structure, reachability, and clarity.", notes: "Speaks during review and demonstrates the Mentioned role." },
@@ -614,7 +638,7 @@ function createSampleProject(language = "en") {
         { id: "opt_open_playbook", label: "See Playbook gate an option", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "data_integrity", value: "1" }, { trigger: "onChoose", op: "set", key: "route", value: "playbook_branch" }] }
       ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c1", role: "Present" }] },
       n5: { title: "An Effect Changed a Variable", body: "The selected option ran an effect and set workflow_progress to step {workflow_progress}. Later nodes and options can read this variable to decide whether to appear.", cast: [{ characterId: "c0", role: "POV" }] },
-      n6: { title: "The Dialog Node", body: "This is the dialog branch's distinct feedback. Each turn has a speaker and a line; matching a speaker to a character name creates a backlink on the Characters page.", turns: [{ speaker: "Guide", line: "You chose the dialog branch, so this node demonstrates multiple turns." }, { speaker: "Writer", line: "My name matches the character list, so the Characters page records this appearance." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
+      n6: { title: "The Dialog Node", body: "This is the dialog branch's distinct feedback. Each turn has a speaker and a line; matching a speaker to a Character entry creates a backlink in Narrative Library.", turns: [{ speaker: "Guide", line: "You chose the dialog branch, so this node demonstrates multiple turns." }, { speaker: "Writer", line: "My name matches a Character entry, so Narrative Library records this appearance." }], cast: [{ characterId: "c1", role: "Speaker" }, { characterId: "c2", role: "Speaker" }, { characterId: "c4", role: "Mentioned" }] },
       n20: { title: "Playbook Feedback", body: "This branch demonstrates a gated option. The previous option was available only when script_builder_seen was true. Its condition controlled availability; its effects wrote data_integrity and route. Keeping those jobs separate makes validation easier.", customFields: { evidence: "Choice condition / on-choose effects", owner: "Playbook", outcome: "Confirm gating and state writes" }, cast: [{ characterId: "c4", role: "Owner" }] },
       e2: { title: "Chapter 2: Conditions and Effects", body: "This chapter shows how conditions and effects work together: options change variables with on-choose effects, and node requirements decide whether the route can continue.", beatList: "Choice effects / node effects / variable actions", eventType: "State Logic", eventDescription: "Options, nodes, and variable actions all write state; Validation shows where each variable is written and read.", location: "Playbook", timeWeather: "Working out the logic", questEpisode: "Tour-02", status: "In progress" },
       cf1: { title: "The Dialog Frame", body: "This is a Dialog Frame. Use it to group dialog or state explanation nodes; when collapsed, it remains a canvas structure.", customFields: { participants: "Guide / Writer / Reviewer", summary: "Once variables are set, check that each route is reachable in preview." }, cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Present" }, { characterId: "c1", role: "Present" }] },
@@ -624,7 +648,7 @@ function createSampleProject(language = "en") {
         { id: "opt_action_rules", label: "Write state in a variable action", requires: "script_builder_seen === true", effects: [{ trigger: "onChoose", op: "add", key: "review_pressure", value: "1" }, { trigger: "onChoose", op: "append", key: "walkthrough_notes", value: "variable_action" }] }
       ], cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Target" }] },
       n8: { title: "Naming Variables", body: "Use lower-case snake_case state keys, such as data_integrity. Consistent names make conditions, effects, text templates, and Validation easier to match.", customFields: { evidence: "State-key naming", owner: "State logic", outcome: "Use one variable name across conditions and effects" }, cast: [{ characterId: "c4", role: "Owner" }] },
-      n9: { title: "Characters and Backlinks", body: "A note node can store source, remarks, and related characters. The Reviewer checks variable reads and writes, while the Editor checks character naming; the Characters page groups where they speak, appear, or are mentioned in story order.", customFields: { recorder: "Reviewer", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
+      n9: { title: "Library and Backlinks", body: "A note node can store sources, remarks, and related Characters. The Reviewer checks variable reads and writes, while the Editor checks Character naming; Narrative Library groups where they speak, appear, or are mentioned in story order.", customFields: { recorder: "Reviewer", reliability: "Used for route checks" }, cast: [{ characterId: "c4", role: "Reviewer" }, { characterId: "c3", role: "Editor" }, { characterId: "c0", role: "POV" }] },
       n23: { title: "Variable Action Feedback", body: "Variable actions handle state writes that do not belong to one option or node row. This branch appends a record to walkthrough_notes and raises review_pressure, then joins the other routes at the condition gate.", customFields: { evidence: "Variable action", owner: "Playbook", outcome: "Write a review record and continue" }, cast: [{ characterId: "c4", role: "Owner" }] },
       n10: { title: "A Condition Gate", body: "section_notes_ready === true || data_integrity >= 2", cast: [{ characterId: "c0", role: "POV" }, { characterId: "c4", role: "Mentioned" }] },
       e3: { title: "Chapter 3: Organize and Review", body: "This chapter uses branch-and-bottleneck structure: three review actions give distinct feedback, then converge on the final practice step. Events Sheet fields track status, risk, and subject.", beatList: "State index / three review actions / convergence", eventType: "Content Review", eventDescription: "Confirm that variables, conditions, text templates, and node notes match.", location: "Review panel", timeWeather: "Organizing", questEpisode: "Tour-03", status: "Needs check", clueStatus: "Open", risk: "Medium", evidenceOwner: "Reviewer" },
@@ -922,9 +946,54 @@ function createSampleProject(language = "en") {
   };
 }
 
+// Post-render UI restore (focus, selection, scroll) runs on a macrotask instead of
+// requestAnimationFrame: rAF can be starved under headless/virtual-time test runs and
+// throttled iframes, which silently drops the restore. Keep rAF for animation and
+// layout-measurement scheduling only.
+function runAfterRender(callback) {
+  window.setTimeout(callback, 0);
+}
+
+// Shadow-DOM safety: capture listeners bound on `document` receive retargeted events
+// for shadow content (the target becomes the shadow host); composedPath()[0] restores
+// the real target. In the non-shadow web build this returns event.target unchanged.
+function getComposedEventTarget(event) {
+  if (typeof event?.composedPath === "function") {
+    const path = event.composedPath();
+    if (path && path.length) return path[0];
+  }
+  return event?.target || null;
+}
+
+// getScopeActiveElement() reports the shadow host for focus inside a shadow tree;
+// dig into the shadow root for the real focused element.
+function getScopeActiveElement() {
+  let active = document.activeElement;
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+  return active;
+}
+
+// Shared arrow-key navigation for dropdown suggestion lists: moves the `.active`
+// class through `options`, syncs aria-selected, scrolls the pick into view, and
+// returns it. Callers keep their own open/close and Enter/Escape semantics.
+function moveActiveSuggestion(options, direction) {
+  if (!options.length) return null;
+  const currentIndex = options.findIndex((option) => option.classList.contains("active"));
+  const nextIndex = currentIndex < 0
+    ? (direction > 0 ? 0 : options.length - 1)
+    : (currentIndex + direction + options.length) % options.length;
+  options.forEach((option, index) => {
+    const active = index === nextIndex;
+    option.classList.toggle("active", active);
+    if (option.getAttribute("role") === "option") option.setAttribute("aria-selected", String(active));
+  });
+  options[nextIndex].scrollIntoView?.({ block: "nearest" });
+  return options[nextIndex];
+}
+
 const fileViews = {
   adventure: "Narrative.canvas",
-  characters: "Characters.md",
+  characters: "Library.md",
   events: "Events Sheet.csv",
   variables: PLAYBOOK_FILE_NAME,
   document: "Document.md"
@@ -932,10 +1001,10 @@ const fileViews = {
 
 const fileViewLabels = {
   adventure: "Narrative canvas",
-  characters: "Characters",
+  characters: "Narrative Library",
   events: "Events sheet",
   variables: "Playbook",
-  document: "Document"
+  document: "Edit document"
 };
 
 const uiTranslations = {
@@ -1044,6 +1113,7 @@ const uiTranslations = {
     "Add a variable definition before adding a variable action.": "添加变量动作前，请添加变量定义。",
     "Advanced JSON": "高级 JSON",
     "All": "全部",
+    "All entries": "全部条目",
     "All characters visible": "显示全部角色",
     "All characters visible.": "全部角色已显示。",
     "All event rows visible": "显示全部事件行",
@@ -1073,18 +1143,64 @@ const uiTranslations = {
     "Buttons": "按钮",
     "Browser storage": "浏览器存储",
     "A new project file will be created when possible.": "满足创建条件时，新建项目文件。",
+    "Add entry": "新增资料条目",
     "Cancel": "取消",
     "Canvas": "画布",
     "Canvas quick menu": "画布快捷菜单",
     "Category": "分类",
+    "Character": "人物",
+    "Narrative Library": "资料库",
+    "Comma-separated tags": "使用逗号分隔标签",
+    "Add tag...": "添加标签……",
+    "Add tag": "添加标签",
+    "Remove tag: {tag}": "删除标签：{tag}",
+    "Tag added.": "已添加标签。",
+    "Tag removed.": "已删除标签。",
+    "Tag suggestions": "标签建议",
     "Center": "居中",
     "Center canvas": "画布居中",
     "Characters": "角色",
     "Characters Markdown exported.": "角色 Markdown 已导出。",
     "Characters JSON exported.": "角色 JSON 已导出。",
-    "Characters.md opened.": "Characters.md 已打开。",
+    "Library.md opened.": "Library.md 已打开。",
+    "Narrative Library Markdown exported.": "资料库 Markdown 已导出。",
+    "Narrative Library JSON exported.": "资料库 JSON 已导出。",
+    "Library file": "资料文件",
+    "Image file": "预览图文件",
+    "Open file": "打开文件",
+    "Choose image": "选择预览图",
+    "Preview image": "预览图",
+    "Hide image": "隐藏预览图",
+    "Search or choose an image file": "搜索或选择预览图文件",
+    "Search images in vault": "搜索库中图片",
+    "Click or drop an image here": "点击选择，或将图片拖到这里",
+    "Drop an image from the vault or your computer": "可从库文件区或电脑拖入图片",
+    "Replace image": "更换预览图",
+    "Remove image": "移除预览图",
+    "Close image picker": "关闭图片选择器",
+    "Library files reloaded.": "资料文件已重新载入。",
+    "Could not reload library files.": "无法重新载入资料文件。",
     "Search character: {name}": "搜索角色：{name}",
+    "Open library entry: {name}": "打开资料条目：{name}",
     "Cast": "演员表",
+    "Library references": "资料",
+    "Library mentions": "资料引用",
+    "Library entry": "资料条目",
+    "Relation": "关系",
+    "Select library entry...": "选择资料条目...",
+    "No library entries yet": "还没有资料条目",
+    "No manual library references.": "还没有手动资料引用。",
+    "Select a library entry first.": "请先选择资料条目。",
+    "Library reference added.": "已添加资料引用。",
+    "Library reference removed.": "已移除资料引用。",
+    "Library references reordered.": "资料引用顺序已调整。",
+    "Remove library reference": "移除资料引用",
+    "Drag to reorder reference": "拖动调整资料顺序",
+    "Drag to reorder linked file": "拖动调整库文件顺序",
+    "Linked files reordered.": "库文件已重新排序。",
+    "Search or choose entry...": "搜索或选择资料条目……",
+    "Show all entries": "显示全部条目",
+    "No matching entries.": "没有匹配的条目。",
     "Choice: {label}": "选择：{label}",
     "Focus source Choice node: {label}": "聚焦来源选择节点：{label}",
     "Focus next node: {title}": "聚焦下一个节点：{title}",
@@ -1159,6 +1275,35 @@ const uiTranslations = {
     "Content": "内容",
     "Choices": "选项",
     "Custom fields": "自定义字段",
+    "Add field": "添加字段",
+    "Referenced nodes": "被引用的节点",
+    "Field name": "字段名",
+    "Field value": "字段值",
+    "Remove field": "删除字段",
+    "No custom fields yet. Fields sync to the entry's markdown frontmatter.": "还没有自定义字段。字段会同步到条目 markdown 文件的 frontmatter。",
+    "Field name {key} is reserved.": "字段名 {key} 为保留字段。",
+    "Category fields": "分类字段模板",
+    "Library": "资料库",
+    "Add category": "新增分类",
+    "Category name": "分类名称",
+    "Remove category": "删除分类",
+    "Category {name} already exists.": "分类 {name} 已存在。",
+    "Category {name} added.": "已新增分类 {name}。",
+    "Category {name} removed.": "已删除分类 {name}。",
+    "Category {name} still has {count} entries. Move or remove them first.": "分类 {name} 下还有 {count} 个条目，请先移动或删除它们。",
+    "Move or remove its entries first.": "请先移动或删除该分类下的条目。",
+    "Summary": "简介",
+    "New field name": "新字段名",
+    "Remove template field: {key}": "移除模板字段：{key}",
+    "Remove from template. Entry values are kept.": "从模板移除。条目中的已有值会保留。",
+    "Field {key} already in the template.": "模板中已有字段 {key}。",
+    "Field {key} added to {count} entries.": "字段 {key} 已添加到 {count} 个条目。",
+    "Field {key} removed from the template. Entry values are kept.": "已从模板移除字段 {key}，条目中的已有值保留。",
+    "Recent cards": "刚刚经过的卡片",
+    "Showing the last {count} cards.": "仅显示最近 {count} 张卡片。",
+    "Return to this card": "回到此卡片",
+    "Rewind the story to this card. Later steps are discarded.": "回到这张卡片重新开始。之后的步骤会被丢弃。",
+    "Returned to card {number}.": "已回到第 {number} 张卡片。",
     "Choice prompt": "选择提示",
     "Choice text": "选项文本",
     "Choices, one per line": "选项，每行一个",
@@ -1269,6 +1414,7 @@ const uiTranslations = {
     "Files": "文件",
     "Find": "查找",
     "Find character": "查找角色",
+    "Find library entries": "查找资料",
     "Find event": "查找事件",
     "Find nodes": "查找节点",
     "Find in Playbook": "在演示设置中查找",
@@ -1297,6 +1443,8 @@ const uiTranslations = {
     "Inspector": "检查器",
     "If": "如果",
     "Item": "物品",
+    "Location": "地点",
+    "Lore": "设定",
     "Item State": "物品状态",
     "Key": "键",
     "Light": "浅色",
@@ -1366,7 +1514,7 @@ const uiTranslations = {
     "Node Library": "节点库",
     "Node visit": "节点进入时",
     "Nodes": "节点",
-    "Notes": "备注",
+    "Notes": "笔记",
     "Note": "备注",
     "Opening text": "开场文本",
     "On visit": "进入时",
@@ -1432,6 +1580,11 @@ const uiTranslations = {
     "Present": "出场",
     "Mentioned": "提及",
     "Owner": "拥有者",
+    "Setting": "场景地点",
+    "Featured": "出现",
+    "Used": "使用",
+    "Referenced": "引用",
+    "Revealed": "揭示",
     "Show": "显示",
     "Show this frame type in Events Sheet": "在事件表中显示这一类框架",
     "Show fewer": "收起",
@@ -1468,6 +1621,11 @@ const uiTranslations = {
     "Subtract": "减去",
     "System rule": "系统规则",
     "Target scenes": "目标场景",
+    "Set at": "作为地点",
+    "Featured in": "出现于",
+    "Used in": "使用于",
+    "Referenced in": "引用于",
+    "Revealed in": "揭示于",
     "Text": "文本",
     "Text source": "文本源",
     "Text Source Mode": "文本源模式",
@@ -1652,6 +1810,10 @@ const uiTranslations = {
     "Node requirements": "节点条件",
     "Node effects": "节点效果",
     "All characters are hidden.": "所有角色都已隐藏。",
+    "All entries are hidden.": "所有资料条目都已隐藏。",
+    "No library entries yet.": "还没有资料条目。",
+    "No library entries match the current filters.": "没有符合当前筛选条件的资料条目。",
+    "{visible} of {total} library entries shown": "显示 {total} 个资料条目中的 {visible} 个",
     "Variable Actions: state writes": "变量动作：状态写入",
     "Advanced JSON is for exact edits and compatibility checks, not the main workflow.": "高级 JSON 用于精确编辑和兼容检查；主要编辑入口为结构化表单。",
     "Use the Operation menu's Append option to keep the old value and add the new value to a list.": "在操作菜单中选择追加，可保留原列表并加入新值。",
@@ -1823,6 +1985,7 @@ const uiTranslations = {
     "Zoom in": "放大",
     "Zoom out": "缩小",
     "{characters} characters, {links} character links": "{characters} 个角色，{links} 条角色链接",
+    "{entries} library entries, {links} node links": "{entries} 个资料条目，{links} 条节点关联",
     ", focusing {name}": "，正在聚焦 {name}",
     "{count} event rows from canvas nodes": "{count} 行事件来自画布节点",
     "{count} event rows": "{count} 行事件",
@@ -1885,7 +2048,55 @@ const uiTranslations = {
     "Text input dialog is unavailable.": "文本输入弹窗不可用。",
     "Events Sheet columns restored.": "事件表列已恢复。",
     "Could not open project picker.": "无法打开项目选择器。",
+    "Could not open the linked vault file.": "无法打开关联的库文件。",
+    "Could not preview the linked vault file.": "无法预览关联的库文件。",
     "No saved project to reload.": "没有可重新加载的已保存项目。",
+    "No linked vault file.": "该节点尚未关联库文件。",
+    "File already linked.": "该文件已关联。",
+    "Vault file linked.": "库文件已关联。",
+    "Vault file removed.": "库文件已移除。",
+    "Image preview size": "图片显示大小",
+    "Board": "画板",
+    "Open board": "打开画板",
+    "Create board": "创建画板",
+    "Create a native canvas board for this entry. Its images and linked files move onto the board.": "为此条目创建原生 canvas 画板；现有预览图和库文件会迁入画板。",
+    "Board created.": "画板已创建。",
+    "Could not create the board.": "无法创建画板。",
+    "Detach board": "解除画板",
+    "Resize image": "调整图片大小",
+    "Bring to front": "置于顶层",
+    "Bring forward": "上移一层",
+    "Send backward": "下移一层",
+    "Send to back": "置于底层",
+    "Image layer updated.": "图层顺序已更新。",
+    "Board detached. The canvas file is kept in the vault.": "已解除画板关联；.canvas 文件仍保留在库中。",
+    "Loading board...": "正在加载画板……",
+    "Could not load the board.": "无法加载画板。",
+    "The board is empty.": "画板还是空的。",
+    "Icon": "图标",
+    "Search icon image": "搜索图标图片",
+    "Remove icon": "移除图标",
+    "Icon updated.": "图标已更新。",
+    "Icon removed.": "图标已移除。",
+    "Not linked": "未关联",
+    "Open vault file": "打开库文件",
+    "Add images": "添加图片",
+    "Add local images": "从电脑导入",
+    "Preview images": "预览图",
+    "Vision board": "视觉板",
+    "Focus vision board": "聚焦视觉板",
+    "Linked images": "关联图片",
+    "Move linked images": "移动关联图片",
+    "Close vision board": "关闭视觉板",
+    "Add vault file": "添加库文件",
+    "Remove vault file": "移除库文件",
+    "Move linked file up": "上移关联文件",
+    "Move linked file down": "下移关联文件",
+    "Preview linked file on canvas": "在画布中预览关联文件",
+    "Loading linked file...": "正在读取关联文件……",
+    "Linked file is empty.": "关联文件为空。",
+    "Linked file preview enabled.": "已开启关联文件预览。",
+    "Linked file preview disabled.": "已关闭关联文件预览。",
     "Could not clear browser storage.": "无法清除浏览器存储。",
     "Browser storage cleared. Blank project saved.": "浏览器存储已清除，空项目已保存。",
     "Browser storage cleared. Blank project loaded.": "浏览器存储已清除，空项目已载入。",
@@ -1905,8 +2116,34 @@ const uiTranslations = {
     "Character name is required.": "角色名称不能为空。",
     "Character focus cleared.": "角色聚焦已清除。",
     "Character search cleared.": "角色搜索已清除。",
+    "Entry name is required.": "资料名称不能为空。",
+    "Library focus cleared.": "资料聚焦已清除。",
+    "Library search cleared.": "资料搜索已清除。",
+    "Search library: {name}": "搜索资料：{name}",
+    "All entries visible.": "全部资料条目已显示。",
     "Character links collapsed.": "角色关联已折叠。",
     "Character links expanded.": "角色关联已展开。",
+    "Library links collapsed.": "资料关联已折叠。",
+    "Library links expanded.": "资料关联已展开。",
+    "Library category filter cleared.": "已清除资料库分类筛选。",
+    "Library tag filter cleared.": "已清除资料库标签筛选。",
+    "Library entry added.": "已新增资料条目。",
+    "Library entry deleted.": "已删除资料条目。",
+    "Library image assigned.": "已设置资料预览图。",
+    "Library image removed.": "已移除资料预览图。",
+    "Could not import image.": "无法导入预览图。",
+    "Back to all entries": "返回全部资料",
+    "Open entry: {name}": "打开资料：{name}",
+    "{count} linked nodes": "{count} 个关联节点",
+    "Drop an image file.": "请拖入图片文件。",
+    "Delete entry": "删除条目",
+    "Hidden entries": "已隐藏条目",
+    "Show entry": "显示条目",
+    "Show all entries": "显示全部条目",
+    "Atmosphere": "氛围",
+    "Reference source": "参考来源",
+    "Choose vault file": "选择库中文件",
+    "Clear vault file": "清除关联文件",
     "Select a character first.": "请先选择角色。",
     "Cast link added.": "演员关联已添加。",
     "Cast link removed.": "演员关联已移除。",
@@ -1935,6 +2172,14 @@ const uiTranslations = {
     "New project created, but vault file creation failed.": "新项目已创建，但 vault 文件创建失败。",
     "New project created.": "新项目已创建。",
     "Project saved.": "项目已保存。",
+    "Link this node to notes or other files in the vault.": "将此节点关联到库中的笔记或其他文件。",
+    "Vault file": "库文件",
+    "Vault file link cleared.": "已清除库文件关联。",
+    "Vault file linked.": "已关联库文件。",
+    "Search or choose a vault file": "搜索或选择库文件",
+    "Vault file suggestions": "库文件建议",
+    "Vault links open only in Obsidian.": "库文件关联只能在 Obsidian 中打开。",
+    "Tags": "标签",
     "Project save failed.": "项目保存失败。",
     "New project created, but vault JSON creation failed.": "新项目已创建，但 vault JSON 创建失败。",
     "Sample project loaded in browser storage.": "示例项目已加载到浏览器存储。",
@@ -1991,6 +2236,7 @@ const uiTranslations = {
     "{label} reordered.": "{label} 已重新排序。",
     "Link created: {label}.": "连线已创建：{label}。",
     "Document": "文档",
+    "Edit document": "编辑文档",
     "Plain text": "纯文本",
     "Source": "文档源",
     "Project document": "项目文档",
@@ -2099,6 +2345,8 @@ function createInitialRuntimeState() {
   reconnectingEnd: null,
   characterFocusId: null,
   characterSearch: "",
+  codexKindFilter: CODEX_ALL_FILTER,
+  codexTagFilter: "",
   eventSearch: "",
   playbookSearch: "",
   searchIndex: -1,
@@ -2138,7 +2386,13 @@ function createInitialRuntimeState() {
   documentChromeCollapsed: false,
   documentHighlightFrame: null,
   autoSaveTimer: null,
-  characterBacklinkExpandedIds: new Set(),
+  characterBacklinkGroupCollapsedKeys: new Set(),
+  codexSelectedEntryId: "",
+  codexImagePickerCharacterId: "",
+  visionBoardContext: null,
+  visionBoardDrag: null,
+  visionBoardLayerMenu: null,
+  visionBoardLayerMenuDismiss: null,
   choiceOptionExpandedIds: new Set(),
   choiceOptionConditionExpandedIds: new Set(),
   nodeSectionExpandedIds: new Set(["dialogTurns"]),
@@ -2189,8 +2443,18 @@ function createInitialRuntimeState() {
   frameCanvasReturnView: null,
   search: "",
   eventRowDrag: null,
+  nodeCastDrag: null,
+  nodeVaultFileDrag: null,
+  codexVaultFileDrag: null,
+  aiButtonDrag: null,
+  aiButtonPos: null,
+  aiButtonClickSuppressed: false,
   eventColumnResize: null,
   mention: null,
+  vaultFileSuggestions: null,
+  vaultFileSuggestionRequestId: 0,
+  vaultFileSuggestionSuppressFocusOnce: false,
+  vaultFilePreviewCache: new Map(),
   characterRenderContext: null,
   characterIndex: null,
   nodeIndex: null,
@@ -2236,6 +2500,8 @@ window.NarrativeCanvasApp = {
   createSampleProjectFile,
   ensureVaultFile: ensureVaultProjectFile,
   loadVaultProject: loadCurrentVaultProject,
+  reloadCodexFiles,
+  refreshCodexCanvasPreviews,
   importStoryMarkdownText,
   importStoryLayoutText,
   importStateSchemaText
@@ -2358,7 +2624,9 @@ async function initNarrativeCanvas() {
 function bindDom(scopeOverride = null) {
   dom.scope = scopeOverride || resolveDomScope();
   dom.root = dom.scope.querySelector(".app-shell");
-  dom.themeHost = dom.root?.closest(".narrative-canvas-plugin-host") || document.documentElement;
+  dom.themeHost = (typeof ShadowRoot === "function" && dom.scope instanceof ShadowRoot ? dom.scope.host : null)
+    || dom.root?.closest(".narrative-canvas-plugin-host")
+    || document.documentElement;
   dom.sidebarLeft = dom.scope.querySelector("[data-sidebar='left']");
   dom.sidebarRight = dom.scope.querySelector("[data-sidebar='right']");
   dom.sidebarToggles = [...dom.scope.querySelectorAll("[data-sidebar-toggle]")];
@@ -2468,6 +2736,9 @@ function bindDom(scopeOverride = null) {
   dom.genericTextButton = dom.scope.querySelector("#genericTextButton");
   dom.playbookHelpDialog = dom.scope.querySelector("#playbookHelpDialog");
   dom.nodeRequiredDialog = dom.scope.querySelector("#nodeRequiredDialog");
+  dom.visionBoardDialog = dom.scope.querySelector("#visionBoardDialog");
+  dom.visionBoardTitle = dom.scope.querySelector("#visionBoardTitle");
+  dom.visionBoardCanvas = dom.scope.querySelector("#visionBoardCanvas");
   dom.playTitle = dom.scope.querySelector("#playTitle");
   dom.playBody = dom.scope.querySelector("#playBody");
   dom.playActions = dom.scope.querySelector("#playActions");
@@ -2516,6 +2787,10 @@ function bindEvents() {
   const eventRoot = dom.scope || document;
 
   dom.aiFloatingButton?.addEventListener("click", handleAiFloatingControlClick, { signal });
+  dom.aiFloatingButton?.addEventListener("pointerdown", handleAiButtonPointerDown, { signal });
+  window.addEventListener("pointermove", handleAiButtonPointerMove, { signal });
+  window.addEventListener("pointerup", handleAiButtonPointerUp, { signal });
+  window.addEventListener("pointercancel", handleAiButtonPointerUp, { signal });
   dom.aiFloatingWindow?.querySelector("[data-action='close-ai-window']")?.addEventListener("click", handleAiFloatingControlClick, { signal });
 
   eventRoot.addEventListener("pointerdown", handleFormControlPointerEvent, { signal });
@@ -2526,6 +2801,27 @@ function bindEvents() {
   eventRoot.addEventListener("pointerdown", handleDialogColumnResizePointerDown, { signal });
   eventRoot.addEventListener("pointermove", handleGraphHoverPointerMove, { signal });
   eventRoot.addEventListener("click", handleDocumentClick, { signal });
+  eventRoot.addEventListener("scroll", handleWorkspacePanelScroll, { capture: true, signal });
+  eventRoot.addEventListener("dragover", handleVaultFileDragOver, { signal });
+  eventRoot.addEventListener("drop", handleVaultFileDrop, { signal });
+  eventRoot.addEventListener("dragend", clearVaultDropHighlights, { signal });
+  eventRoot.addEventListener("dragleave", (event) => {
+    if (!getVaultFileDropZone(event.relatedTarget)) clearVaultDropHighlights();
+  }, { signal });
+
+  // The Obsidian workspace resizes the leaf (its own sidebars, split drags) without any
+  // window resize event; observe the app root so layout reflows on every size change.
+  if (typeof ResizeObserver === "function" && dom.root) {
+    state.rootResizeObserver?.disconnect?.();
+    state.rootResizeObserver = new ResizeObserver(() => {
+      if (state.rootResizeTimer) window.clearTimeout(state.rootResizeTimer);
+      state.rootResizeTimer = window.setTimeout(() => {
+        state.rootResizeTimer = null;
+        handleWindowResize();
+      }, 80);
+    });
+    state.rootResizeObserver.observe(dom.root);
+  }
   eventRoot.addEventListener("contextmenu", handleContextMenu, { signal });
   eventRoot.addEventListener("input", handleInput, { signal });
   eventRoot.addEventListener("change", handleChange, { signal });
@@ -2534,6 +2830,14 @@ function bindEvents() {
   eventRoot.addEventListener("keydown", handleKeyDown, { signal });
   eventRoot.addEventListener("keydown", handleWorkspaceSearchKeyDown, { signal });
   eventRoot.addEventListener("pointerdown", handleStoryPointerDown, { signal });
+  eventRoot.addEventListener("pointerdown", handleVaultFileSuggestionPointerDown, { signal });
+  eventRoot.addEventListener("dragover", handleCodexImageDragOver, { signal });
+  eventRoot.addEventListener("dragleave", handleCodexImageDragLeave, { signal });
+  eventRoot.addEventListener("drop", handleCodexImageDrop, { signal });
+  eventRoot.addEventListener("pointerdown", handleVisionBoardPointerDown, { signal });
+  eventRoot.addEventListener("pointermove", handleVisionBoardPointerMove, { signal });
+  eventRoot.addEventListener("pointerup", handleVisionBoardPointerUp, { signal });
+  eventRoot.addEventListener("pointercancel", handleVisionBoardPointerUp, { signal });
   dom.mentionPopover?.addEventListener("pointerdown", handleMentionPopoverPointerDown, { signal });
   document.addEventListener("pointerdown", handleGlobalAppPointerContext, { capture: true, signal });
   document.addEventListener("click", handleGlobalAppPointerContext, { capture: true, signal });
@@ -2556,6 +2860,7 @@ function bindEvents() {
   window.addEventListener("pointercancel", handleDialogColumnResizePointerUp, { signal });
   window.addEventListener("pointermove", handleStoryPointerMove, { signal });
   window.addEventListener("pointerup", handleStoryPointerUp, { signal });
+  window.addEventListener("pointercancel", handleStoryPointerUp, { signal });
   window.addEventListener("keydown", handleGlobalHistoryKeyDown, { capture: true, signal });
   window.addEventListener("blur", hideNodeContextMenu, { signal });
   window.addEventListener("resize", handleWindowResize, { signal });
@@ -2639,6 +2944,9 @@ function bindEvents() {
   dom.playRuleDialog.addEventListener("click", (event) => {
     if (event.target === dom.playRuleDialog) dom.playRuleDialog.close();
   }, { signal });
+  dom.visionBoardDialog?.addEventListener("click", (event) => {
+    if (event.target === dom.visionBoardDialog) closeVisionBoard();
+  }, { signal });
   dom.nodeTypeDialog.addEventListener("close", () => {
     if (dom.nodeTypeDialog.returnValue === "confirm") {
       const historyBefore = getHistorySnapshot();
@@ -2662,6 +2970,13 @@ function bindEvents() {
 
 function handleAiFloatingControlClick(event) {
   if (event.__narrativeCanvasClickHandled) return;
+  // A drag that just ended must not toggle the window.
+  if (state.aiButtonClickSuppressed) {
+    state.aiButtonClickSuppressed = false;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const action = event.currentTarget?.dataset?.action;
   if (action !== "toggle-ai-window" && action !== "close-ai-window") return;
   event.preventDefault();
@@ -2670,9 +2985,75 @@ function handleAiFloatingControlClick(event) {
   toggleAiWindow(action === "close-ai-window" ? false : null);
 }
 
+// The AI launcher is a draggable floating ball: drag moves it anywhere in its
+// container, a plain click still toggles the assistant window.
+function handleAiButtonPointerDown(event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  const button = dom.aiFloatingButton;
+  if (!button) return;
+  const rect = button.getBoundingClientRect();
+  state.aiButtonDrag = {
+    startX: event.clientX,
+    startY: event.clientY,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    active: false
+  };
+}
+
+function handleAiButtonPointerMove(event) {
+  const drag = state.aiButtonDrag;
+  if (!drag) return;
+  if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+  drag.active = true;
+  setAiButtonPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY);
+  event.preventDefault();
+}
+
+function handleAiButtonPointerUp() {
+  const drag = state.aiButtonDrag;
+  state.aiButtonDrag = null;
+  if (drag?.active) state.aiButtonClickSuppressed = true;
+}
+
+function setAiButtonPosition(clientLeft, clientTop) {
+  const button = dom.aiFloatingButton;
+  const parent = button?.offsetParent;
+  if (!button || !parent) return;
+  const parentRect = parent.getBoundingClientRect();
+  const left = clamp(clientLeft - parentRect.left, 0, Math.max(0, parentRect.width - button.offsetWidth));
+  const top = clamp(clientTop - parentRect.top, 0, Math.max(0, parentRect.height - button.offsetHeight));
+  state.aiButtonPos = { left, top };
+  applyAiButtonPosition();
+}
+
+function applyAiButtonPosition() {
+  const button = dom.aiFloatingButton;
+  if (!button) return;
+  const pos = state.aiButtonPos;
+  if (!pos || !Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return;
+  // Only clamp against a laid-out container; a hidden leaf reports zero sizes and
+  // would jam the ball into the corner.
+  const parent = button.offsetParent;
+  const hasLayout = parent && parent.clientWidth > 60 && parent.clientHeight > 60;
+  const maxLeft = hasLayout ? Math.max(0, parent.clientWidth - button.offsetWidth) : Infinity;
+  const maxTop = hasLayout ? Math.max(0, parent.clientHeight - button.offsetHeight) : Infinity;
+  button.style.left = `${clamp(pos.left, 0, maxLeft)}px`;
+  button.style.top = `${clamp(pos.top, 0, maxTop)}px`;
+  button.style.right = "auto";
+  button.style.bottom = "auto";
+}
+
 function destroyNarrativeCanvas() {
   eventController?.abort();
   eventController = null;
+  closeVisionBoardLayerMenu();
+  state.rootResizeObserver?.disconnect?.();
+  state.rootResizeObserver = null;
+  if (state.rootResizeTimer) {
+    window.clearTimeout(state.rootResizeTimer);
+    state.rootResizeTimer = null;
+  }
   if (state.canvasViewportRenderFrame) {
     window.cancelAnimationFrame(state.canvasViewportRenderFrame);
     state.canvasViewportRenderFrame = null;
@@ -2733,13 +3114,25 @@ function resetDomRefs() {
   Object.keys(dom).forEach((key) => delete dom[key]);
 }
 
+// The back-to-top button only appears after real scrolling, so it never sits on top
+// of interactive rows while the reader is at the top of a document page. Any scroller
+// inside a document-style panel counts (the document editor scrolls an inner element).
+function handleWorkspacePanelScroll(event) {
+  const scroller = event.target;
+  if (!(scroller instanceof Element) || !scroller.closest?.(".document-panel")) return;
+  if (scroller.closest("[data-vault-file-suggestions], .cast-entry-suggestions")) return;
+  dom.root?.classList.toggle("workspace-scrolled", scroller.scrollTop > 240);
+}
+
 function handleWindowResize() {
   hideNodeContextMenu();
   renderSidebarState();
   constrainFloatingWindow("play");
   constrainFloatingWindow("inspector");
   constrainFloatingWindow("ai");
+  applyAiButtonPosition();
   scheduleCanvasViewportRender();
+  if (state.activeFileId === "characters") scheduleCharacterMasonryLayout();
 }
 
 function getFloatingWindowElement(kind) {
@@ -2812,7 +3205,7 @@ function dockFloatingWindow(kind) {
 }
 
 function handleFloatingWindowOutsideClick(event) {
-  const target = event.target;
+  const target = getComposedEventTarget(event);
   if (!(target instanceof Element)) return;
   const clickGuard = state.floatingWindowClickGuard;
   if (clickGuard && Date.now() <= clickGuard.until && event.detail > 0) {
@@ -3442,6 +3835,8 @@ function getHistorySnapshot() {
     view: state.view,
     characterFocusId: state.characterFocusId,
     characterSearch: state.characterSearch,
+    codexKindFilter: state.codexKindFilter,
+    codexTagFilter: state.codexTagFilter,
     eventSearch: state.eventSearch,
     playbookSearch: state.playbookSearch,
     playbookJsonOpen: state.playbookJsonOpen,
@@ -3634,6 +4029,8 @@ function restoreHistorySnapshot(snapshot, label) {
   state.view = normalizeView(payload.view);
   state.characterFocusId = payload.characterFocusId && getCharacterById(payload.characterFocusId) ? payload.characterFocusId : null;
   state.characterSearch = typeof payload.characterSearch === "string" ? payload.characterSearch : "";
+  state.codexKindFilter = normalizeCodexKindFilter(payload.codexKindFilter);
+  state.codexTagFilter = normalizeOptionalString(payload.codexTagFilter).trim();
   state.eventSearch = typeof payload.eventSearch === "string" ? payload.eventSearch : "";
   state.playbookSearch = typeof payload.playbookSearch === "string" ? payload.playbookSearch : "";
   state.playbookJsonOpen = Boolean(payload.playbookJsonOpen);
@@ -3667,10 +4064,16 @@ function shouldRecordAction(action) {
     "hide-node-type",
     "delete-custom-node-type",
     "add-character",
+    "add-codex-entry",
     "hide-character",
     "show-character",
     "show-all-characters",
     "delete-character",
+    "remove-codex-tag",
+    "add-codex-extra-field",
+    "remove-codex-extra-field",
+    "add-codex-template-field",
+    "remove-codex-template-field",
     "add-node-cast",
     "delete-node-cast",
     "add-node-effect",
@@ -3968,12 +4371,12 @@ function localizeStaticShell() {
     [".export-image-controls", "aria-label", "Image export"],
     ["#canvasViewport", "aria-label", "Node canvas"],
     ["#minimap", "aria-label", "Move canvas viewport"],
-    ["#charactersPanel", "aria-label", "Characters"],
+    ["#charactersPanel", "aria-label", "Narrative Library"],
     ["#variablesPanel", "aria-label", "Variables"],
     ["#eventsPanel", "aria-label", "Events Sheet"],
     ["#documentPanel", "aria-label", "Document"],
     ["#workspaceSearchControls", "aria-label", "Search"],
-    ["#mentionPopover", "aria-label", "Character mentions"],
+    ["#mentionPopover", "aria-label", "Library mentions"],
     [".playbook-scroll-top-button", "title", "Back to top"],
     [".playbook-scroll-top-button", "aria-label", "Back to top"],
     [".workspace-toc-button", "title", "Toggle outline"],
@@ -3997,7 +4400,7 @@ function localizeStaticShell() {
   localizeLabelText(".document-search-box", "Find");
   [
     ["#queryInput", "Find nodes"],
-    ["#characterSearchInput", "Find character"],
+    ["#characterSearchInput", "Find library entries"],
     ["#eventSearchInput", "Find event"],
     ["#playbookSearchInput", "Find in Playbook"],
     ["#documentSearchInput", "Find in document"],
@@ -5374,30 +5777,72 @@ function renderDocumentLimitNotice(fileId, shown, total) {
 
 function renderCharactersPage() {
   const model = buildCharacterDocumentModel(getCharacterRenderContext());
+  const selectedEntry = state.codexSelectedEntryId
+    ? model.characters.find((entry) => entry.id === state.codexSelectedEntryId)
+    : null;
+  if (state.codexSelectedEntryId && !selectedEntry) state.codexSelectedEntryId = "";
+  if (selectedEntry) {
+    renderCodexEntryDetail(selectedEntry, model.context);
+    return;
+  }
   const limit = getDocumentRenderLimit("characters");
   const shownCount = Math.min(model.visible.length, limit);
+  const masonryColumns = getCharacterMasonryColumnCount();
   dom.charactersPanel.innerHTML = `
-    <div class="document-shell">
+    <div class="document-shell codex-overview-shell">
       <header class="document-header">
         <div>
-          <span class="pane-kicker">Markdown</span>
-          <h2>Characters.md</h2>
+          <span class="pane-kicker">Library</span>
+          <h2>${t("Narrative Library")}</h2>
           <div class="document-meta" data-character-search-meta>${escapeHtml(formatCharacterMeta(model))}</div>
         </div>
         <div class="document-actions">
-          <button class="small-button" data-action="add-character">${t("Add character")}</button>
+          <button class="small-button" data-action="add-codex-entry">${t("Add entry")}</button>
           <button class="small-button" data-action="export-characters-md">${t("Export MD")}</button>
           <button class="small-button" data-action="export-characters-json">${t("Export JSON")}</button>
         </div>
       </header>
-      <div class="document-filter-bar" data-character-filter-bar>
-        ${renderCharacterFilterBar(model)}
-      </div>
+      <nav class="codex-category-tabs" data-codex-category-tabs aria-label="${escapeAttr(t("Category"))}">
+        ${renderCodexCategoryTabs(model)}
+      </nav>
+      <div class="codex-tag-filters" data-codex-tag-filters>${renderCodexTagFilters(model).trim()}</div>
+      <div class="codex-template-editor" data-codex-template-editor>${renderCodexTemplateEditorContent(model).trim()}</div>
+      <div class="document-filter-bar" data-character-filter-bar>${renderCharacterFilterBar(model).trim()}</div>
       ${renderHiddenCharacterRestoreBar(model)}
-      <div class="character-grid">
+      <div class="character-grid" data-masonry-columns="${masonryColumns}" style="--codex-masonry-columns:${masonryColumns}">
         ${renderCharacterCardsMarkup(model, limit)}
       </div>
       ${renderDocumentLimitNotice("characters", shownCount, model.visible.length)}
+    </div>
+  `;
+  scheduleCharacterMasonryLayout();
+  runAfterRender(hydrateCodexCanvasEmbeds);
+}
+
+function renderCodexEntryDetail(character, context = getCharacterRenderContext()) {
+  runAfterRender(hydrateCodexCanvasEmbeds);
+  const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
+  const backlinkCount = groups.reduce((total, group) => total + group.items.length, 0);
+  dom.charactersPanel.innerHTML = `
+    <div class="document-shell codex-detail-shell">
+      <header class="document-header codex-detail-header">
+        <div>
+          <button class="codex-detail-back" type="button" data-action="close-codex-entry-detail">
+            <span aria-hidden="true">←</span><span>${t("Back to all entries")}</span>
+          </button>
+          <span class="pane-kicker">${escapeHtml(t(character.kind))}</span>
+          <h2>${escapeHtml(character.name || t("Unnamed Character"))}</h2>
+        </div>
+      </header>
+      <div class="codex-detail-editor codex-detail-columns">
+        <aside class="codex-detail-references" aria-label="${escapeAttr(t("Referenced nodes"))}">
+          <h3 class="codex-detail-references-title">${t("Referenced nodes")} <small>${backlinkCount}</small></h3>
+          ${renderCharacterBacklinkSections(groups, character.id)}
+        </aside>
+        <div class="codex-detail-main">
+          ${renderCharacterCard(character, context, { includeBacklinks: false })}
+        </div>
+      </div>
     </div>
   `;
 }
@@ -5409,9 +5854,19 @@ function buildCharacterDocumentModel(context = getCharacterRenderContext()) {
   const focusedCharacter = getActiveCharacterFocus();
   const queryRaw = state.characterSearch || "";
   const query = queryRaw.trim().toLowerCase();
+  const kindFilter = normalizeCodexKindFilter(state.codexKindFilter);
+  const tagFilter = normalizeOptionalString(state.codexTagFilter).trim();
+  const categoryEntries = kindFilter === CODEX_ALL_FILTER
+    ? visibleCharacters
+    : visibleCharacters.filter((entry) => entry.kind === kindFilter);
+  const tagCounts = collectCodexTagCounts(categoryEntries);
+  const taggedEntries = tagFilter
+    ? categoryEntries.filter((entry) => parseCodexTags(entry.tags).some((tag) => tag.toLowerCase() === tagFilter.toLowerCase()))
+    : categoryEntries;
   const visible = query
-    ? visibleCharacters.filter((character) => characterMatchesSearch(character, query, context))
-    : visibleCharacters;
+    ? taggedEntries.filter((character) => characterMatchesSearch(character, query, context))
+    : taggedEntries;
+  const kindCounts = Object.fromEntries(getCodexKindsList().map((kind) => [kind, visibleCharacters.filter((entry) => entry.kind === kind).length]));
   return {
     context,
     characters,
@@ -5421,6 +5876,11 @@ function buildCharacterDocumentModel(context = getCharacterRenderContext()) {
     focusedCharacter,
     query,
     queryRaw,
+    kindFilter,
+    tagFilter,
+    tagCounts,
+    kindCounts,
+    hasFilters: Boolean(query || tagFilter || kindFilter !== CODEX_ALL_FILTER),
     linkCount: context.linkCount,
     totalCount: characters.length,
     hiddenCount: hidden.length,
@@ -5431,8 +5891,62 @@ function buildCharacterDocumentModel(context = getCharacterRenderContext()) {
 function formatCharacterMeta(model) {
   const focusText = model.focusedCharacter ? t(", focusing {name}", { name: model.focusedCharacter.name }) : "";
   const hiddenText = model.hiddenCount ? `, ${t("{count} hidden", { count: model.hiddenCount })}` : "";
-  if (model.query) return `${t("{visible} of {total} characters match {query}", { visible: model.visibleCount, total: model.totalCount, query: `"${model.queryRaw.trim()}"` })}${hiddenText}${focusText}`;
-  return `${t("{characters} characters, {links} character links", { characters: model.totalCount, links: model.linkCount })}${hiddenText}${focusText}`;
+  if (model.hasFilters) return `${t("{visible} of {total} library entries shown", { visible: model.visibleCount, total: model.totalCount })}${hiddenText}${focusText}`;
+  return `${t("{entries} library entries, {links} node links", { entries: model.totalCount, links: model.linkCount })}${hiddenText}${focusText}`;
+}
+
+function renderCodexCategoryTabs(model) {
+  const entries = [
+    { value: CODEX_ALL_FILTER, label: t("All entries"), count: model.visibleCharacters.length },
+    ...getCodexKindsList().map((kind) => ({ value: kind, label: t(kind), count: model.kindCounts[kind] || 0 }))
+  ];
+  const customKinds = new Set(normalizeCustomCodexKinds(state.project.customCodexKinds).map((kind) => kind.toLowerCase()));
+  return `${entries.map((entry) => {
+    const isCustom = customKinds.has(String(entry.value).toLowerCase());
+    // Custom categories always show the × control; it's disabled (with a reason)
+    // while entries still use the category, so the affordance stays discoverable.
+    const removeTitle = entry.count === 0
+      ? t("Remove category")
+      : t("Move or remove its entries first.");
+    return `
+    <span class="codex-category-tab-wrap">
+      <button class="codex-category-tab${model.kindFilter === entry.value ? " active" : ""}" type="button" data-action="set-codex-kind-filter" data-codex-kind="${escapeAttr(entry.value)}" aria-pressed="${model.kindFilter === entry.value ? "true" : "false"}">
+        <span>${escapeHtml(entry.label)}</span><small>${entry.count}</small>
+      </button>
+      ${isCustom ? `<button class="codex-category-remove" type="button" data-action="remove-codex-kind" data-codex-kind="${escapeAttr(entry.value)}" title="${escapeAttr(removeTitle)}" aria-label="${escapeAttr(removeTitle)}"${entry.count === 0 ? "" : " aria-disabled=\"true\""}>×</button>` : ""}
+    </span>`;
+  }).join("")}
+    <button class="codex-category-tab codex-category-add" type="button" data-action="add-codex-kind" title="${escapeAttr(t("Add category"))}" aria-label="${escapeAttr(t("Add category"))}">+</button>`;
+}
+
+function renderCodexTagFilters(model) {
+  const entries = [...model.tagCounts.entries()];
+  if (!entries.length) return "";
+  return `
+    <span class="codex-filter-label">${t("Tags")}</span>
+    <button class="codex-tag-filter${model.tagFilter ? "" : " active"}" type="button" data-action="clear-codex-tag-filter" aria-pressed="${model.tagFilter ? "false" : "true"}">${t("All")}</button>
+    ${entries.map(([tag, count]) => `
+      <button class="codex-tag-filter${model.tagFilter.toLowerCase() === tag.toLowerCase() ? " active" : ""}" type="button" data-action="set-codex-tag-filter" data-codex-tag="${escapeAttr(tag)}" aria-pressed="${model.tagFilter.toLowerCase() === tag.toLowerCase() ? "true" : "false"}">
+        <span>${escapeHtml(tag)}</span><small>${count}</small>
+      </button>
+    `).join("")}
+  `;
+}
+
+function renderCodexTemplateEditorContent(model) {
+  // Templates are per category; the editor only appears on a specific category tab.
+  if (model.kindFilter === CODEX_ALL_FILTER) return "";
+  const template = getCodexFieldTemplate(model.kindFilter);
+  return `
+    <span class="codex-filter-label">${t("Category fields")}</span>
+    ${template.map((key) => `
+      <button class="codex-template-chip" type="button" data-action="remove-codex-template-field" data-codex-template-key="${escapeAttr(key)}" aria-label="${escapeAttr(t("Remove template field: {key}", { key }))}" title="${escapeAttr(t("Remove from template. Entry values are kept."))}">
+        <span>${escapeHtml(key)}</span><span class="codex-tag-remove" aria-hidden="true">×</span>
+      </button>
+    `).join("")}
+    <input class="codex-template-input" data-codex-template-input placeholder="${escapeAttr(t("New field name"))}" spellcheck="false" autocomplete="off" aria-label="${escapeAttr(t("New field name"))}">
+    <button class="small-button" type="button" data-action="add-codex-template-field">${t("Add")}</button>
+  `;
 }
 
 function renderCharacterFilterBar(model) {
@@ -5441,6 +5955,14 @@ function renderCharacterFilterBar(model) {
     chips.push(`
       <button type="button" class="filter-chip filter-chip-button" data-action="clear-character-search" aria-label="${escapeAttr(t("Clear character search"))}">
         <span>${t("Search")}: ${escapeHtml(model.queryRaw.trim())}</span>
+        <span class="filter-chip-clear">${t("Clear")}</span>
+      </button>
+    `);
+  }
+  if (model.tagFilter) {
+    chips.push(`
+      <button type="button" class="filter-chip filter-chip-button" data-action="clear-codex-tag-filter" aria-label="${escapeAttr(t("Library tag filter cleared."))}">
+        <span>${t("Tags")}: ${escapeHtml(model.tagFilter)}</span>
         <span class="filter-chip-clear">${t("Clear")}</span>
       </button>
     `);
@@ -5460,22 +5982,22 @@ function renderHiddenCharacterRestoreBar(model) {
   if (!model.hidden?.length) return "";
   return `
     <div class="document-restore-bar character-restore-bar" data-character-restore-bar>
-      <span>${t("Hidden characters")}:</span>
+      <span>${t("Hidden entries")}:</span>
       ${model.hidden.map((character) => `
-        <button type="button" class="filter-chip" data-action="show-character" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Show character"))}">
+        <button type="button" class="filter-chip" data-action="show-character" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Show entry"))}">
           ${escapeHtml(character.name || t("Unnamed Character"))}
         </button>
       `).join("")}
-      <button type="button" class="small-button" data-action="show-all-characters">${t("Show all characters")}</button>
+      <button type="button" class="small-button" data-action="show-all-characters">${t("Show all entries")}</button>
     </div>
   `;
 }
 
 function renderCharacterCardsMarkup(model, limit = getDocumentRenderLimit("characters")) {
-  if (!model.characters.length) return `<div class="nc-empty-state">${t("No characters yet.")}</div>`;
+  if (!model.characters.length) return `<div class="nc-empty-state">${t("No library entries yet.")}</div>`;
   const visible = model.visible.slice(0, Math.max(0, limit));
-  if (!model.visibleCharacters.length && model.hiddenCount) return `<div class="nc-empty-state">${t("All characters are hidden.")}</div>`;
-  if (!visible.length) return `<div class="nc-empty-state">${escapeHtml(t("No characters match {query}.", { query: `"${model.queryRaw.trim()}"` }))}</div>`;
+  if (!model.visibleCharacters.length && model.hiddenCount) return `<div class="nc-empty-state">${t("All entries are hidden.")}</div>`;
+  if (!visible.length) return `<div class="nc-empty-state">${t("No library entries match the current filters.")}</div>`;
   return renderCharacterMasonryColumns(visible, model.context);
 }
 
@@ -5506,38 +6028,283 @@ function renderCharacterMasonryColumns(characters, context) {
   const columns = Array.from({ length: columnCount }, () => ({ score: 0, cards: [] }));
   characters.forEach((character) => {
     const target = columns.reduce((best, column) => (column.score < best.score ? column : best), columns[0]);
-    target.cards.push(renderCharacterCard(character, context));
+    target.cards.push(renderCodexOverviewCard(character, context));
     target.score += estimateCharacterCardWeight(character, context);
   });
   return columns
-    .filter((column) => column.cards.length)
     .map((column) => `<div class="character-column">${column.cards.join("")}</div>`)
     .join("");
 }
 
-function getCharacterMasonryColumnCount() {
-  const shellWidth = dom.charactersPanel?.querySelector(".document-shell")?.clientWidth
-    || dom.charactersPanel?.clientWidth
-    || window.innerWidth
-    || 1024;
-  return clamp(Math.floor((shellWidth + 18) / 358), 1, 4);
+function renderCodexOverviewCard(character, context = getCharacterRenderContext()) {
+  const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
+  const backlinkCount = groups.reduce((total, group) => total + group.items.length, 0);
+  const tags = parseCodexTags(character.tags).slice(0, 3);
+  const extraTags = Math.max(0, parseCodexTags(character.tags).length - tags.length);
+  const host = window.NarrativeCanvasHost;
+  const imageReference = normalizeNodeVaultFileReference(character.imageFile);
+  const imageUrl = imageReference && host?.getVaultResourceUrl ? host.getVaultResourceUrl(imageReference) : "";
+  const summary = normalizeOptionalString(character.role || character.voice || character.notes).trim();
+  const kindLabel = t(character.kind);
+  const isFocused = state.characterFocusId === character.id;
+  return `
+    <button class="codex-overview-card${isFocused ? " focused" : ""}" type="button" data-action="open-codex-entry-detail" data-character-id="${escapeAttr(character.id)}" data-character-card-id="${escapeAttr(character.id)}" data-codex-kind="${escapeAttr(character.kind)}" aria-label="${escapeAttr(t("Open entry: {name}", { name: character.name || t("Unnamed Character") }))}">
+      <span class="codex-overview-image${imageUrl ? " has-image" : ""}">
+        ${renderCodexOverviewCover(character, imageUrl, kindLabel, host)}
+        <span class="codex-overview-kind">${escapeHtml(kindLabel)}</span>
+        ${isFocused ? `<span class="codex-overview-focus-badge">${escapeHtml(t("Focus"))}</span>` : ""}
+      </span>
+      <span class="codex-overview-body">
+        <strong class="codex-overview-name">${escapeHtml(character.name || t("Unnamed Character"))}</strong>
+        ${summary ? `<span class="codex-overview-summary">${escapeHtml(summary)}</span>` : ""}
+        ${tags.length ? `<span class="codex-overview-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}${extraTags ? `<small>+${extraTags}</small>` : ""}</span>` : ""}
+        <span class="codex-overview-meta">${escapeHtml(t("{count} linked nodes", { count: backlinkCount }))}</span>
+      </span>
+    </button>
+  `;
 }
 
-function estimateCharacterCardWeight(character, context) {
-  const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
-  const linkCount = groups.reduce((sum, group) => sum + group.items.length, 0);
-  const textLength = [character.name, character.role, character.voice, character.notes]
-    .map((value) => String(value || "").length)
-    .reduce((sum, value) => sum + value, 0);
-  return 120 + Math.ceil(textLength / 48) * 28 + linkCount * 36;
+function getCharacterMasonryColumnCount() {
+  const shell = dom.charactersPanel?.querySelector(".document-shell");
+  const measuredWidths = [
+    shell?.clientWidth || 0,
+    shell?.getBoundingClientRect?.().width || 0,
+    dom.charactersPanel?.clientWidth || 0,
+    dom.charactersPanel?.getBoundingClientRect?.().width || 0
+  ].filter((width) => Number.isFinite(width) && width > 0);
+  const shellWidth = measuredWidths.length ? Math.max(...measuredWidths) : Math.max(window.innerWidth || 0, 320);
+  return clamp(Math.floor((shellWidth + 16) / 260), 1, 6);
+}
+
+function applyCharacterMasonryLayout() {
+  if (state.activeFileId !== "characters") return;
+  const grid = dom.charactersPanel?.querySelector(".character-grid");
+  if (!grid) return;
+  const model = buildCharacterDocumentModel();
+  const columnCount = getCharacterMasonryColumnCount();
+  if (grid.dataset.masonryColumns === String(columnCount)) return;
+  grid.dataset.masonryColumns = String(columnCount);
+  grid.style.setProperty("--codex-masonry-columns", String(columnCount));
+  grid.innerHTML = renderCharacterCardsMarkup(model, getDocumentRenderLimit("characters"));
+}
+
+function scheduleCharacterMasonryLayout() {
+  // Measure twice: once right away, and once after the sidebar collapse/expand
+  // transition has finished animating the panel width.
+  window.setTimeout(applyCharacterMasonryLayout, 60);
+  window.setTimeout(applyCharacterMasonryLayout, 340);
+}
+
+function estimateCharacterCardWeight(character) {
+  // Overview cards share a fixed-ratio cover, so heights only differ by the
+  // summary and tag lines. Uniform weights keep the masonry columns even.
+  const summary = normalizeOptionalString(character.role || character.voice || character.notes).trim();
+  return 240 + (summary ? 22 : 0) + (parseCodexTags(character.tags).length ? 26 : 0);
 }
 
 function buildCharacterSearchText(character) {
-  return [character.name, character.role, character.voice, character.notes]
+  const extraFieldText = normalizeCodexExtraFields(character.extraFields)
+    .map((field) => `${field.key} ${field.value}`);
+  return [character.name, character.kind, character.role, character.voice, character.tags, character.notes, ...extraFieldText, ...normalizeCodexVaultFiles(character.vaultFiles)]
     .filter(Boolean)
     .map(String)
     .join("\n")
     .toLowerCase();
+}
+
+function parseCodexTags(value) {
+  const seen = new Set();
+  return String(value || "")
+    .split(/[,，\n]/)
+    .map((tag) => tag.trim())
+    .filter((tag) => {
+      const key = tag.toLowerCase();
+      if (!tag || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function handleCodexTagInput(input) {
+  const value = String(input?.value || "");
+  const parts = value.split(/[,，\n]/);
+  if (parts.length < 2) {
+    updateCodexTagSuggestions(input);
+    return false;
+  }
+  const trailingSeparator = /[,，\n]$/.test(value);
+  const draft = trailingSeparator ? "" : parts.pop() || "";
+  addCodexTags(input.dataset.characterId, parts, draft);
+  return true;
+}
+
+function handleCodexTagKeyDown(event) {
+  const input = event.target;
+  if (!input?.hasAttribute?.("data-character-tag-input")) return false;
+  if (event.isComposing || event.keyCode === 229) return false;
+  const suggestionButtons = getVisibleCodexTagSuggestionButtons(input);
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && suggestionButtons.length) {
+    const picked = moveActiveSuggestion(suggestionButtons, event.key === "ArrowDown" ? 1 : -1);
+    if (picked?.id) input.setAttribute("aria-activedescendant", picked.id);
+    event.preventDefault();
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "," || event.key === "，") {
+    event.preventDefault();
+    const activeSuggestion = suggestionButtons.find((button) => button.classList.contains("active"));
+    if (event.key === "Enter" && activeSuggestion) {
+      selectCodexTagSuggestion(activeSuggestion);
+    } else if (input.value.trim()) {
+      addCodexTags(input.dataset.characterId, [input.value], "");
+    }
+    return true;
+  }
+  if (event.key === "Backspace" && !input.value) {
+    const tags = parseCodexTags(getCharacterById(input.dataset.characterId)?.tags);
+    if (tags.length) {
+      event.preventDefault();
+      removeCodexTagAt(input.dataset.characterId, tags.length - 1, "", true);
+    }
+    return true;
+  }
+  if (event.key === "Escape") {
+    hideCodexTagSuggestions(input);
+    event.preventDefault();
+    return true;
+  }
+  return false;
+}
+
+function updateCodexTagSuggestions(input) {
+  const editor = input?.closest?.("[data-character-tag-editor]");
+  const panel = editor?.querySelector?.("[data-codex-tag-suggestions]");
+  if (!editor || !panel) return;
+  const character = getCharacterById(input.dataset.characterId);
+  const currentTags = new Set(parseCodexTags(character?.tags).map((tag) => tag.toLowerCase()));
+  const query = String(input.value || "").trim().toLowerCase();
+  const suggestions = [...collectCodexTagCounts(getCharacters()).entries()]
+    .filter(([tag]) => !currentTags.has(tag.toLowerCase()) && (!query || tag.toLowerCase().includes(query)))
+    .sort((a, b) => {
+      const aPrefix = query && a[0].toLowerCase().startsWith(query) ? 0 : 1;
+      const bPrefix = query && b[0].toLowerCase().startsWith(query) ? 0 : 1;
+      return aPrefix - bPrefix || b[1] - a[1] || a[0].localeCompare(b[0]);
+    })
+    .slice(0, 8);
+  if (!suggestions.length) {
+    hideCodexTagSuggestions(input);
+    return;
+  }
+  panel.innerHTML = suggestions.map(([tag, count], index) => `
+    <button class="codex-tag-suggestion${index === 0 ? " active" : ""}" id="codex-tag-suggestion-${escapeAttr(character.id)}-${index}" type="button" role="option" data-action="select-codex-tag-suggestion" data-character-id="${escapeAttr(character.id)}" data-codex-tag-value="${escapeAttr(tag)}" aria-selected="${index === 0 ? "true" : "false"}">
+      <span>${escapeHtml(tag)}</span><small>${count}</small>
+    </button>
+  `).join("");
+  panel.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  input.setAttribute("aria-activedescendant", `codex-tag-suggestion-${character.id}-0`);
+}
+
+function hideCodexTagSuggestions(input) {
+  const panel = input?.closest?.("[data-character-tag-editor]")?.querySelector?.("[data-codex-tag-suggestions]");
+  if (panel) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+  }
+  input?.setAttribute?.("aria-expanded", "false");
+  input?.removeAttribute?.("aria-activedescendant");
+}
+
+function getVisibleCodexTagSuggestionButtons(input) {
+  const panel = input?.closest?.("[data-character-tag-editor]")?.querySelector?.("[data-codex-tag-suggestions]");
+  return panel && !panel.hidden ? [...panel.querySelectorAll("[data-codex-tag-value]")] : [];
+}
+
+function selectCodexTagSuggestion(target) {
+  if (!target?.dataset?.codexTagValue) return false;
+  return addCodexTags(target.dataset.characterId, [target.dataset.codexTagValue], "");
+}
+
+function addCodexTags(characterId, values, focusDraft = "") {
+  const character = getCharacterById(characterId);
+  if (!character) return false;
+  const existing = parseCodexTags(character.tags);
+  const seen = new Set(existing.map((tag) => tag.toLowerCase()));
+  const additions = parseCodexTags((Array.isArray(values) ? values : [values]).join(","));
+  const next = [...existing];
+  additions.forEach((tag) => {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    next.push(tag);
+  });
+  if (next.length === existing.length) {
+    if (focusDraft !== null) focusCodexTagInput(characterId, focusDraft);
+    return false;
+  }
+  const historyBefore = getHistorySnapshot();
+  writeCodexTags(character, next, {
+    focusDraft,
+    historyBefore,
+    status: "Tag added."
+  });
+  return true;
+}
+
+function removeCodexTag(target) {
+  const editor = target?.closest?.("[data-character-tag-editor]");
+  const draft = editor?.querySelector("[data-character-tag-input]")?.value || "";
+  removeCodexTagAt(target?.dataset?.characterId, Number(target?.dataset?.codexTagIndex), draft, false);
+}
+
+function removeCodexTagAt(characterId, index, focusDraft = "", recordHistory = true) {
+  const character = getCharacterById(characterId);
+  const tags = parseCodexTags(character?.tags);
+  if (!character || !Number.isInteger(index) || index < 0 || index >= tags.length) return false;
+  const historyBefore = recordHistory ? getHistorySnapshot() : null;
+  tags.splice(index, 1);
+  writeCodexTags(character, tags, {
+    focusDraft,
+    historyBefore,
+    status: "Tag removed."
+  });
+  return true;
+}
+
+function writeCodexTags(character, tags, options = {}) {
+  character.tags = parseCodexTags(tags.join(",")).join(", ");
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderCharacterListSurfaces();
+  if (options.historyBefore) commitHistoryFromSnapshot(options.historyBefore);
+  if (options.status) setStatus(options.status);
+  if (options.focusDraft !== null && options.focusDraft !== undefined) {
+    focusCodexTagInput(character.id, options.focusDraft);
+  }
+}
+
+function focusCodexTagInput(characterId, draft = "") {
+  // Timer instead of requestAnimationFrame: rAF can be starved under headless/virtual-time
+  // test runs and throttled iframes, dropping the preserved tag draft.
+  window.setTimeout(() => {
+    const input = dom.charactersPanel?.querySelector(`[data-character-tag-input][data-character-id="${CSS.escape(characterId)}"]`);
+    if (!input) return;
+    input.value = draft;
+    input.focus?.({ preventScroll: true });
+    input.setSelectionRange?.(input.value.length, input.value.length);
+    updateCodexTagSuggestions(input);
+  }, 0);
+}
+
+function collectCodexTagCounts(entries) {
+  const counts = new Map();
+  (entries || []).forEach((entry) => {
+    parseCodexTags(entry.tags).forEach((tag) => {
+      const existing = [...counts.keys()].find((key) => key.toLowerCase() === tag.toLowerCase());
+      const key = existing || tag;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+  });
+  return new Map([...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])));
 }
 
 function characterMatchesSearch(character, query, context = state.characterRenderContext) {
@@ -5547,31 +6314,73 @@ function characterMatchesSearch(character, query, context = state.characterRende
 }
 
 function renderCharacterGridForSearch() {
+  if (state.codexSelectedEntryId) {
+    renderCharactersPage();
+    return;
+  }
   const grid = dom.charactersPanel?.querySelector(".character-grid");
   const meta = dom.charactersPanel?.querySelector("[data-character-search-meta]");
   const filterBar = dom.charactersPanel?.querySelector("[data-character-filter-bar]");
+  const categoryTabs = dom.charactersPanel?.querySelector("[data-codex-category-tabs]");
+  const tagFilters = dom.charactersPanel?.querySelector("[data-codex-tag-filters]");
   if (!grid) return;
   const model = buildCharacterDocumentModel();
   const limit = getDocumentRenderLimit("characters");
   const shownCount = Math.min(model.visible.length, limit);
   if (meta) meta.textContent = formatCharacterMeta(model);
-  if (filterBar) filterBar.innerHTML = renderCharacterFilterBar(model);
+  if (filterBar) filterBar.innerHTML = renderCharacterFilterBar(model).trim();
+  if (categoryTabs) categoryTabs.innerHTML = renderCodexCategoryTabs(model);
+  if (tagFilters) tagFilters.innerHTML = renderCodexTagFilters(model).trim();
+  const templateEditor = dom.charactersPanel?.querySelector("[data-codex-template-editor]");
+  if (templateEditor) templateEditor.innerHTML = renderCodexTemplateEditorContent(model).trim();
   const restoreBar = dom.charactersPanel?.querySelector("[data-character-restore-bar]");
   if (restoreBar) restoreBar.outerHTML = renderHiddenCharacterRestoreBar(model);
   else if (filterBar) filterBar.insertAdjacentHTML("afterend", renderHiddenCharacterRestoreBar(model));
   grid.innerHTML = renderCharacterCardsMarkup(model, limit);
+  const masonryColumns = getCharacterMasonryColumnCount();
+  grid.dataset.masonryColumns = String(masonryColumns);
+  grid.style.setProperty("--codex-masonry-columns", String(masonryColumns));
+  runAfterRender(hydrateCodexCanvasEmbeds);
   const shell = dom.charactersPanel?.querySelector(".document-shell");
   shell?.querySelector("[data-document-limit-notice]")?.remove();
   shell?.insertAdjacentHTML("beforeend", renderDocumentLimitNotice("characters", shownCount, model.visible.length));
 }
 
-function renderCharacterCard(character, context = getCharacterRenderContext()) {
+// Overview cover precedence: entry icon → board snapshot → preview-image board
+// snapshot (all images in their layout, scaled) → category placeholder.
+function renderCodexOverviewCover(character, imageUrl, kindLabel, host) {
+  if (character.icon && host?.getVaultResourceUrl) {
+    return `<img src="${escapeAttr(host.getVaultResourceUrl(character.icon))}" alt="" loading="lazy">`;
+  }
+  const canvasPath = normalizeNodeVaultFileReference(character.canvasFile);
+  if (canvasPath && host?.readVaultFile) {
+    return `<span class="codex-overview-canvas" data-codex-canvas-embed data-canvas-cover="true" data-canvas-path="${escapeAttr(canvasPath)}" aria-hidden="true"></span>`;
+  }
+  const images = host?.getVaultResourceUrl ? getCharacterImages(character) : [];
+  if (images.length) {
+    return `<span class="codex-overview-board" aria-hidden="true">${images.map((image) => `
+      <img src="${escapeAttr(host.getVaultResourceUrl(image.path))}" style="left:${image.x}%;top:${image.y}%;width:${image.w}%" alt="" loading="lazy" draggable="false">
+    `).join("")}</span>`;
+  }
+  if (imageUrl) {
+    return `<img src="${escapeAttr(imageUrl)}" alt="" loading="lazy">`;
+  }
+  return `<span class="codex-overview-placeholder" aria-hidden="true">${escapeHtml(kindLabel.slice(0, 1))}</span>`;
+}
+
+function renderCharacterCard(character, context = getCharacterRenderContext(), options = {}) {
   const isFocused = state.characterFocusId === character.id;
-  const groups = context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character);
-  const isExpanded = state.characterBacklinkExpandedIds?.has(character.id);
+  const includeBacklinks = options.includeBacklinks !== false;
+  const groups = includeBacklinks
+    ? (context?.backlinkIndex?.get(character.id) || getCharacterBacklinkGroups(character))
+    : [];
+  const kindLabels = getCodexKindFieldLabels(character.kind);
   return `
-    <article class="character-card ${isFocused ? "focused" : ""}" data-character-card-id="${escapeAttr(character.id)}">
+    <article class="character-card ${isFocused ? "focused" : ""}" data-character-card-id="${escapeAttr(character.id)}" data-codex-kind="${escapeAttr(character.kind)}">
       <div class="character-card-header">
+        ${window.NarrativeCanvasHost?.getVaultResourceUrl && character.icon
+          ? `<img class="codex-icon-avatar" src="${escapeAttr(window.NarrativeCanvasHost.getVaultResourceUrl(character.icon))}" alt="" loading="lazy">`
+          : ""}
         <label class="field">
           <span>${t("Name")}</span>
           <input data-character-id="${escapeAttr(character.id)}" data-character-field="name" value="${escapeAttr(character.name)}">
@@ -5579,61 +6388,491 @@ function renderCharacterCard(character, context = getCharacterRenderContext()) {
         <div class="character-card-actions">
           <button class="small-button" data-action="${isFocused ? "clear-character-focus" : "focus-character"}" data-character-id="${escapeAttr(character.id)}">${isFocused ? t("Clear") : t("Focus")}</button>
           <button class="small-button" data-action="hide-character" data-character-id="${escapeAttr(character.id)}">${t("Hide")}</button>
-          <button class="icon-button danger-button" title="${escapeAttr(t("Delete character"))}" data-action="delete-character" data-character-id="${escapeAttr(character.id)}">x</button>
+          <button class="small-button danger-button" title="${escapeAttr(t("Delete entry"))}" data-action="delete-character" data-character-id="${escapeAttr(character.id)}">${t("Delete")}</button>
         </div>
       </div>
+      ${window.NarrativeCanvasHost?.searchVaultFiles ? `
+        <div class="field codex-icon-field">
+          <span>${t("Icon")}</span>
+          <div class="codex-icon-row">
+            <div class="codex-vault-file-input-wrap codex-icon-input-wrap">
+              <input data-character-icon-input data-character-id="${escapeAttr(character.id)}" value="${escapeAttr(character.icon || "")}" placeholder="${escapeAttr(t("Search icon image"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Search icon image"))}" aria-autocomplete="list" aria-expanded="false">
+              <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+            </div>
+            ${character.icon ? `<button class="icon-button danger-button vault-row-icon-button" type="button" data-action="clear-codex-icon" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Remove icon"))}" aria-label="${escapeAttr(t("Remove icon"))}">×</button>` : ""}
+          </div>
+        </div>
+      ` : ""}
+      ${renderCodexPluginFileFields(character)}
       <div class="field-row">
         <label class="field">
-          <span>${t("Role")}</span>
+          <span>${t("Category")}</span>
+          <select data-character-id="${escapeAttr(character.id)}" data-character-field="kind">
+            ${renderCodexKindOptions(character.kind)}
+          </select>
+        </label>
+        <label class="field">
+          <span>${escapeHtml(kindLabels.primary)}</span>
           <input data-character-id="${escapeAttr(character.id)}" data-character-field="role" value="${escapeAttr(character.role || "")}">
         </label>
         <label class="field">
-          <span>${t("Voice")}</span>
+          <span>${escapeHtml(kindLabels.secondary)}</span>
           <input data-character-id="${escapeAttr(character.id)}" data-character-field="voice" value="${escapeAttr(character.voice || "")}">
         </label>
+      </div>
+      <div class="field codex-tags-field">
+        <span>${t("Tags")}</span>
+        ${renderCodexTagEditor(character)}
       </div>
       <label class="field">
         <span>${t("Notes")}</span>
         <textarea data-character-id="${escapeAttr(character.id)}" data-character-field="notes">${escapeHtml(character.notes || "")}</textarea>
       </label>
-      ${renderCharacterBacklinkSections(groups, character.id, isExpanded)}
+      ${renderCodexExtraFieldsEditor(character)}
+      ${includeBacklinks ? renderCharacterBacklinkSections(groups, character.id) : ""}
     </article>
   `;
 }
 
-function renderCharacterBacklinkSections(groups, characterId, isExpanded = false) {
-  const nonEmptyGroups = groups.filter((group) => group.items.length);
-  if (!nonEmptyGroups.length) return `<div class="linked-node empty">${t("No linked scenes yet")}</div>`;
+function renderCodexExtraFieldsEditor(character) {
+  const fields = normalizeCodexExtraFields(character.extraFields);
   return `
-    <div class="character-backlink-section">
-      ${nonEmptyGroups.map((group) => `
-        <section class="character-backlink-group">
-          <h3>${escapeHtml(t(group.label))}</h3>
-          <div class="linked-node-list">
-            ${renderCharacterBacklinkGroupItems(group, characterId, isExpanded)}
-          </div>
-        </section>
+    <section class="codex-extra-fields" data-character-extra-fields data-character-id="${escapeAttr(character.id)}">
+      <div class="codex-extra-fields-header">
+        <span>${t("Custom fields")}</span>
+        <button class="small-button" type="button" data-action="add-codex-extra-field" data-character-id="${escapeAttr(character.id)}">+ ${t("Add field")}</button>
+      </div>
+      ${fields.length ? fields.map((field, index) => `
+        <div class="codex-extra-field-row">
+          <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="key" value="${escapeAttr(field.key)}" placeholder="${escapeAttr(t("Field name"))}" spellcheck="false">
+          <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="value" value="${escapeAttr(field.value)}" placeholder="${escapeAttr(t("Field value"))}">
+          <button class="icon-button danger-button" type="button" data-action="remove-codex-extra-field" data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" title="${escapeAttr(t("Remove field"))}" aria-label="${escapeAttr(t("Remove field"))}">×</button>
+        </div>
+      `).join("") : `<div class="codex-extra-fields-empty">${t("No custom fields yet. Fields sync to the entry's markdown frontmatter.")}</div>`}
+    </section>
+  `;
+}
+
+function renderCodexTagEditor(character) {
+  const tags = parseCodexTags(character.tags);
+  return `
+    <div class="codex-tag-editor" data-character-tag-editor data-character-id="${escapeAttr(character.id)}">
+      ${tags.map((tag, index) => `
+        <button class="codex-tag-chip" type="button" data-action="remove-codex-tag" data-character-id="${escapeAttr(character.id)}" data-codex-tag-index="${index}" aria-label="${escapeAttr(t("Remove tag: {tag}", { tag }))}">
+          <span>${escapeHtml(tag)}</span><span class="codex-tag-remove" aria-hidden="true">×</span>
+        </button>
       `).join("")}
+      <input class="codex-tag-input" data-character-tag-input data-character-id="${escapeAttr(character.id)}" value="" placeholder="${escapeAttr(t("Add tag..."))}" aria-label="${escapeAttr(t("Add tag"))}" aria-autocomplete="list" aria-expanded="false" aria-controls="codex-tag-suggestions-${escapeAttr(character.id)}" autocomplete="off" spellcheck="false">
+      <div class="codex-tag-suggestions" id="codex-tag-suggestions-${escapeAttr(character.id)}" data-codex-tag-suggestions role="listbox" aria-label="${escapeAttr(t("Tag suggestions"))}" hidden></div>
     </div>
   `;
 }
 
-function renderCharacterBacklinkGroupItems(group, characterId, isExpanded) {
-  const items = isExpanded ? group.items : group.items.slice(0, CHARACTER_BACKLINK_PREVIEW_LIMIT);
-  const hiddenCount = group.items.length - items.length;
+function renderVisionBoard(kind, id, images, options = {}) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.getVaultResourceUrl || !images.length) return "";
+  const focused = Boolean(options.focused);
   return `
-    ${items.map((item) => renderCharacterBacklinkItem(item)).join("")}
-    ${hiddenCount > 0 ? `
-      <button class="linked-node linked-node-more" data-action="toggle-character-backlinks" data-character-id="${escapeAttr(characterId)}">
-        ${t("Show {count} more", { count: hiddenCount })}
-      </button>
-    ` : ""}
-    ${isExpanded && group.items.length > CHARACTER_BACKLINK_PREVIEW_LIMIT ? `
-      <button class="linked-node linked-node-more" data-action="toggle-character-backlinks" data-character-id="${escapeAttr(characterId)}">
-        ${t("Show fewer")}
-      </button>
-    ` : ""}
+    <div${focused ? " id=\"visionBoardCanvas\"" : ""} class="vision-board-canvas${focused ? " is-focused" : " is-embedded"}" data-vision-board-kind="${escapeAttr(kind)}" data-vision-board-id="${escapeAttr(id)}">
+      ${images.map((image, index) => {
+        const imageUrl = host.getVaultResourceUrl(image.path);
+        return `
+          <article class="vision-board-tile" data-vision-board-tile data-vision-board-index="${index}" style="--vision-x:${image.x};--vision-y:${image.y};--vision-w:${image.w}" title="${escapeAttr(image.path)}">
+            ${imageUrl ? `<img src="${escapeAttr(imageUrl)}" alt="" draggable="false" loading="lazy">` : `<span class="vision-board-missing">${escapeHtml(image.path.split("/").pop() || image.path)}</span>`}
+            <div class="vision-board-tile-actions">
+              <button type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(image.path)}" title="${escapeAttr(t("Open file"))}" aria-label="${escapeAttr(t("Open file"))}">↗</button>
+              ${kind === "character" ? `<button type="button" data-action="remove-codex-image" data-character-id="${escapeAttr(id)}" data-codex-image-index="${index}" title="${escapeAttr(t("Remove image"))}" aria-label="${escapeAttr(t("Remove image"))}">×</button>` : ""}
+            </div>
+            ${focused ? `<span class="vision-board-tile-resize" data-vision-board-resize title="${escapeAttr(t("Resize image"))}" aria-hidden="true"></span>` : ""}
+          </article>
+        `;
+      }).join("")}
+    </div>
   `;
+}
+
+function renderCodexPluginFileFields(character) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.loadCodexEntries || !host?.searchVaultFiles) return "";
+  const images = getCharacterImages(character);
+  const pickerOpen = state.codexImagePickerCharacterId === character.id;
+  const canvasPath = normalizeNodeVaultFileReference(character.canvasFile);
+  // An entry with a native canvas board delegates images and linked files to it:
+  // the board is embedded read-only here and edited in Obsidian's canvas view.
+  if (host.readVaultFile && canvasPath) {
+    return `
+      <section class="codex-plugin-files">
+        ${character.codexFile ? `
+          <div class="codex-managed-file-row">
+            <span><strong>${t("Library file")}</strong><small>${escapeHtml(character.codexFile)}</small></span>
+            <button class="small-button" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(character.codexFile)}">${t("Open file")}</button>
+          </div>
+        ` : ""}
+        <div class="codex-canvas-section">
+          <div class="codex-vault-files-header">
+            <span>${t("Board")}</span>
+            <div>
+              <button class="small-button" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(canvasPath)}">${t("Open board")}</button>
+              <button class="small-button" type="button" data-action="detach-codex-canvas" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Board detached. The canvas file is kept in the vault."))}">${t("Detach board")}</button>
+            </div>
+          </div>
+          <div class="codex-canvas-embed" data-codex-canvas-embed data-canvas-path="${escapeAttr(canvasPath)}" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(canvasPath)}" role="button" tabindex="0" title="${escapeAttr(t("Open board"))}" aria-label="${escapeAttr(t("Open board"))}">${escapeHtml(t("Loading board..."))}</div>
+        </div>
+      </section>
+    `;
+  }
+  return `
+    <section class="codex-plugin-files">
+      ${character.codexFile ? `
+        <div class="codex-managed-file-row">
+          <span><strong>${t("Library file")}</strong><small>${escapeHtml(character.codexFile)}</small></span>
+          <button class="small-button" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(character.codexFile)}">${t("Open file")}</button>
+        </div>
+      ` : ""}
+      ${host.createCodexCanvas ? `
+        <div class="codex-canvas-create-row">
+          <span>${escapeHtml(t("Create a native canvas board for this entry. Its images and linked files move onto the board."))}</span>
+          <button class="small-button" type="button" data-action="create-codex-canvas" data-character-id="${escapeAttr(character.id)}">${t("Create board")}</button>
+        </div>
+      ` : ""}
+      ${renderCodexVaultFileLinks(character)}
+      <div class="codex-image-editor${images.length ? " has-image" : ""}${pickerOpen ? " picker-open" : ""}" data-codex-image-drop data-character-id="${escapeAttr(character.id)}">
+        <div class="vision-board-toolbar">
+          ${images.length ? `<strong>${t("Preview images")} <small>${images.length}</small></strong>` : `<span></span>`}
+          <div>
+            <button class="small-button" type="button" data-action="choose-codex-image-file" data-character-id="${escapeAttr(character.id)}">+ ${t("Add images")}</button>
+            ${images.length ? `<button class="small-button" type="button" data-action="open-vision-board" data-vision-board-kind="character" data-vision-board-id="${escapeAttr(character.id)}">${t("Focus")}</button>` : ""}
+          </div>
+        </div>
+        <input data-codex-local-image-input data-character-id="${escapeAttr(character.id)}" type="file" accept="image/*" multiple hidden>
+        ${renderVisionBoard("character", character.id, images)}
+        ${pickerOpen ? `
+          <div class="codex-image-picker" data-codex-image-picker>
+            <div class="codex-image-picker-head">
+              <input data-character-id="${escapeAttr(character.id)}" data-character-image-picker-input="true" value="" placeholder="${escapeAttr(t("Search images in vault"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Search images in vault"))}" aria-autocomplete="list" aria-expanded="false">
+              <button class="small-button" type="button" data-action="import-local-codex-images" data-character-id="${escapeAttr(character.id)}">${t("Add local images")}</button>
+              <button class="icon-button" type="button" data-action="close-codex-image-picker" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Close image picker"))}" aria-label="${escapeAttr(t("Close image picker"))}">×</button>
+            </div>
+            <div class="vault-file-suggestions codex-image-suggestions" data-vault-file-suggestions role="listbox" aria-label="${escapeAttr(t("Search images in vault"))}" hidden></div>
+          </div>
+        ` : ""}
+      </div>
+    </section>
+  `;
+}
+
+// Library entries can link vault files like nodes do: each row opens or removes its
+// file, and the search input at the bottom links a new one. Paths sync to the entry's
+// frontmatter `files` array.
+function renderCodexVaultFileLinks(character) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.searchVaultFiles) return "";
+  const files = normalizeCodexVaultFiles(character.vaultFiles);
+  return `
+    <div class="codex-vault-files">
+      <div class="codex-vault-files-header"><span>${t("Vault file")}</span>${files.length ? `<small>${files.length}</small>` : ""}</div>
+      ${files.map((path, index) => {
+        const parts = path.split("/");
+        const name = parts.pop() || path;
+        const folder = parts.join("/");
+        return `
+          <div class="codex-vault-file-row" data-codex-vault-row-index="${index}">
+            <button class="cast-drag-handle vault-drag-handle" type="button" data-codex-vault-drag="${index}" data-character-id="${escapeAttr(character.id)}" title="${escapeAttr(t("Drag to reorder linked file"))}" aria-label="${escapeAttr(t("Drag to reorder linked file"))}">::</button>
+            <button class="node-vault-open" type="button" data-action="open-codex-reference" data-vault-file-reference="${escapeAttr(path)}" title="${escapeAttr(t("Open vault file"))}">
+              <span class="node-vault-open-icon" aria-hidden="true">↗</span>
+              <span class="node-vault-open-text"><strong>${escapeHtml(name)}</strong>${folder ? `<small>${escapeHtml(folder)}</small>` : ""}</span>
+            </button>
+            <button class="icon-button danger-button" type="button" data-action="remove-codex-vault-file" data-character-id="${escapeAttr(character.id)}" data-codex-vault-file-index="${index}" title="${escapeAttr(t("Remove vault file"))}" aria-label="${escapeAttr(t("Remove vault file"))}">×</button>
+          </div>
+        `;
+      }).join("")}
+      <div class="codex-vault-file-input-wrap">
+        <input data-character-vault-file-input data-character-id="${escapeAttr(character.id)}" value="" placeholder="${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Add vault file"))}" aria-autocomplete="list" aria-expanded="false">
+        <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+      </div>
+    </div>
+  `;
+}
+
+function detachCodexCanvas(characterId) {
+  const character = getCharacterById(characterId);
+  if (!character?.canvasFile) return;
+  character.canvasFile = "";
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderWorkspaceFile();
+  setStatus(t("Board detached. The canvas file is kept in the vault."));
+}
+
+// Re-renders board previews when their .canvas file changes on disk (called by the
+// plugin's vault watcher).
+function refreshCodexCanvasPreviews(pathValue) {
+  const path = normalizeNodeVaultFileReference(pathValue);
+  dom.charactersPanel?.querySelectorAll?.("[data-codex-canvas-embed]").forEach((element) => {
+    if (path && normalizeNodeVaultFileReference(element.dataset.canvasPath) !== path) return;
+    void renderCodexCanvasPreview(element);
+  });
+}
+
+function setCodexIcon(characterId, path) {
+  const character = getCharacterById(characterId);
+  if (!character) return;
+  character.icon = normalizeNodeVaultFileReference(path);
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderCharacterAwareSurfaces();
+  setStatus(character.icon ? t("Icon updated.") : t("Icon removed."));
+}
+
+async function createCodexCanvasForCharacter(characterId) {
+  const host = window.NarrativeCanvasHost;
+  const character = getCharacterById(characterId);
+  if (!character || !host?.createCodexCanvas) return;
+  try {
+    const path = await host.createCodexCanvas({
+      id: character.id,
+      name: character.name,
+      images: getCharacterImages(character),
+      files: normalizeCodexVaultFiles(character.vaultFiles).map((entry) => entry.path ?? entry),
+      codexFile: character.codexFile
+    });
+    if (!path) return;
+    character.canvasFile = normalizeNodeVaultFileReference(path);
+    invalidateCharacterRenderContext();
+    setProjectDirty(true);
+    renderWorkspaceFile();
+    setStatus(t("Board created."));
+  } catch (error) {
+    console.error(error);
+    setStatus(t("Could not create the board."));
+  }
+}
+
+// The board preview parses the .canvas JSON directly and draws a scaled, read-only
+// snapshot: image cards show the image, note cards show a text excerpt, groups show
+// dashed frames, edges are drawn as lines. (Obsidian's own embed component does not
+// render inside the plugin's shell.)
+const CANVAS_PREVIEW_COLOR_PRESETS = {
+  1: "#fb464c", 2: "#e9973f", 3: "#e0de71", 4: "#44cf6e", 5: "#53dfdd", 6: "#a882ff"
+};
+
+function hydrateCodexCanvasEmbeds() {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.readVaultFile) return;
+  dom.charactersPanel?.querySelectorAll?.("[data-codex-canvas-embed]").forEach((element) => {
+    if (element.dataset.canvasEmbedHydrated) return;
+    element.dataset.canvasEmbedHydrated = "true";
+    void renderCodexCanvasPreview(element, host);
+  });
+}
+
+async function renderCodexCanvasPreview(element, host = window.NarrativeCanvasHost) {
+  try {
+    const raw = await host.readVaultFile(element.dataset.canvasPath);
+    const text = typeof raw === "string" ? raw : String(raw?.text || "");
+    const data = JSON.parse(text || "{}");
+    if (!element.isConnected) return;
+    renderCanvasPreviewInto(element, data, host);
+  } catch (error) {
+    console.error(error);
+    element.textContent = t("Could not load the board.");
+  }
+}
+
+function renderCanvasPreviewInto(element, data, host) {
+  const nodes = (Array.isArray(data?.nodes) ? data.nodes : []).filter((node) => Number.isFinite(Number(node?.x)));
+  const edges = Array.isArray(data?.edges) ? data.edges : [];
+  if (!nodes.length) {
+    element.textContent = t("The board is empty.");
+    return;
+  }
+  const pad = 40;
+  const minX = Math.min(...nodes.map((node) => Number(node.x))) - pad;
+  const minY = Math.min(...nodes.map((node) => Number(node.y))) - pad;
+  const maxX = Math.max(...nodes.map((node) => Number(node.x) + (Number(node.width) || 0))) + pad;
+  const maxY = Math.max(...nodes.map((node) => Number(node.y) + (Number(node.height) || 0))) + pad;
+  const boundsWidth = Math.max(1, maxX - minX);
+  const boundsHeight = Math.max(1, maxY - minY);
+  const containerWidth = element.clientWidth || 640;
+  // Cover mode (overview card): fit the whole board into the fixed cover box.
+  const heightLimit = element.dataset.canvasCover === "true" ? (element.clientHeight || 150) : 520;
+  const scale = Math.min(1, containerWidth / boundsWidth, heightLimit / boundsHeight);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const edgePoint = (node, side) => {
+    const x = Number(node.x) - minX;
+    const y = Number(node.y) - minY;
+    const w = Number(node.width) || 0;
+    const h = Number(node.height) || 0;
+    if (side === "left") return [x, y + h / 2];
+    if (side === "right") return [x + w, y + h / 2];
+    if (side === "top") return [x + w / 2, y];
+    return [x + w / 2, y + h];
+  };
+  const colorOf = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    return CANVAS_PREVIEW_COLOR_PRESETS[raw] || (raw.startsWith("#") ? raw : "");
+  };
+  // Groups render behind cards, in area order so nested groups stay visible.
+  const ordered = [...nodes].sort((a, b) => (a.type === "group" ? -1 : 0) - (b.type === "group" ? -1 : 0));
+  const cards = ordered.map((node) => {
+    const x = Number(node.x) - minX;
+    const y = Number(node.y) - minY;
+    const w = Number(node.width) || 0;
+    const h = Number(node.height) || 0;
+    const color = colorOf(node.color);
+    const style = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;${color ? `--canvas-card-color:${escapeAttr(color)};` : ""}`;
+    if (node.type === "group") {
+      return `<div class="canvas-preview-group" style="${style}">${node.label ? `<span>${escapeHtml(String(node.label))}</span>` : ""}</div>`;
+    }
+    if (node.type === "text") {
+      return `<div class="canvas-preview-card is-text" style="${style}"><div class="canvas-preview-card-body">${escapeHtml(String(node.text || "")).slice(0, 1200)}</div></div>`;
+    }
+    if (node.type === "file") {
+      const path = String(node.file || "");
+      const name = path.split("/").pop() || path;
+      if (CODEX_IMAGE_FILE_PATTERN.test(path) && host?.getVaultResourceUrl) {
+        return `<div class="canvas-preview-card is-image" style="${style}"><img src="${escapeAttr(host.getVaultResourceUrl(path))}" alt="" loading="lazy" draggable="false"></div>`;
+      }
+      return `<div class="canvas-preview-card is-file" style="${style}" data-canvas-preview-file="${escapeAttr(path)}"><div class="canvas-preview-card-title">${escapeHtml(name)}</div><div class="canvas-preview-card-body" data-canvas-preview-file-body>${escapeHtml(t("Loading linked file..."))}</div></div>`;
+    }
+    return `<div class="canvas-preview-card is-file" style="${style}"><div class="canvas-preview-card-title">${escapeHtml(String(node.url || node.type || ""))}</div></div>`;
+  }).join("");
+  const lines = edges.map((edge) => {
+    const from = nodeById.get(edge.fromNode);
+    const to = nodeById.get(edge.toNode);
+    if (!from || !to) return "";
+    const [x1, y1] = edgePoint(from, String(edge.fromSide || "bottom"));
+    const [x2, y2] = edgePoint(to, String(edge.toSide || "top"));
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+  }).join("");
+  const offsetX = element.dataset.canvasCover === "true"
+    ? Math.max(0, Math.round((containerWidth - boundsWidth * scale) / 2))
+    : 0;
+  element.replaceChildren();
+  element.insertAdjacentHTML("beforeend", `
+    <div class="canvas-preview-viewport" style="height:${Math.round(boundsHeight * scale)}px">
+      <div class="canvas-preview-inner" style="left:${offsetX}px;width:${boundsWidth}px;height:${boundsHeight}px;transform:scale(${scale})">
+        <svg class="canvas-preview-edges" width="${boundsWidth}" height="${boundsHeight}" aria-hidden="true">${lines}</svg>
+        ${cards}
+      </div>
+    </div>
+  `);
+  hydrateCanvasPreviewFileCards(element, host);
+}
+
+function hydrateCanvasPreviewFileCards(element, host) {
+  if (!host?.readVaultFile) return;
+  element.querySelectorAll("[data-canvas-preview-file]").forEach((card) => {
+    const path = card.dataset.canvasPreviewFile;
+    const body = card.querySelector("[data-canvas-preview-file-body]");
+    if (!path || !body) return;
+    Promise.resolve(host.readVaultFile(path)).then((raw) => {
+      if (!body.isConnected) return;
+      const text = (typeof raw === "string" ? raw : String(raw?.text || ""))
+        .replace(/^---\n[\s\S]*?\n---\n?/, "")
+        .trim();
+      body.textContent = text ? text.slice(0, 600) : t("Linked file is empty.");
+    }).catch(() => {
+      if (body.isConnected) body.textContent = t("Could not preview the linked vault file.");
+    });
+  });
+}
+
+function addCodexVaultFile(characterId, path) {
+  const character = getCharacterById(characterId);
+  const normalized = normalizeNodeVaultFileReference(path);
+  if (!character || !normalized) return;
+  const files = normalizeCodexVaultFiles(character.vaultFiles);
+  if (files.includes(normalized)) {
+    hideVaultFileSuggestions();
+    setStatus("File already linked.");
+    return;
+  }
+  files.push(normalized);
+  character.vaultFiles = files;
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  hideVaultFileSuggestions();
+  renderWorkspaceFile();
+  setStatus(t("Vault file linked."));
+}
+
+function removeCodexVaultFile(characterId, index) {
+  const character = getCharacterById(characterId);
+  if (!character) return;
+  const files = normalizeCodexVaultFiles(character.vaultFiles);
+  if (!Number.isInteger(index) || index < 0 || index >= files.length) return;
+  files.splice(index, 1);
+  character.vaultFiles = files;
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderWorkspaceFile();
+  setStatus(t("Vault file removed."));
+}
+
+function renderCodexKindOptions(selected) {
+  const value = normalizeCodexKind(selected);
+  return getCodexKindsList()
+    .map((kind) => `<option value="${escapeAttr(kind)}" ${kind === value ? "selected" : ""}>${escapeHtml(t(kind))}</option>`)
+    .join("");
+}
+
+function getCodexKindFieldLabels(kind) {
+  if (kind === "Character") return { primary: t("Role"), secondary: t("Voice") };
+  if (kind === "Location") return { primary: t("Type"), secondary: t("Atmosphere") };
+  if (kind === "Item") return { primary: t("Type"), secondary: t("Owner") };
+  if (kind === "Lore") return { primary: t("Type"), secondary: t("Reference source") };
+  // Custom categories get generic, purpose-neutral labels instead of inheriting
+  // the Character defaults; add per-field templates for anything more specific.
+  return { primary: t("Type"), secondary: t("Summary") };
+}
+
+function renderCharacterBacklinkSections(groups, characterId) {
+  const nonEmptyGroups = groups.filter((group) => group.items.length);
+  if (!nonEmptyGroups.length) return `<div class="linked-node empty">${t("No linked scenes yet")}</div>`;
+  return `
+    <div class="character-backlink-section">
+      ${nonEmptyGroups.map((group) => renderCharacterBacklinkGroup(group, characterId)).join("")}
+    </div>
+  `;
+}
+
+function renderCharacterBacklinkGroup(group, characterId) {
+  const expanded = isCharacterBacklinkGroupExpanded(characterId, group.id);
+  const label = t(group.label);
+  return `
+    <section class="character-backlink-group nc-collapsible${expanded ? " expanded" : ""}">
+      <header class="character-backlink-header nc-collapsible-header">
+        <button class="nc-section-toggle character-backlink-toggle" type="button" data-action="toggle-character-backlink-group" data-character-id="${escapeAttr(characterId)}" data-character-backlink-group="${escapeAttr(group.id)}" aria-expanded="${expanded ? "true" : "false"}" aria-label="${escapeAttr(`${label} (${group.items.length})`)}">
+          <span class="nc-section-caret" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+          <span class="nc-section-title">${escapeHtml(label)}</span>
+        </button>
+        <span class="nc-section-count">${group.items.length}</span>
+      </header>
+      ${expanded ? `
+        <div class="linked-node-list">
+          ${renderCharacterBacklinkGroupItems(group)}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function getCharacterBacklinkGroupKey(characterId, groupId) {
+  return JSON.stringify([String(characterId || ""), String(groupId || "")]);
+}
+
+function isCharacterBacklinkGroupExpanded(characterId, groupId) {
+  // Groups are expanded by default; the set remembers the ones the user collapsed.
+  const keys = state.characterBacklinkGroupCollapsedKeys;
+  return !(keys instanceof Set && keys.has(getCharacterBacklinkGroupKey(characterId, groupId)));
+}
+
+function renderCharacterBacklinkGroupItems(group) {
+  // The relation group header is the fold level; an expanded group always shows
+  // every node without a second "show more" truncation.
+  return group.items.map((item) => renderCharacterBacklinkItem(item)).join("");
 }
 
 function renderCharacterBacklinkItem(item) {
@@ -5749,7 +6988,7 @@ function renderVariablesPage(options = {}) {
       ` : ""}
     </div>
   `;
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     const textarea = resizePlaybookJsonTextarea();
     restorePlaybookJsonSearchHighlight();
     if (options.focusJsonToken) focusPlaybookJsonToken(options.focusJsonToken, textarea);
@@ -7753,7 +8992,7 @@ function focusPlaybookJsonToken(token, textarea = dom.variablesPanel?.querySelec
     textarea.focus();
   }
   scrollPlaybookJsonLineIntoView(textarea, lineIndex);
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     setTextareaSelection(textarea, lineStart, lineEnd);
     scrollPlaybookJsonLineIntoView(textarea, lineIndex);
   });
@@ -8272,9 +9511,13 @@ function normalizeEventSheetColumn(column) {
   const width = key === "characterEncountered" && sourceWidth === "220px"
     ? defaultColumn?.width
     : sourceWidth || defaultColumn?.width;
+  const sourceLabel = String((typeof column === "object" && column?.label) || defaultColumn?.label || key).trim() || key;
+  const label = key === "characterEncountered" && ["Characters", "Character Encountered"].includes(sourceLabel)
+    ? defaultColumn?.label || sourceLabel
+    : sourceLabel;
   return {
     key,
-    label: String((typeof column === "object" && column?.label) || defaultColumn?.label || key).trim() || key,
+    label,
     width: normalizeEventColumnWidth(width),
     readonly: Boolean((typeof column === "object" && column?.readonly) || defaultColumn?.readonly),
     custom: defaultColumn ? Boolean(typeof column === "object" && column?.custom) : true
@@ -8539,12 +9782,14 @@ function showGenericTextInput(options) {
   dom.genericTextTitle.textContent = t(options.title || "Edit value");
   dom.genericTextLabel.textContent = t(options.label || "Value");
   dom.genericTextInput.value = options.value || "";
-  dom.genericTextInput.maxLength = options.maxLength ? String(options.maxLength) : "";
+  // Assigning "" coerces maxLength to 0 and blocks all typing; remove instead.
+  if (options.maxLength) dom.genericTextInput.maxLength = String(options.maxLength);
+  else dom.genericTextInput.removeAttribute("maxlength");
   dom.genericTextBody.textContent = t(options.message || "");
   dom.genericTextButton.textContent = t(options.confirmLabel || "Apply");
   dom.genericTextDialog.returnValue = "";
   dom.genericTextDialog.showModal();
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     dom.genericTextInput.focus();
     dom.genericTextInput.select();
   });
@@ -8879,6 +10124,7 @@ function renderNodes(renderContext = getCanvasRenderContext()) {
   });
   if (dom.frameLayer) dom.frameLayer.innerHTML = frameMarkup.join("");
   dom.nodeLayer.innerHTML = nodeMarkup.join("");
+  hydrateVaultFilePreviews();
   refreshGraphHoverClasses();
   refreshWorkspaceSearchCount();
 }
@@ -8926,6 +10172,7 @@ function renderCanvasNodeMarkup(node, query, focusedCharacterId, layerOrder = ge
           ${renderNodeTitle(node, inlineEditField)}
           ${renderNodeCastChips(node)}
           ${renderNodeCardContent(node, inlineEditField)}
+          ${renderNodeVaultFileCard(node)}
         </div>
         <button class="node-resize-handle right" data-resize-handle="e" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize width"))}" aria-label="${escapeAttr(t("Resize width"))}"></button>
         <button class="node-resize-handle bottom" data-resize-handle="s" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(t("Resize height"))}" aria-label="${escapeAttr(t("Resize height"))}"></button>
@@ -9001,6 +10248,137 @@ function renderNodeCardContent(node, inlineEditField) {
   if (isChoiceNode(node)) return renderChoiceNodeCardContent(node);
   if (isDialogNode(node) && Array.isArray(node.turns) && node.turns.length) return renderDialogNodeCardContent(node);
   return `${renderNodeText(node, inlineEditField)}${hasNodeChoices(node) ? `<div class="node-meta">${t("{count} choices", { count: node.choices.length })}</div>` : ""}`;
+}
+
+function renderNodeVaultFileCard(node) {
+  // Frames organize the canvas; they do not carry vault file links.
+  if (isFrameNode(node)) return "";
+  const host = window.NarrativeCanvasHost;
+  const references = getNodeVaultFiles(node);
+  if (!host?.readVaultFile || !references.length) return "";
+  return `<div class="node-vault-links" data-no-drag="true">${references.map((entry, index) => {
+    const parts = entry.path.split("/");
+    const name = parts.pop() || entry.path;
+    const folder = parts.join("/");
+    return `
+      <section class="node-vault-link${entry.preview ? " is-previewing" : ""}" data-no-drag="true">
+        <div class="node-vault-link-row">
+          <button class="node-vault-open" type="button" data-action="open-node-vault-file" data-node-id="${escapeAttr(node.id)}" data-node-vault-file-index="${index}" data-no-drag="true" title="${escapeAttr(t("Open vault file"))}">
+            <span class="node-vault-open-icon" aria-hidden="true">↗</span>
+            <span class="node-vault-open-text"><strong>${escapeHtml(name)}</strong>${folder ? `<small>${escapeHtml(folder)}</small>` : ""}</span>
+          </button>
+          ${entry.preview && CODEX_IMAGE_FILE_PATTERN.test(entry.path) ? `
+            <input type="range" class="node-vault-size-slider" data-node-vault-size-slider data-node-id="${escapeAttr(node.id)}" data-node-vault-file-index="${index}" min="48" max="320" step="4" value="${normalizeVaultPreviewSize(entry.previewSize)}" data-no-drag="true" title="${escapeAttr(t("Image preview size"))}" aria-label="${escapeAttr(t("Image preview size"))}">
+          ` : ""}
+          ${renderNodeVaultPreviewSwitch(node, index, true)}
+        </div>
+        ${entry.preview ? `<div class="node-vault-preview" style="--vault-preview-h:${normalizeVaultPreviewSize(entry.previewSize)}px" data-vault-file-preview data-node-vault-preview-index="${index}" data-vault-file-path="${escapeAttr(entry.path)}" aria-live="polite">${escapeHtml(t("Loading linked file..."))}</div>` : ""}
+      </section>
+    `;
+  }).join("")}</div>`;
+}
+
+function renderNodeVaultPreviewSwitch(node, index = 0, compact = false) {
+  const enabled = Boolean(getNodeVaultFiles(node)[index]?.preview);
+  const label = t("Preview linked file on canvas");
+  return `
+    <button class="vault-preview-toggle${enabled ? " is-enabled" : ""}${compact ? " is-compact" : ""}" type="button" role="switch" aria-checked="${enabled ? "true" : "false"}" aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}" data-action="toggle-node-vault-preview" data-node-id="${escapeAttr(node?.id || "")}" data-node-vault-file-index="${index}" data-no-drag="true">
+      <span class="vault-preview-toggle-track" aria-hidden="true"><span class="vault-preview-toggle-thumb"></span></span>
+    </button>
+  `;
+}
+
+function hydrateVaultFilePreviews() {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.readVaultFile || !dom.nodeLayer) return;
+  const previews = Array.from(dom.nodeLayer.querySelectorAll("[data-vault-file-preview]"));
+  const paths = [...new Set(previews.map((element) => normalizeNodeVaultFileReference(element.dataset.vaultFilePath)).filter(Boolean))];
+  paths.forEach((path) => { void loadVaultFilePreview(path); });
+}
+
+async function loadVaultFilePreview(path) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.readVaultFile || !path) return;
+  const now = Date.now();
+  // Image files render as images, not as their source text.
+  if (CODEX_IMAGE_FILE_PATTERN.test(path) && host.getVaultResourceUrl) {
+    const image = { status: "loaded", loadedAt: now, text: "", sourcePath: path, isMarkdown: false, isImage: true, imageUrl: host.getVaultResourceUrl(path), error: "" };
+    state.vaultFilePreviewCache.set(path, image);
+    patchVaultFilePreview(path, image);
+    return;
+  }
+  const cached = state.vaultFilePreviewCache.get(path);
+  if (cached?.status === "loading") return;
+  if (cached && now - cached.loadedAt < 1500) {
+    patchVaultFilePreview(path, cached);
+    return;
+  }
+  const loading = { status: "loading", loadedAt: now, text: "", error: "" };
+  state.vaultFilePreviewCache.set(path, loading);
+  patchVaultFilePreview(path, loading);
+  try {
+    const result = await host.readVaultFile(path);
+    const text = typeof result === "string" ? result : String(result?.text || "");
+    const sourcePath = typeof result === "string" ? path : normalizeNodeVaultFileReference(result?.path) || path;
+    const isMarkdown = typeof result === "string"
+      ? /\.(?:md|markdown)$/i.test(sourcePath)
+      : Boolean(result?.isMarkdown ?? /\.(?:md|markdown)$/i.test(sourcePath));
+    const loaded = { status: "loaded", loadedAt: Date.now(), text: formatVaultFilePreviewText(text), sourcePath, isMarkdown, error: "" };
+    state.vaultFilePreviewCache.set(path, loaded);
+    patchVaultFilePreview(path, loaded);
+  } catch (error) {
+    console.error(error);
+    const failed = { status: "error", loadedAt: Date.now(), text: "", error: t("Could not preview the linked vault file.") };
+    state.vaultFilePreviewCache.set(path, failed);
+    patchVaultFilePreview(path, failed);
+  }
+}
+
+function patchVaultFilePreview(path, entry) {
+  const host = window.NarrativeCanvasHost;
+  if (!dom.nodeLayer) return;
+  dom.nodeLayer.querySelectorAll("[data-vault-file-preview]").forEach((element) => {
+    if (normalizeNodeVaultFileReference(element.dataset.vaultFilePath) !== path) return;
+    element.classList.toggle("is-loading", entry.status === "loading");
+    element.classList.toggle("is-error", entry.status === "error");
+    element.classList.toggle("is-markdown", entry.status === "loaded" && Boolean(entry.isMarkdown));
+    element.classList.toggle("is-image", entry.status === "loaded" && Boolean(entry.isImage));
+    if (entry.status === "loading") element.textContent = t("Loading linked file...");
+    else if (entry.status === "error") element.textContent = entry.error || t("Could not preview the linked vault file.");
+    else if (entry.isImage) {
+      if (entry.imageUrl) {
+        const img = document.createElement("img");
+        img.src = entry.imageUrl;
+        img.alt = "";
+        img.draggable = false;
+        img.loading = "lazy";
+        element.replaceChildren(img);
+      } else {
+        element.textContent = t("Could not preview the linked vault file.");
+      }
+    }
+    else if (!entry.text) element.textContent = t("Linked file is empty.");
+    else if (entry.isMarkdown && host?.renderVaultMarkdown) {
+      const renderToken = String(entry.loadedAt || Date.now());
+      element.dataset.vaultMarkdownRender = renderToken;
+      element.replaceChildren();
+      void Promise.resolve(host.renderVaultMarkdown(entry.text, element, entry.sourcePath || path)).catch((error) => {
+        console.error(error);
+        if (element.dataset.vaultMarkdownRender === renderToken) {
+          element.classList.remove("is-markdown");
+          element.textContent = entry.text;
+        }
+      });
+    } else {
+      element.textContent = entry.text;
+    }
+  });
+}
+
+function formatVaultFilePreviewText(value) {
+  const text = String(value || "").replace(/\r\n?/g, "\n").trim();
+  if (text.length <= 6000) return text;
+  return `${text.slice(0, 6000).trimEnd()}\n…`;
 }
 
 function renderChoiceNodeCardContent(node) {
@@ -10165,6 +11543,7 @@ function renderProjectPanel() {
 }
 
 function renderNodePanel(node) {
+  hideVaultFileSuggestions();
   dom.nodePanel.classList.remove("is-empty");
   if (!node) {
     dom.nodePanel.replaceChildren();
@@ -10193,6 +11572,7 @@ function renderNodePanel(node) {
           <input data-node-field="title" value="${escapeAttr(node.title || "")}">
         </label>
         ${renderNodeBodyField(node)}
+        ${renderNodeVaultFileField(node)}
         ${isDialogNode(node) ? renderNodeDialogTurnsField(node) : ""}
         ${renderNodeCastFields(node)}
         ${!isFrameNode(node) ? renderNodeStateLogicFields(node) : ""}
@@ -10251,7 +11631,7 @@ function renderNodeDialogTurnsField(node) {
         <button class="small-button" type="button" data-action="add-dialog-turn">${t("Add turn")}</button>
       </div>
       <datalist id="dialogTurnSpeakerOptions">
-        ${getCharacters().map((char) => `<option value="${escapeAttr(char.name)}"></option>`).join("")}
+        ${getCastCharacters().map((char) => `<option value="${escapeAttr(char.name)}"></option>`).join("")}
       </datalist>
       ` : ""}
     </section>
@@ -10291,6 +11671,50 @@ function renderNodeBodyField(node) {
   `;
 }
 
+function renderNodeVaultFileField(node) {
+  // Frames organize the canvas; they do not carry vault file links.
+  if (isFrameNode(node)) return "";
+  const host = window.NarrativeCanvasHost;
+  if (!host?.searchVaultFiles) return "";
+  const references = getNodeVaultFiles(node);
+  const expanded = isNodeSectionExpanded("vaultFile");
+  const summary = references.length ? String(references.length) : t("Not linked");
+  return `
+    <section class="node-vault-file-field nc-collapsible${expanded ? " expanded" : ""}">
+      <header class="node-vault-file-header nc-collapsible-header">
+        ${renderNodeSectionToggle("vaultFile", t("Vault file"), expanded)}
+        <span class="nc-section-count">${escapeHtml(summary)}</span>
+      </header>
+      ${expanded ? `
+      <div class="node-vault-file-content">
+      <div class="node-vault-file-list">
+        ${references.map((entry, index) => `
+          <div class="node-vault-file-item" data-node-vault-row-index="${index}">
+            <div class="node-vault-file-input-row">
+              <button class="cast-drag-handle vault-drag-handle" type="button" data-node-vault-drag="${index}" title="${escapeAttr(t("Drag to reorder linked file"))}" aria-label="${escapeAttr(t("Drag to reorder linked file"))}">::</button>
+              <div class="node-vault-file-input-wrap">
+                <input data-node-vault-file-index="${index}" value="${escapeAttr(entry.path)}" placeholder="${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Vault file"))}" aria-autocomplete="list" aria-expanded="false">
+                <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+              </div>
+              <button class="icon-button vault-row-icon-button" type="button" data-action="open-node-vault-file" data-node-vault-file-index="${index}" title="${escapeAttr(t("Open vault file"))}" aria-label="${escapeAttr(t("Open vault file"))}">↗</button>
+              <button class="icon-button danger-button vault-row-icon-button" type="button" data-action="clear-node-vault-file" data-node-vault-file-index="${index}" title="${escapeAttr(t("Remove vault file"))}" aria-label="${escapeAttr(t("Remove vault file"))}">×</button>
+            </div>
+          </div>
+        `).join("")}
+        <div class="node-vault-file-item is-add">
+          <div class="node-vault-file-input-wrap">
+            <input data-node-vault-file-index="${references.length}" value="" placeholder="${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Add vault file"))}" aria-autocomplete="list" aria-expanded="false">
+            <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+          </div>
+        </div>
+      </div>
+      <small>${escapeHtml(t("Link this node to notes or other files in the vault."))}</small>
+      </div>
+      ` : ""}
+    </section>
+  `;
+}
+
 function isNodeSectionExpanded(sectionKey) {
   if (!sectionKey) return false;
   const set = state.nodeSectionExpandedIds;
@@ -10322,24 +11746,22 @@ function renderNodeSectionToggle(sectionKey, label, expanded) {
 }
 
 function renderNodeCastFields(node) {
-  const characters = getCharacters();
+  const entries = getCharacters();
   const cast = normalizeNodeCast(node.cast);
   const autoLinks = getNodeCharacterLinks(node, { includeCast: false, includeEventAggregate: false });
   const expanded = isNodeSectionExpanded("cast");
-  const summary = characters.length
+  const summary = entries.length
     ? `${cast.length} ${t("manual")}, ${autoLinks.length} ${t("auto")}`
-    : t("No characters yet");
-  const body = !characters.length
-    ? `<button class="small-button" data-action="add-character">${t("Add character")}</button>`
+    : t("No library entries yet");
+  const body = !entries.length
+    ? `<button class="small-button" data-action="add-codex-entry">${t("Add entry")}</button>`
     : `
       <div class="cast-row-list">
-        ${cast.map((entry, index) => renderNodeCastRow(entry, index)).join("") || `<div class="cast-empty">${t("No manual cast links.")}</div>`}
+        ${cast.map((entry, index) => renderNodeCastRow(entry, index)).join("") || `<div class="cast-empty">${t("No manual library references.")}</div>`}
       </div>
       <div class="cast-add-row">
-        <select data-new-cast-character>
-          ${renderCastCharacterOptions("", { placeholder: t("Select character...") })}
-        </select>
-        <select data-new-cast-role>
+        ${renderCastEntryPicker("", "new")}
+        <select data-new-cast-role aria-label="${escapeAttr(t("Relation"))}">
           ${renderCastRelationOptions("Present")}
         </select>
         <button class="small-button" data-action="add-node-cast">${t("Add")}</button>
@@ -10356,7 +11778,7 @@ function renderNodeCastFields(node) {
   return `
     <section class="cast-editor nc-collapsible${expanded ? " expanded" : ""}">
       <div class="cast-editor-header nc-collapsible-header">
-        ${renderNodeSectionToggle("cast", t("Cast"), expanded)}
+        ${renderNodeSectionToggle("cast", t("Library references"), expanded)}
         <span>${escapeHtml(summary)}</span>
       </div>
       ${expanded ? body : ""}
@@ -10845,33 +12267,177 @@ function renderNodeEffectRow(effect, index) {
 }
 
 function renderNodeCastRow(entry, index) {
+  const codexEntry = getCharacterById(entry.characterId);
   return `
-    <div class="cast-row">
-      <select data-node-cast-index="${index}" data-node-cast-field="characterId">
-        ${renderCastCharacterOptions(entry.characterId)}
-      </select>
+    <div class="cast-row" data-node-cast-row-index="${index}" data-codex-kind="${escapeAttr(codexEntry?.kind || "Character")}">
+      <button class="cast-drag-handle" type="button" data-node-cast-drag="${index}" title="${escapeAttr(t("Drag to reorder reference"))}" aria-label="${escapeAttr(t("Drag to reorder reference"))}">::</button>
+      ${renderCastEntryPicker(entry.characterId, String(index))}
       <select data-node-cast-index="${index}" data-node-cast-field="role">
-        ${renderCastRelationOptions(entry.role)}
+        ${renderCastRelationOptions(entry.role, entry.characterId)}
       </select>
-      <button class="icon-button danger-button" title="${escapeAttr(t("Remove cast link"))}" data-action="delete-node-cast" data-node-cast-index="${index}">x</button>
+      <button class="icon-button danger-button" title="${escapeAttr(t("Remove library reference"))}" data-action="delete-node-cast" data-node-cast-index="${index}">x</button>
     </div>
   `;
 }
 
-function renderCastCharacterOptions(selectedId, options = {}) {
-  const placeholder = options.placeholder
-    ? `<option value="" ${selectedId ? "" : "selected"}>${escapeHtml(options.placeholder)}</option>`
-    : "";
-  return placeholder + getCharacters().map((character) => `
-    <option value="${escapeAttr(character.id)}" ${character.id === selectedId ? "selected" : ""}>${escapeHtml(character.name || t("Unnamed Character"))}</option>
+// Combobox for choosing a library entry: click or focus shows the full, category-grouped
+// menu (dropdown behavior); typing filters it (search behavior). `context` is a cast row
+// index, or "new" for the add row.
+function renderCastEntryPicker(selectedId, context) {
+  const entry = getCharacterById(selectedId);
+  const name = entry ? (entry.name || t("Unnamed Character")) : "";
+  const contextAttr = context === "new"
+    ? ` data-cast-entry-context="new"`
+    : ` data-cast-entry-index="${escapeAttr(context)}"`;
+  return `
+    <div class="cast-entry-picker" data-cast-entry-picker data-codex-kind="${escapeAttr(entry?.kind || "")}">
+      <input data-cast-entry-input${contextAttr} data-cast-entry-id="${escapeAttr(entry ? entry.id : "")}" value="${escapeAttr(name)}" placeholder="${escapeAttr(t("Search or choose entry..."))}" role="combobox" aria-label="${escapeAttr(t("Library entry"))}" aria-autocomplete="list" aria-expanded="false" autocomplete="off" spellcheck="false">
+      <button class="cast-entry-picker-arrow" type="button" data-action="toggle-cast-entry-suggestions" tabindex="-1" aria-label="${escapeAttr(t("Show all entries"))}">▾</button>
+      <div class="cast-entry-suggestions" data-cast-entry-suggestions role="listbox" aria-label="${escapeAttr(t("Library entry"))}" hidden></div>
+    </div>
+  `;
+}
+
+function renderCastEntrySuggestionMarkup(input) {
+  const selectedId = input.dataset.castEntryId || "";
+  const selected = getCharacterById(selectedId);
+  const raw = String(input.value || "").trim();
+  // When the field still shows the selected entry's name, browse the full menu
+  // instead of filtering down to one entry.
+  const query = selected && raw === (selected.name || t("Unnamed Character")) ? "" : raw.toLowerCase();
+  const groups = getCodexKindsList().map((kind) => {
+    const entries = getCharacters().filter((entry) => entry.kind === kind
+      && (!query || String(entry.name || "").toLowerCase().includes(query)));
+    if (!entries.length) return "";
+    return `
+      <div class="cast-entry-suggestion-group" role="presentation">${escapeHtml(t(kind))}</div>
+      ${entries.map((entry) => `
+        <button type="button" class="cast-entry-suggestion${entry.id === selectedId ? " is-selected" : ""}" role="option" aria-selected="${entry.id === selectedId ? "true" : "false"}" data-action="select-cast-entry-suggestion" data-cast-entry-id="${escapeAttr(entry.id)}" data-codex-kind="${escapeAttr(entry.kind)}">
+          <span>${escapeHtml(entry.name || t("Unnamed Character"))}</span><small>${escapeHtml(t(entry.kind))}</small>
+        </button>
+      `).join("")}
+    `;
+  }).join("");
+  return groups || `<div class="cast-entry-suggestion-empty">${t("No matching entries.")}</div>`;
+}
+
+function openCastEntrySuggestions(input) {
+  const picker = input?.closest?.("[data-cast-entry-picker]");
+  const list = picker?.querySelector("[data-cast-entry-suggestions]");
+  if (!list) return;
+  hideCastEntrySuggestions(input);
+  list.innerHTML = renderCastEntrySuggestionMarkup(input);
+  list.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function hideCastEntrySuggestions(exceptInput = null) {
+  dom.nodePanel?.querySelectorAll("[data-cast-entry-suggestions]").forEach((list) => {
+    const picker = list.closest("[data-cast-entry-picker]");
+    const input = picker?.querySelector("[data-cast-entry-input]");
+    if (exceptInput && input === exceptInput) return;
+    list.hidden = true;
+    list.innerHTML = "";
+    input?.setAttribute("aria-expanded", "false");
+  });
+}
+
+function restoreCastEntryInputValue(input) {
+  const entry = getCharacterById(input?.dataset?.castEntryId || "");
+  if (!input) return;
+  input.value = entry ? (entry.name || t("Unnamed Character")) : "";
+}
+
+function toggleCastEntrySuggestions(target) {
+  const picker = target?.closest?.("[data-cast-entry-picker]");
+  const input = picker?.querySelector("[data-cast-entry-input]");
+  const list = picker?.querySelector("[data-cast-entry-suggestions]");
+  if (!input || !list) return;
+  if (list.hidden) {
+    input.focus?.({ preventScroll: true });
+    input.select?.();
+    openCastEntrySuggestions(input);
+  } else {
+    hideCastEntrySuggestions();
+  }
+}
+
+function selectCastEntrySuggestion(target) {
+  const picker = target?.closest?.("[data-cast-entry-picker]");
+  const input = picker?.querySelector("[data-cast-entry-input]");
+  const entry = getCharacterById(target?.dataset?.castEntryId || "");
+  if (!input || !entry) return;
+  if (input.dataset.castEntryContext === "new") {
+    input.dataset.castEntryId = entry.id;
+    input.value = entry.name || t("Unnamed Character");
+    picker.dataset.codexKind = entry.kind;
+    const roleSelect = input.closest(".cast-add-row")?.querySelector("[data-new-cast-role]");
+    if (roleSelect) roleSelect.innerHTML = renderCastRelationOptions(getDefaultCodexRelation(entry), entry.id);
+    hideCastEntrySuggestions();
+    return;
+  }
+  const index = Number(input.dataset.castEntryIndex);
+  if (!Number.isInteger(index)) return;
+  const historyBefore = getHistorySnapshot();
+  setNodeCastField(index, "characterId", entry.id, true);
+  commitHistoryFromSnapshot(historyBefore);
+}
+
+function handleCastEntryPickerKeyDown(event) {
+  const input = event.target;
+  if (!input?.hasAttribute?.("data-cast-entry-input")) return false;
+  const picker = input.closest("[data-cast-entry-picker]");
+  const list = picker?.querySelector("[data-cast-entry-suggestions]");
+  if (!list) return false;
+  const options = [...list.querySelectorAll(".cast-entry-suggestion")];
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (list.hidden) {
+      openCastEntrySuggestions(input);
+      return true;
+    }
+    moveActiveSuggestion(options, event.key === "ArrowDown" ? 1 : -1);
+    return true;
+  }
+  if (event.key === "Enter") {
+    if (list.hidden) return false;
+    event.preventDefault();
+    const active = options.find((option) => option.classList.contains("active")) || options[0];
+    if (active) selectCastEntrySuggestion(active);
+    return true;
+  }
+  if (event.key === "Escape") {
+    if (list.hidden) return false;
+    event.preventDefault();
+    hideCastEntrySuggestions();
+    restoreCastEntryInputValue(input);
+    return true;
+  }
+  return false;
+}
+
+function renderCastRelationOptions(selectedRole, entryId = "") {
+  const role = normalizeCastRole(selectedRole);
+  const relations = getCodexRelationsForEntry(entryId, role);
+  return relations.map((relation) => `
+    <option value="${escapeAttr(relation)}" ${relation === role ? "selected" : ""}>${escapeHtml(getCastRelationLabel(relation))}</option>
   `).join("");
 }
 
-function renderCastRelationOptions(selectedRole) {
-  const role = normalizeCastRole(selectedRole);
-  return CAST_RELATIONS.map((relation) => `
-    <option value="${escapeAttr(relation)}" ${relation === role ? "selected" : ""}>${escapeHtml(getCastRelationLabel(relation))}</option>
-  `).join("");
+function getCodexRelationsForEntry(entryId, preservedRole = "") {
+  const entry = getCharacterById(entryId);
+  const kind = normalizeCodexKind(entry?.kind || "Character");
+  const relations = [...(CODEX_RELATIONS_BY_KIND[kind] || CODEX_RELATIONS_BY_KIND.Character)];
+  const role = normalizeCastRole(preservedRole);
+  if (preservedRole && !relations.includes(role)) relations.push(role);
+  return relations;
+}
+
+function getDefaultCodexRelation(entryOrKind) {
+  const kind = typeof entryOrKind === "string"
+    ? normalizeCodexKind(entryOrKind)
+    : normalizeCodexKind(entryOrKind?.kind || "Character");
+  return CODEX_DEFAULT_RELATION_BY_KIND[kind] || "Mentioned";
 }
 
 function getCastRelationLabel(role) {
@@ -10894,10 +12460,14 @@ function renderNodeCastChips(node) {
 }
 
 function renderCastChip(link) {
-  const characterName = link.character?.name || getCharacterName(link.characterId) || "Character";
+  const character = link.character || getCharacterById(link.characterId);
+  const characterName = character?.name || getCharacterName(link.characterId) || "Character";
   const role = getCastRelationLabel(link.role);
-  const searchLabel = t("Search character: {name}", { name: characterName });
-  return `<button class="node-cast-chip node-cast-chip-button" type="button" data-action="open-character-search" data-character-id="${escapeAttr(link.characterId)}" data-no-drag="true" aria-label="${escapeAttr(searchLabel)}">${escapeHtml(characterName)} · ${escapeHtml(role)}</button>`;
+  const searchLabel = t("Open library entry: {name}", { name: characterName });
+  const kind = normalizeCodexKind(character?.kind || "Character");
+  const host = window.NarrativeCanvasHost;
+  const iconUrl = character?.icon && host?.getVaultResourceUrl ? host.getVaultResourceUrl(character.icon) : "";
+  return `<button class="node-cast-chip node-cast-chip-button" type="button" data-action="open-character-search" data-character-id="${escapeAttr(link.characterId)}" data-codex-kind="${escapeAttr(kind)}" data-no-drag="true" aria-label="${escapeAttr(searchLabel)}">${iconUrl ? `<img class="node-cast-chip-avatar" src="${escapeAttr(iconUrl)}" alt="" loading="lazy" draggable="false">` : ""}<span class="node-cast-chip-text"><span>${escapeHtml(characterName)}</span><small>${escapeHtml(t(kind))} · ${escapeHtml(role)}</small></span></button>`;
 }
 
 // Frame node properties render inline at the same level as every other property,
@@ -11434,7 +13004,7 @@ function scheduleStoryPanelRender() {
 
 function handleDocumentClickCapture(event) {
   if (event.__narrativeCanvasClickHandled) return;
-  const target = getCanvasCoveredFrameTarget(event) || event.target;
+  const target = getCanvasCoveredFrameTarget(event) || getComposedEventTarget(event);
   if (target?.closest?.("#aiFloatingButton, [data-action='close-ai-window']")) return;
   if (!isNarrativeCanvasClickDelegateTarget(target)) return;
   syncDomScopeForEventTarget(target);
@@ -11474,15 +13044,26 @@ function handleDocumentClickEvent(event, retarget = null) {
   const mentionOption = target.closest("[data-mention-index]");
   if (mentionOption && state.mention) {
     const index = Number(mentionOption.dataset.mentionIndex);
-    const character = state.mention.characters[index];
-    if (character) {
-      insertMention(character);
+    const entry = state.mention.entries[index];
+    if (entry) {
+      insertMention(entry);
       event.preventDefault();
       return true;
     }
   }
+  const codexTagEditor = target.closest("[data-character-tag-editor]");
+  if (codexTagEditor && target === codexTagEditor) {
+    codexTagEditor.querySelector("[data-character-tag-input]")?.focus?.({ preventScroll: true });
+    event.preventDefault();
+    return true;
+  }
   if (state.mention && !dom.mentionPopover?.contains(target) && target !== state.mention.target) {
     hideMentionPopover();
+  }
+  if (state.vaultFileSuggestions
+    && target !== state.vaultFileSuggestions.target
+    && !target.closest?.("[data-vault-file-suggestions]")) {
+    hideVaultFileSuggestions();
   }
   if (getFormControlTarget(target)) return false;
 
@@ -11577,7 +13158,9 @@ function handleDocumentClickEvent(event, retarget = null) {
       toggleNodeSelection(nodeId);
       return true;
     }
-    focusCanvasNode(nodeId);
+    // Single click only selects; the view stays put. Double-click centers the node
+    // (focusCanvasNodeForInlineEdit above).
+    selectNode(nodeId);
     return true;
   } else {
     state.lastNodeClick = { id: null, time: 0 };
@@ -11624,7 +13207,7 @@ function handleFormControlPointerEvent(event) {
   event.stopPropagation();
   if (typeof control.focus === "function") {
     requestAnimationFrame(() => {
-      if (document.activeElement !== control) control.focus({ preventScroll: true });
+      if (getScopeActiveElement() !== control) control.focus({ preventScroll: true });
     });
   }
 }
@@ -11635,11 +13218,11 @@ function handleFormControlClickEvent(event) {
 }
 
 function handleGlobalMenuDismiss(event) {
-  if (isCanvasRadialMenuOpen() && !dom.canvasRadialMenu.contains(event.target)) {
+  if (isCanvasRadialMenuOpen() && !dom.canvasRadialMenu.contains(getComposedEventTarget(event))) {
     hideCanvasRadialMenu();
   }
   if (!isNodeContextMenuOpen()) return;
-  if (dom.nodeContextMenu.contains(event.target)) return;
+  if (dom.nodeContextMenu.contains(getComposedEventTarget(event))) return;
   hideNodeContextMenu();
 }
 
@@ -11658,11 +13241,11 @@ function handleGlobalMenuKeyDown(event) {
 }
 
 function handleGlobalAppPointerContext(event) {
-  state.lastAppInteractionAt = isNarrativeCanvasTarget(event.target) ? performance.now() : 0;
+  state.lastAppInteractionAt = isNarrativeCanvasTarget(getComposedEventTarget(event)) ? performance.now() : 0;
 }
 
 function handleGlobalAppFocusContext(event) {
-  if (!isNarrativeCanvasTarget(event.target)) return;
+  if (!isNarrativeCanvasTarget(getComposedEventTarget(event))) return;
   state.lastAppInteractionAt = performance.now();
 }
 
@@ -11673,7 +13256,7 @@ function handleGlobalHistoryKeyDown(event) {
 function handleHistoryShortcutEvent(event) {
   if (event.defaultPrevented || !isHistoryShortcut(event)) return false;
   if (!isNarrativeCanvasShortcutContext(event.target)) return false;
-  const editTarget = getNativeEditingTarget(event.target) || getNativeEditingTarget(document.activeElement);
+  const editTarget = getNativeEditingTarget(event.target) || getNativeEditingTarget(getScopeActiveElement());
   if (editTarget && shouldPreserveNativeHistoryShortcut(editTarget)) return false;
   return applyHistoryShortcut(event);
 }
@@ -11712,7 +13295,7 @@ function shouldPreserveNativeHistoryShortcut(target) {
 
 function isNarrativeCanvasShortcutContext(target) {
   if (isNarrativeCanvasTarget(target)) return true;
-  if (isNarrativeCanvasTarget(document.activeElement)) return true;
+  if (isNarrativeCanvasTarget(getScopeActiveElement())) return true;
   return Boolean(state.lastAppInteractionAt && performance.now() - state.lastAppInteractionAt <= APP_SHORTCUT_CONTEXT_MS);
 }
 
@@ -11760,6 +13343,12 @@ function handleNodeContextMenuCommand(event) {
 
 function handleContextMenu(event) {
   if (!isNarrativeCanvasTarget(event.target)) return;
+  const visionTile = event.target.closest?.("#visionBoardDialog [data-vision-board-tile]");
+  if (visionTile) {
+    event.preventDefault();
+    showVisionBoardLayerMenu(event, visionTile);
+    return;
+  }
   if (!isCanvasFileActive()) {
     hideNodeContextMenu();
     return;
@@ -11922,6 +13511,30 @@ function handleAction(target) {
     exitFrameCanvas();
     return;
   }
+  if (action === "open-node-vault-file") { void openNodeVaultFile(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex)); return; }
+  if (action === "clear-node-vault-file") { clearNodeVaultFile(Number(target.dataset.nodeVaultFileIndex)); return; }
+  if (action === "toggle-node-vault-preview") { toggleNodeVaultFilePreview(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex)); return; }
+  if (action === "select-vault-file-suggestion") { selectVaultFileSuggestion(target.dataset.vaultFilePath); return; }
+  if (action === "select-cast-entry-suggestion") { selectCastEntrySuggestion(target); return; }
+  if (action === "toggle-cast-entry-suggestions") { toggleCastEntrySuggestions(target); return; }
+  if (action === "choose-codex-image-file") { void chooseCodexImageFile(target.dataset.characterId); return; }
+  if (action === "import-local-codex-images") { openLocalCodexImageInput(target.dataset.characterId); return; }
+  if (action === "close-codex-image-picker") { closeCodexImagePicker(target.dataset.characterId); return; }
+  if (action === "open-vision-board") { openVisionBoard(target.dataset.visionBoardKind, target.dataset.visionBoardId); return; }
+  if (action === "close-vision-board") { closeVisionBoard(); return; }
+  if (action === "open-codex-reference") { void openCodexReference(target.dataset.vaultFileReference); return; }
+  if (action === "remove-codex-image") { removeCodexImage(target.dataset.characterId, Number(target.dataset.codexImageIndex)); return; }
+  if (action === "remove-codex-vault-file") { removeCodexVaultFile(target.dataset.characterId, Number(target.dataset.codexVaultFileIndex)); return; }
+  if (action === "create-codex-canvas") { void createCodexCanvasForCharacter(target.dataset.characterId); return; }
+  if (action === "clear-codex-icon") { setCodexIcon(target.dataset.characterId, ""); return; }
+  if (action === "detach-codex-canvas") { detachCodexCanvas(target.dataset.characterId); return; }
+  if (action === "clear-codex-image-file") { clearCodexImageFile(target.dataset.characterId); return; }
+  if (action === "set-codex-kind-filter") { setCodexKindFilter(target.dataset.codexKind); return; }
+  if (action === "set-codex-tag-filter") { setCodexTagFilter(target.dataset.codexTag); return; }
+  if (action === "clear-codex-tag-filter") { clearCodexTagFilter(); return; }
+  if (action === "select-codex-tag-suggestion") { selectCodexTagSuggestion(target); return; }
+  if (action === "open-codex-entry-detail") { openCodexEntryDetail(target.dataset.characterId); return; }
+  if (action === "close-codex-entry-detail") { closeCodexEntryDetail(); return; }
   const historyBefore = shouldRecordAction(action) ? getHistorySnapshot() : null;
   if (action === "add-node") addNode(target.dataset.type, readNodeSpawnPoint(target));
   if (action === "add-custom-node-type") addCustomNodeType();
@@ -11941,6 +13554,7 @@ function handleAction(target) {
   if (action === "clear-browser-storage") clearBrowserStorageFromUi();
   if (action === "open-sample-project") openSampleProjectFromUi();
   if (action === "add-character") addCharacter();
+  if (action === "add-codex-entry") addCodexEntry();
   if (action === "hide-character") hideCharacter(target.dataset.characterId);
   if (action === "show-character") showCharacter(target.dataset.characterId);
   if (action === "show-all-characters") showAllCharacters();
@@ -11949,7 +13563,14 @@ function handleAction(target) {
   if (action === "open-character-search") openCharacterSearch(target.dataset.characterId);
   if (action === "clear-character-focus") clearCharacterFocus();
   if (action === "clear-character-search") clearCharacterSearch();
-  if (action === "toggle-character-backlinks") toggleCharacterBacklinks(target.dataset.characterId);
+  if (action === "toggle-character-backlink-group") toggleCharacterBacklinkGroup(target.dataset.characterId, target.dataset.characterBacklinkGroup);
+  if (action === "remove-codex-tag") removeCodexTag(target);
+  if (action === "add-codex-extra-field") addCodexExtraField(target.dataset.characterId);
+  if (action === "remove-codex-extra-field") removeCodexExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex));
+  if (action === "add-codex-template-field") addCodexTemplateField();
+  if (action === "remove-codex-template-field") removeCodexTemplateField(target.dataset.codexTemplateKey);
+  if (action === "add-codex-kind") addCodexKind();
+  if (action === "remove-codex-kind") removeCodexKind(target.dataset.codexKind);
   if (action === "show-more-document") showMoreDocument(target.dataset.documentId);
   if (action === "add-node-cast") addNodeCast();
   if (action === "delete-node-cast") deleteNodeCast(Number(target.dataset.nodeCastIndex));
@@ -12069,6 +13690,7 @@ function handleAction(target) {
   if (action === "play-dialog-next") advanceDialogTurn(1);
   if (action === "play-dialog-prev") advanceDialogTurn(-1);
   if (action === "play-prev") previousPreview();
+  if (action === "play-history-jump") jumpToPreviewStep(target.dataset.playStepIndex);
   if (action === "play-manual") executePreviewManualAction(target.dataset.nodeId, target.dataset.playbookActionId);
   if (action === "restart-play") openPreview();
   commitHistoryFromSnapshot(historyBefore);
@@ -12397,7 +14019,7 @@ function hideCanvasRadialMenu() {
   dom.canvasRadialMenu.querySelectorAll("[data-radial-toggle]").forEach((toggle) => {
     toggle.setAttribute("aria-expanded", "false");
   });
-  const focused = document.activeElement;
+  const focused = getScopeActiveElement();
   if (focused && dom.canvasRadialMenu.contains(focused) && typeof focused.blur === "function") focused.blur();
   dom.canvasRadialMenu.hidden = true;
   dom.canvasRadialMenu.setAttribute("aria-hidden", "true");
@@ -12704,8 +14326,13 @@ function reparentChildrenOfDeletedFrames(deletedIds) {
 
 function selectFile(fileId) {
   if (!fileViews[fileId]) return;
-  if (state.activeFileId === fileId) return;
+  if (state.activeFileId === fileId) {
+    if (fileId === "characters" && state.codexSelectedEntryId) closeCodexEntryDetail();
+    return;
+  }
   state.activeFileId = fileId;
+  // Each page starts at its top; the back-to-top button resets with it.
+  dom.root?.classList.remove("workspace-scrolled");
 
   if (fileId === "adventure") {
     state.panel = state.selectedNodeId ? "node" : "project";
@@ -12715,8 +14342,10 @@ function selectFile(fileId) {
   }
 
   if (fileId === "characters") {
+    // Keep the last-opened entry detail when returning from another file;
+    // re-clicking the Library tab while already there returns to the overview (see above).
     renderDocumentFileSwitch();
-    setStatus("Characters.md opened.");
+    setStatus("Library.md opened.");
     return;
   }
 
@@ -12758,7 +14387,7 @@ function getEditableHistoryKey(target) {
   if (!target?.dataset) return "";
   if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
   const parts = [];
-  ["documentSource", "projectField", "nodeField", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+  ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
   ["nodeId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
@@ -12769,7 +14398,19 @@ function getEditableHistoryKey(target) {
 
 function handleEditFocusIn(event) {
   if (!isNarrativeCanvasTarget(event.target)) return;
+  if (event.target?.hasAttribute?.("data-character-tag-input")) updateCodexTagSuggestions(event.target);
+  if (event.target?.hasAttribute?.("data-cast-entry-input")) {
+    event.target.select?.();
+    openCastEntrySuggestions(event.target);
+  }
   beginNodeTitleReferenceEdit(event.target);
+  if (event.target?.dataset?.nodeVaultSizeSlider == null
+    && (event.target?.dataset?.nodeVaultFileIndex != null || event.target?.dataset?.characterImageFile || event.target?.dataset?.characterImagePickerInput || event.target?.dataset?.characterVaultFileInput != null || event.target?.dataset?.characterIconInput != null)) {
+    if (state.vaultFileSuggestionSuppressFocusOnce) state.vaultFileSuggestionSuppressFocusOnce = false;
+    // Force so an empty input lists every file on focus — the browse buttons are gone,
+    // the search input is the single entry point.
+    else void updateVaultFileSuggestions(event.target, { force: true });
+  }
   const key = getEditableHistoryKey(event.target);
   if (!key) return;
   state.editHistoryTarget = {
@@ -12780,11 +14421,28 @@ function handleEditFocusIn(event) {
 
 function handleEditFocusOut(event) {
   const target = event.target;
+  if (target?.hasAttribute?.("data-character-tag-input")) {
+    const editor = target.closest("[data-character-tag-editor]");
+    if (!editor?.contains(event.relatedTarget)) hideCodexTagSuggestions(target);
+    return;
+  }
+  if (target?.hasAttribute?.("data-cast-entry-input")) {
+    const picker = target.closest("[data-cast-entry-picker]");
+    if (!picker?.contains(event.relatedTarget)) {
+      hideCastEntrySuggestions();
+      restoreCastEntryInputValue(target);
+    }
+    return;
+  }
   if (target?.dataset?.projectField === "variables") {
     setProjectField("variables", target.value);
   }
   commitFocusedEdit(event.target);
   finishNodeTitleReferenceEdit(target);
+  if ((target?.dataset?.nodeVaultFileIndex != null || target?.dataset?.characterImageFile || target?.dataset?.characterImagePickerInput || target?.dataset?.characterVaultFileInput != null || target?.dataset?.characterIconInput != null)
+    && !event.relatedTarget?.closest?.("[data-vault-file-suggestions]")) {
+    hideVaultFileSuggestions();
+  }
   if (target?.dataset?.inlineNodeField) {
     if (event.relatedTarget && dom.mentionPopover?.contains(event.relatedTarget)) return;
     if (shouldKeepInlineNodeEditOnFocusOut(target.dataset.nodeId, event.relatedTarget)) {
@@ -12811,8 +14469,45 @@ function handleInput(event) {
   }
   if (!isMentionTarget && !isNarrativeCanvasTarget(target)) return;
 
+  if (target.hasAttribute?.("data-character-tag-input")) {
+    handleCodexTagInput(target);
+    return;
+  }
+
+  if (target.hasAttribute?.("data-cast-entry-input")) {
+    openCastEntrySuggestions(target);
+    return;
+  }
+
   if (target.hasAttribute?.("data-ai-prompt")) {
     state.aiPromptDraft = target.value;
+    return;
+  }
+
+  if (target.dataset?.nodeVaultSizeSlider != null) {
+    setNodeVaultPreviewSize(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex), target.value, false);
+    return;
+  }
+
+  if (target.dataset?.nodeVaultFileIndex != null) {
+    setNodeVaultFile(Number(target.dataset.nodeVaultFileIndex), target.value);
+    void updateVaultFileSuggestions(target);
+    return;
+  }
+
+  if (target.dataset?.characterImageFile) {
+    setCharacterField(target.dataset.characterId, "imageFile", target.value, false);
+    void updateVaultFileSuggestions(target);
+    return;
+  }
+
+  if (target.dataset?.characterVaultFileInput != null || target.dataset?.characterIconInput != null) {
+    void updateVaultFileSuggestions(target, { force: true });
+    return;
+  }
+
+  if (target.dataset?.characterImagePickerInput) {
+    void updateVaultFileSuggestions(target, { force: true });
     return;
   }
 
@@ -12896,6 +14591,11 @@ function handleInput(event) {
 
   if (target.dataset.characterField) {
     setCharacterField(target.dataset.characterId, target.dataset.characterField, target.value, false);
+    return;
+  }
+
+  if (target.dataset.characterExtraPart) {
+    setCharacterExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex), target.dataset.characterExtraPart, target.value, false);
     return;
   }
 
@@ -13032,6 +14732,19 @@ function handleChange(event) {
   const target = event.target;
   if (!isNarrativeCanvasTarget(target)) return;
 
+  if (target.dataset?.nodeVaultSizeSlider != null) {
+    setNodeVaultPreviewSize(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex), target.value, true);
+    commitFocusedEdit(target);
+    return;
+  }
+
+  if (target.hasAttribute?.("data-codex-local-image-input")) {
+    const files = [...(target.files || [])];
+    target.value = "";
+    void importLocalCodexImages(target.dataset.characterId, files);
+    return;
+  }
+
   if (target.hasAttribute?.("data-document-source")) {
     state.documentDraft = target.value;
     state.documentDraftFormat = state.documentFormat;
@@ -13058,6 +14771,11 @@ function handleChange(event) {
     setCharacterField(target.dataset.characterId, target.dataset.characterField, target.value, true);
     commitFocusedEdit(target);
     finishNodeTitleReferenceEdit(target);
+    return;
+  }
+  if (target.dataset.characterExtraPart) {
+    setCharacterExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex), target.dataset.characterExtraPart, target.value, true);
+    commitFocusedEdit(target);
     return;
   }
   if (target.dataset.variableField) {
@@ -13253,8 +14971,59 @@ function handleKeyDown(event) {
     if (!state.aiBusy) void sendAiMessage();
     return;
   }
+  if (handleVaultFileSuggestionKeyDown(event)) return;
   if (handleMentionKeyDown(event)) return;
   if (handleDocumentSourceKeyDown(event)) return;
+  if (handleCodexTagKeyDown(event)) return;
+  if (handleCastEntryPickerKeyDown(event)) return;
+  if (event.target?.hasAttribute?.("data-codex-template-input") && event.key === "Enter") {
+    event.preventDefault();
+    addCodexTemplateField();
+    return;
+  }
+  if (event.target?.dataset?.nodeCastDrag && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    const fromIndex = Number(event.target.dataset.nodeCastDrag);
+    const direction = event.key === "ArrowUp" ? -1 : 1;
+    const cast = normalizeNodeCast(getNode(state.selectedNodeId)?.cast);
+    const targetIndex = fromIndex + direction;
+    if (Number.isInteger(fromIndex) && targetIndex >= 0 && targetIndex < cast.length) {
+      const historyBefore = getHistorySnapshot();
+      if (moveNodeCastReference(fromIndex, targetIndex, direction < 0 ? "before" : "after")) {
+        commitHistoryFromSnapshot(historyBefore);
+        runAfterRender(() => dom.nodePanel?.querySelector(`[data-node-cast-drag="${targetIndex}"]`)?.focus?.({ preventScroll: true }));
+      }
+    }
+    event.preventDefault();
+    return;
+  }
+  if (event.target?.dataset?.codexVaultDrag != null && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    const fromIndex = Number(event.target.dataset.codexVaultDrag);
+    const characterId = event.target.dataset.characterId;
+    const direction = event.key === "ArrowUp" ? -1 : 1;
+    const targetIndex = fromIndex + direction;
+    const historyBefore = getHistorySnapshot();
+    if (moveCodexVaultFileReference(characterId, fromIndex, targetIndex, direction < 0 ? "before" : "after")) {
+      commitHistoryFromSnapshot(historyBefore);
+      runAfterRender(() => dom.charactersPanel?.querySelector(`[data-codex-vault-drag="${targetIndex}"]`)?.focus?.({ preventScroll: true }));
+    }
+    event.preventDefault();
+    return;
+  }
+  if (event.target?.dataset?.nodeVaultDrag && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    const fromIndex = Number(event.target.dataset.nodeVaultDrag);
+    const direction = event.key === "ArrowUp" ? -1 : 1;
+    const references = getNodeVaultFiles(getNode(state.selectedNodeId));
+    const targetIndex = fromIndex + direction;
+    if (Number.isInteger(fromIndex) && targetIndex >= 0 && targetIndex < references.length) {
+      const historyBefore = getHistorySnapshot();
+      if (moveNodeVaultFileReference(fromIndex, targetIndex, direction < 0 ? "before" : "after")) {
+        commitHistoryFromSnapshot(historyBefore);
+        runAfterRender(() => dom.nodePanel?.querySelector(`[data-node-vault-drag="${targetIndex}"]`)?.focus?.({ preventScroll: true }));
+      }
+    }
+    event.preventDefault();
+    return;
+  }
   if (event.target.dataset?.canvasChoiceOption) {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -13328,10 +15097,22 @@ function updateMentionFromTarget(target) {
   }
   const query = match[2] || "";
   const atOffset = caret - query.length - 1;
-  const characters = getCharacters();
-  const filtered = query
-    ? characters.filter((character) => (character.name || "").toLowerCase().includes(query.toLowerCase()))
-    : characters;
+  const entries = getCharacters();
+  const needle = query.toLowerCase();
+  const filtered = (query
+    ? entries.filter((entry) => (entry.name || "").toLowerCase().includes(needle))
+    : entries)
+    .slice()
+    .sort((a, b) => {
+      const aName = String(a.name || "").toLowerCase();
+      const bName = String(b.name || "").toLowerCase();
+      const aPrefix = needle && aName.startsWith(needle) ? 0 : 1;
+      const bPrefix = needle && bName.startsWith(needle) ? 0 : 1;
+      return aPrefix - bPrefix
+        || CODEX_KINDS.indexOf(a.kind) - CODEX_KINDS.indexOf(b.kind)
+        || aName.localeCompare(bName);
+    })
+    .slice(0, 60);
   if (!filtered.length) {
     hideMentionPopover();
     return;
@@ -13340,7 +15121,7 @@ function updateMentionFromTarget(target) {
     target,
     atOffset,
     queryLength: query.length,
-    characters: filtered,
+    entries: filtered,
     activeIndex: 0
   };
   renderMentionPopover();
@@ -13349,11 +15130,11 @@ function updateMentionFromTarget(target) {
 
 function renderMentionPopover() {
   if (!dom.mentionPopover || !state.mention) return;
-  const { characters, activeIndex } = state.mention;
-  dom.mentionPopover.innerHTML = characters.map((character, index) => `
+  const { entries, activeIndex } = state.mention;
+  dom.mentionPopover.innerHTML = entries.map((entry, index) => `
     <button type="button" class="mention-option ${index === activeIndex ? "active" : ""}" data-mention-index="${index}" role="option">
-      <strong>${escapeHtml(character.name || "Unnamed")}</strong>
-      ${character.role ? `<small>${escapeHtml(character.role)}</small>` : ""}
+      <span class="mention-option-main"><strong>${escapeHtml(entry.name || "Unnamed")}</strong>${entry.role ? `<small>${escapeHtml(entry.role)}</small>` : ""}</span>
+      <span class="mention-option-kind" data-codex-kind="${escapeAttr(entry.kind)}">${escapeHtml(t(entry.kind))}</span>
     </button>
   `).join("");
   dom.mentionPopover.hidden = false;
@@ -13410,16 +15191,16 @@ function handleMentionKeyDown(event) {
   }
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     const dir = event.key === "ArrowDown" ? 1 : -1;
-    const length = state.mention.characters.length;
+    const length = state.mention.entries.length;
     state.mention.activeIndex = (state.mention.activeIndex + dir + length) % length;
     renderMentionPopover();
     event.preventDefault();
     return true;
   }
   if (event.key === "Enter" || event.key === "Tab") {
-    const character = state.mention.characters[state.mention.activeIndex];
-    if (character) {
-      insertMention(character);
+    const entry = state.mention.entries[state.mention.activeIndex];
+    if (entry) {
+      insertMention(entry);
       event.preventDefault();
       return true;
     }
@@ -13427,13 +15208,13 @@ function handleMentionKeyDown(event) {
   return false;
 }
 
-function insertMention(character) {
+function insertMention(entry) {
   if (!state.mention) return;
   const { target, atOffset, queryLength } = state.mention;
   const value = target.value || "";
   const before = value.slice(0, atOffset);
   const after = value.slice(atOffset + 1 + queryLength);
-  const insertion = `@${character.name || ""}`;
+  const insertion = `@${entry.name || ""}`;
   target.value = `${before}${insertion} ${after}`;
   const caret = (before + insertion + " ").length;
   if (typeof target.setSelectionRange === "function") target.setSelectionRange(caret, caret);
@@ -13447,8 +15228,8 @@ function insertMention(character) {
     const node = getNode(target.dataset.nodeId || state.selectedNodeId);
     if (node && !isEventSheetNode(node)) {
       const cast = normalizeNodeCast(node.cast);
-      if (!cast.some((entry) => entry.characterId === character.id && entry.role === "Mentioned")) {
-        cast.push({ characterId: character.id, role: "Mentioned" });
+      if (!cast.some((link) => link.characterId === entry.id && link.role === "Mentioned")) {
+        cast.push({ characterId: entry.id, role: "Mentioned" });
         node.cast = cast;
         if (target.dataset.inlineNodeField) {
           invalidateCharacterRenderContext();
@@ -13466,6 +15247,54 @@ function insertMention(character) {
 }
 
 function handleStoryPointerDown(event) {
+  const castDragHandle = event.target.closest && event.target.closest("[data-node-cast-drag]");
+  if (castDragHandle && dom.nodePanel?.contains(castDragHandle)) {
+    const index = Number(castDragHandle.dataset.nodeCastDrag);
+    const node = getNode(state.selectedNodeId);
+    if (!node || !Number.isInteger(index) || !normalizeNodeCast(node.cast)[index]) return;
+    state.nodeCastDrag = {
+      nodeId: node.id,
+      fromIndex: index,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      historyBefore: getHistorySnapshot()
+    };
+    event.preventDefault();
+    return;
+  }
+  const codexVaultHandle = event.target.closest && event.target.closest("[data-codex-vault-drag]");
+  if (codexVaultHandle && dom.charactersPanel?.contains(codexVaultHandle)) {
+    const index = Number(codexVaultHandle.dataset.codexVaultDrag);
+    const characterId = codexVaultHandle.dataset.characterId;
+    if (!getCharacterById(characterId) || !Number.isInteger(index)) return;
+    state.codexVaultFileDrag = {
+      characterId,
+      fromIndex: index,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      historyBefore: getHistorySnapshot()
+    };
+    event.preventDefault();
+    return;
+  }
+  const vaultDragHandle = event.target.closest && event.target.closest("[data-node-vault-drag]");
+  if (vaultDragHandle && dom.nodePanel?.contains(vaultDragHandle)) {
+    const index = Number(vaultDragHandle.dataset.nodeVaultDrag);
+    const node = getNode(state.selectedNodeId);
+    if (!node || !Number.isInteger(index) || !getNodeVaultFiles(node)[index]) return;
+    state.nodeVaultFileDrag = {
+      nodeId: node.id,
+      fromIndex: index,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      historyBefore: getHistorySnapshot()
+    };
+    event.preventDefault();
+    return;
+  }
   const columnResizeHandle = event.target.closest && event.target.closest("[data-event-column-resize]");
   if (columnResizeHandle && dom.eventsPanel?.contains(columnResizeHandle)) {
     const key = columnResizeHandle.dataset.eventColumnResize;
@@ -13626,6 +15455,18 @@ function markEventRowDropPlacement(placement) {
 }
 
 function handleStoryPointerMove(event) {
+  if (state.nodeCastDrag) {
+    handleNodeCastPointerMove(event);
+    return;
+  }
+  if (state.nodeVaultFileDrag) {
+    handleNodeVaultFilePointerMove(event);
+    return;
+  }
+  if (state.codexVaultFileDrag) {
+    handleCodexVaultFilePointerMove(event);
+    return;
+  }
   if (state.eventColumnResize) {
     handleEventColumnResizeMove(event);
     return;
@@ -13646,6 +15487,18 @@ function handleStoryPointerMove(event) {
 }
 
 function handleStoryPointerUp(event) {
+  if (state.nodeCastDrag) {
+    handleNodeCastPointerUp(event);
+    return;
+  }
+  if (state.nodeVaultFileDrag) {
+    handleNodeVaultFilePointerUp(event);
+    return;
+  }
+  if (state.codexVaultFileDrag) {
+    handleCodexVaultFilePointerUp(event);
+    return;
+  }
   if (state.eventColumnResize) {
     handleEventColumnResizeUp(event);
     return;
@@ -13663,6 +15516,167 @@ function handleStoryPointerUp(event) {
   if (placement && canMoveStoryNode(drag.id, placement)) {
     moveStoryNode(drag.id, placement);
   }
+}
+
+function handleNodeCastPointerMove(event) {
+  const drag = state.nodeCastDrag;
+  if (!drag) return;
+  const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+  if (distance < 5 && !drag.active) return;
+  drag.active = true;
+  const placement = getNodeCastDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+  clearNodeCastDropMarkers();
+  if (placement) {
+    const row = dom.nodePanel?.querySelector(`[data-node-cast-row-index="${placement.targetIndex}"]`);
+    row?.classList.add(placement.placement === "after" ? "cast-row-drop-after" : "cast-row-drop-before");
+  }
+  event.preventDefault();
+}
+
+function handleNodeCastPointerUp(event) {
+  const drag = state.nodeCastDrag;
+  if (!drag) return;
+  const placement = drag.active && event.type !== "pointercancel"
+    ? getNodeCastDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+    : null;
+  state.nodeCastDrag = null;
+  clearNodeCastDropMarkers();
+  if (!placement || drag.nodeId !== state.selectedNodeId) return;
+  if (moveNodeCastReference(drag.fromIndex, placement.targetIndex, placement.placement)) {
+    commitHistoryFromSnapshot(drag.historyBefore);
+  }
+}
+
+function handleNodeVaultFilePointerMove(event) {
+  const drag = state.nodeVaultFileDrag;
+  if (!drag) return;
+  const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+  if (distance < 5 && !drag.active) return;
+  drag.active = true;
+  const placement = getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+  clearNodeVaultFileDropMarkers();
+  if (placement) {
+    const row = dom.nodePanel?.querySelector(`[data-node-vault-row-index="${placement.targetIndex}"]`);
+    row?.classList.add(placement.placement === "after" ? "cast-row-drop-after" : "cast-row-drop-before");
+  }
+  event.preventDefault();
+}
+
+function handleNodeVaultFilePointerUp(event) {
+  const drag = state.nodeVaultFileDrag;
+  if (!drag) return;
+  const placement = drag.active && event.type !== "pointercancel"
+    ? getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+    : null;
+  state.nodeVaultFileDrag = null;
+  clearNodeVaultFileDropMarkers();
+  if (!placement || drag.nodeId !== state.selectedNodeId) return;
+  if (moveNodeVaultFileReference(drag.fromIndex, placement.targetIndex, placement.placement)) {
+    commitHistoryFromSnapshot(drag.historyBefore);
+  }
+}
+
+function handleCodexVaultFilePointerMove(event) {
+  const drag = state.codexVaultFileDrag;
+  if (!drag) return;
+  const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+  if (distance < 5 && !drag.active) return;
+  drag.active = true;
+  const placement = getCodexVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+  clearCodexVaultFileDropMarkers();
+  if (placement) {
+    const row = dom.charactersPanel?.querySelector(`[data-codex-vault-row-index="${placement.targetIndex}"]`);
+    row?.classList.add(placement.placement === "after" ? "cast-row-drop-after" : "cast-row-drop-before");
+  }
+  event.preventDefault();
+}
+
+function handleCodexVaultFilePointerUp(event) {
+  const drag = state.codexVaultFileDrag;
+  if (!drag) return;
+  const placement = drag.active && event.type !== "pointercancel"
+    ? getCodexVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+    : null;
+  state.codexVaultFileDrag = null;
+  clearCodexVaultFileDropMarkers();
+  if (!placement) return;
+  if (moveCodexVaultFileReference(drag.characterId, drag.fromIndex, placement.targetIndex, placement.placement)) {
+    commitHistoryFromSnapshot(drag.historyBefore);
+  }
+}
+
+function getCodexVaultFileDropPlacement(x, y, fromIndex) {
+  const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+  const target = root.elementFromPoint(x, y);
+  const row = target?.closest?.("[data-codex-vault-row-index]");
+  if (!row || !dom.charactersPanel?.contains(row)) return null;
+  const targetIndex = Number(row.dataset.codexVaultRowIndex);
+  if (!Number.isInteger(targetIndex) || targetIndex === fromIndex) return null;
+  const rect = row.getBoundingClientRect();
+  const placement = y - rect.top > rect.height / 2 ? "after" : "before";
+  return { targetIndex, placement };
+}
+
+function clearCodexVaultFileDropMarkers() {
+  dom.charactersPanel?.querySelectorAll("[data-codex-vault-row-index].cast-row-drop-before, [data-codex-vault-row-index].cast-row-drop-after")
+    .forEach((row) => row.classList.remove("cast-row-drop-before", "cast-row-drop-after"));
+}
+
+function moveCodexVaultFileReference(characterId, fromIndex, targetIndex, placement = "before") {
+  const character = getCharacterById(characterId);
+  if (!character || !Number.isInteger(fromIndex) || !Number.isInteger(targetIndex)) return false;
+  const files = normalizeCodexVaultFiles(character.vaultFiles);
+  if (fromIndex < 0 || fromIndex >= files.length || targetIndex < 0 || targetIndex >= files.length || fromIndex === targetIndex) return false;
+  const insertionBeforeRemoval = targetIndex + (placement === "after" ? 1 : 0);
+  const [entry] = files.splice(fromIndex, 1);
+  const insertionIndex = clamp(insertionBeforeRemoval - (fromIndex < insertionBeforeRemoval ? 1 : 0), 0, files.length);
+  if (insertionIndex === fromIndex) {
+    files.splice(fromIndex, 0, entry);
+    return false;
+  }
+  files.splice(insertionIndex, 0, entry);
+  character.vaultFiles = files;
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderWorkspaceFile();
+  setStatus(t("Linked files reordered."));
+  return true;
+}
+
+function getNodeVaultFileDropPlacement(x, y, fromIndex) {
+  const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+  const target = root.elementFromPoint(x, y);
+  const row = target?.closest?.("[data-node-vault-row-index]");
+  if (!row || !dom.nodePanel?.contains(row)) return null;
+  const targetIndex = Number(row.dataset.nodeVaultRowIndex);
+  if (!Number.isInteger(targetIndex)) return null;
+  if (targetIndex === fromIndex) return null;
+  const rect = row.getBoundingClientRect();
+  const placement = y - rect.top > rect.height / 2 ? "after" : "before";
+  return { targetIndex, placement };
+}
+
+function clearNodeVaultFileDropMarkers() {
+  dom.nodePanel?.querySelectorAll("[data-node-vault-row-index].cast-row-drop-before, [data-node-vault-row-index].cast-row-drop-after")
+    .forEach((row) => row.classList.remove("cast-row-drop-before", "cast-row-drop-after"));
+}
+
+function getNodeCastDropPlacement(x, y, fromIndex) {
+  const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+  const target = root.elementFromPoint(x, y);
+  const row = target?.closest?.("[data-node-cast-row-index]");
+  if (!row || !dom.nodePanel?.contains(row)) return null;
+  const targetIndex = Number(row.dataset.nodeCastRowIndex);
+  if (!Number.isInteger(targetIndex)) return null;
+  if (targetIndex === fromIndex) return null;
+  const rect = row.getBoundingClientRect();
+  const placement = y - rect.top > rect.height / 2 ? "after" : "before";
+  return { targetIndex, placement };
+}
+
+function clearNodeCastDropMarkers() {
+  dom.nodePanel?.querySelectorAll(".cast-row-drop-before, .cast-row-drop-after")
+    .forEach((row) => row.classList.remove("cast-row-drop-before", "cast-row-drop-after"));
 }
 
 function getStoryDropPlacementFromPoint(x, y) {
@@ -13752,6 +15766,7 @@ function isNarrativeCanvasTarget(target) {
     || dom.playbookHelpDialog?.contains(target)
     || dom.playRuleDialog?.contains(target)
     || dom.nodeRequiredDialog?.contains(target)
+    || dom.visionBoardDialog?.contains(target)
     || dom.aiFloatingWindow?.contains(target)
   );
 }
@@ -13819,6 +15834,13 @@ function getCanvasNodeIdFromTargetForClick(target, event = null) {
 
 function getNarrativeCanvasScopeForTarget(target) {
   if (!target?.closest) return null;
+  // Shadow mount: the app tree lives inside a shadow root on the plugin host element.
+  const rootNode = target.getRootNode?.();
+  if (typeof ShadowRoot === "function" && rootNode instanceof ShadowRoot
+    && rootNode.host?.classList?.contains("narrative-canvas-plugin-host")
+    && rootNode.querySelector?.(".app-shell")) {
+    return rootNode;
+  }
   const host = target.closest(".narrative-canvas-plugin-host");
   if (host?.querySelector?.(".app-shell")) return host;
   if (dom.root?.contains(target)) return dom.scope || document;
@@ -13831,7 +15853,8 @@ function syncDomScopeForEventTarget(target) {
   const nextScope = getNarrativeCanvasScopeForTarget(target);
   if (!nextScope || nextScope === dom.scope) return;
   eventController?.abort();
-  if (window.NarrativeCanvasHost && nextScope.classList?.contains("narrative-canvas-plugin-host")) {
+  const scopeHostElement = typeof ShadowRoot === "function" && nextScope instanceof ShadowRoot ? nextScope.host : nextScope;
+  if (window.NarrativeCanvasHost && scopeHostElement?.classList?.contains("narrative-canvas-plugin-host")) {
     window.NarrativeCanvasHost.root = nextScope;
   }
   bindDom(nextScope);
@@ -14902,19 +16925,29 @@ function applyNodeTypeDefaults(node) {
   }
 }
 
-function addCharacter() {
+function addCharacter(kind = "Character", codexMode = false) {
   const characters = getCharacters();
   const wasEmpty = characters.length === 0;
-  const nextNumber = characters.length + 1;
+  const normalizedKind = normalizeCodexKind(kind);
+  const nextNumber = characters.filter((entry) => entry.kind === normalizedKind).length + 1;
   const character = {
     id: nextId("c", characters),
-    name: uniqueCharacterName(`Character ${nextNumber}`),
+    name: uniqueCharacterName(`${normalizedKind} ${nextNumber}`),
+    kind: normalizedKind,
     role: "",
     voice: "",
-    notes: ""
+    tags: "",
+    notes: "",
+    extraFields: [],
+    codexFile: "",
+    images: [],
+    imageFile: "",
+    imagePreview: false
   };
+  applyCodexTemplateToCharacter(character);
   characters.push(character);
   state.project.characters = characters;
+  state.codexSelectedEntryId = character.id;
   invalidateCharacterRenderContext();
   if (wasEmpty) {
     state.characterSearch = "";
@@ -14926,11 +16959,22 @@ function addCharacter() {
   if (shouldSwitchToCharacters) renderDocumentFileSwitch();
   else renderCharacterListSurfaces();
   revealCharacterCard(character.id);
-  setStatus("Character added.");
+  setStatus(codexMode ? t("Library entry added.") : t("Character added."));
+}
+
+function addCodexEntry() {
+  const kind = normalizeCodexKindFilter(state.codexKindFilter) === CODEX_ALL_FILTER
+    ? "Character"
+    : normalizeCodexKind(state.codexKindFilter);
+  state.characterSearch = "";
+  state.codexTagFilter = "";
+  state.codexKindFilter = kind;
+  if (dom.characterSearchInput) dom.characterSearchInput.value = "";
+  addCharacter(kind, true);
 }
 
 function revealCharacterCard(id) {
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     const card = dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(id)}"]`);
     if (!card) return;
     card.scrollIntoView?.({ behavior: "smooth", block: "center" });
@@ -14943,13 +16987,22 @@ function deleteCharacter(id) {
   const characters = getCharacters();
   const character = characters.find((item) => item.id === id);
   state.project.characters = characters.filter((item) => item.id !== id);
+  if (state.codexSelectedEntryId === id) state.codexSelectedEntryId = "";
   invalidateCharacterRenderContext();
   state.project.nodes.forEach((node) => {
     node.cast = normalizeNodeCast(node.cast).filter((entry) => entry.characterId !== id);
     if (!node.cast.length) delete node.cast;
   });
   if (state.characterFocusId === id || !getCharacterById(state.characterFocusId)) state.characterFocusId = null;
-  state.characterBacklinkExpandedIds?.delete(id);
+  if (state.characterBacklinkGroupCollapsedKeys instanceof Set) {
+    [...state.characterBacklinkGroupCollapsedKeys].forEach((key) => {
+      try {
+        if (JSON.parse(key)?.[0] === id) state.characterBacklinkGroupCollapsedKeys.delete(key);
+      } catch (_error) {
+        state.characterBacklinkGroupCollapsedKeys.delete(key);
+      }
+    });
+  }
   if (!state.project.characters.length) {
     state.characterSearch = "";
     resetDocumentRenderLimit("characters");
@@ -14957,13 +17010,14 @@ function deleteCharacter(id) {
   state.activeFileId = "characters";
   setProjectDirty(true);
   renderCharacterListSurfaces();
-  setStatus(character ? `${character.name} deleted.` : "Character deleted.");
+  setStatus(character ? `${character.name} deleted.` : "Library entry deleted.");
 }
 
 function hideCharacter(id) {
   const character = getCharacters().find((item) => item.id === id);
   if (!character) return;
   character.hidden = true;
+  if (state.codexSelectedEntryId === id) state.codexSelectedEntryId = "";
   if (state.characterFocusId === id) state.characterFocusId = null;
   invalidateCharacterRenderContext();
   state.activeFileId = "characters";
@@ -14997,7 +17051,7 @@ function showAllCharacters() {
   state.activeFileId = "characters";
   setProjectDirty(true);
   renderCharacterListSurfaces();
-  setStatus("All characters visible.");
+  setStatus("All entries visible.");
 }
 
 function setCharacterField(id, field, value, rerender) {
@@ -15008,13 +17062,13 @@ function setCharacterField(id, field, value, rerender) {
     const previousName = character.name;
     const nextName = normalizeOptionalString(value).trim();
     if (!nextName) {
-      setStatus("Character name is required.");
+      setStatus("Entry name is required.");
       if (rerender) renderCharacterListSurfaces();
       return;
     }
     character.name = nextName;
     state.project.nodes.forEach((node) => {
-      if (isDialogNode(node) && node.title === previousName) {
+      if (character.kind === "Character" && isDialogNode(node) && node.title === previousName) {
         node.title = nextName;
       }
     });
@@ -15027,11 +17081,167 @@ function setCharacterField(id, field, value, rerender) {
       renderStoryPanel();
     }
   } else {
-    character[field] = value;
+    if (field === "kind") {
+      const nextKind = normalizeCodexKind(value);
+      character.kind = nextKind;
+      applyCodexTemplateToCharacter(character);
+      state.project.nodes.forEach((node) => {
+        const cast = normalizeNodeCast(node.cast);
+        let changed = false;
+        cast.forEach((entry) => {
+          if (entry.characterId !== character.id) return;
+          if ((CODEX_RELATIONS_BY_KIND[nextKind] || []).includes(entry.role)) return;
+          entry.role = getDefaultCodexRelation(nextKind);
+          changed = true;
+        });
+        if (changed) node.cast = normalizeNodeCast(cast);
+      });
+    } else if (field === "imageFile") {
+      syncCharacterImageAliases(character, normalizeVisionBoardImages([], value));
+    } else if (field === "imagePreview") {
+      character.imagePreview = Boolean(value);
+    } else {
+      character[field] = value;
+    }
   }
   setProjectDirty(true);
   if (rerender) updateStatus();
   if (rerender) renderWorkspaceFile();
+}
+
+function setCharacterExtraField(id, index, part, value, rerender) {
+  const character = getCharacters().find((item) => item.id === id);
+  if (!character) return;
+  const fields = normalizeCodexExtraFields(character.extraFields);
+  if (!Number.isInteger(index) || index < 0 || index >= fields.length) return;
+  if (part === "key") {
+    const nextKey = String(value || "").trim();
+    if (CODEX_RESERVED_FRONTMATTER_KEYS.has(nextKey.toLowerCase())) {
+      setStatus(t("Field name {key} is reserved.", { key: nextKey }));
+      if (rerender) renderWorkspaceFile();
+      return;
+    }
+    fields[index].key = nextKey;
+  } else {
+    fields[index].value = String(value ?? "");
+  }
+  character.extraFields = fields;
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  if (rerender) renderWorkspaceFile();
+}
+
+function addCodexExtraField(id) {
+  const character = getCharacters().find((item) => item.id === id);
+  if (!character) return;
+  const fields = normalizeCodexExtraFields(character.extraFields);
+  fields.push({ key: "", value: "" });
+  character.extraFields = fields;
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderWorkspaceFile();
+  runAfterRender(() => {
+    const inputs = dom.charactersPanel?.querySelectorAll(`[data-character-id="${CSS.escape(id)}"][data-character-extra-part="key"]`);
+    inputs?.[inputs.length - 1]?.focus?.();
+  });
+}
+
+function addCodexKind() {
+  showGenericTextInput({
+    kicker: "Library",
+    title: t("Add category"),
+    label: t("Category name"),
+    confirmLabel: t("Add"),
+    onConfirm: (value) => {
+      const name = String(value || "").trim();
+      if (!name) return;
+      const kinds = getCodexKindsList();
+      if (name.toLowerCase() === "all" || kinds.some((kind) => kind.toLowerCase() === name.toLowerCase())) {
+        setStatus(t("Category {name} already exists.", { name }));
+        return;
+      }
+      state.project.customCodexKinds = normalizeCustomCodexKinds([...(state.project.customCodexKinds || []), name]);
+      state.codexKindFilter = name;
+      setProjectDirty(true);
+      renderCharactersPage();
+      setStatus(t("Category {name} added.", { name }));
+    }
+  });
+}
+
+function removeCodexKind(kindValue) {
+  const name = String(kindValue || "").trim();
+  if (!name) return;
+  const count = getCharacters().filter((entry) => entry.kind.toLowerCase() === name.toLowerCase()).length;
+  if (count) {
+    setStatus(t("Category {name} still has {count} entries. Move or remove them first.", { name, count }));
+    return;
+  }
+  state.project.customCodexKinds = normalizeCustomCodexKinds(
+    (state.project.customCodexKinds || []).filter((kind) => String(kind).toLowerCase() !== name.toLowerCase())
+  );
+  if (String(state.codexKindFilter).toLowerCase() === name.toLowerCase()) state.codexKindFilter = CODEX_ALL_FILTER;
+  setProjectDirty(true);
+  renderCharactersPage();
+  setStatus(t("Category {name} removed.", { name }));
+}
+
+function addCodexTemplateField() {
+  const kind = normalizeCodexKindFilter(state.codexKindFilter);
+  if (kind === CODEX_ALL_FILTER) return;
+  const input = dom.charactersPanel?.querySelector("[data-codex-template-input]");
+  const key = String(input?.value || "").trim();
+  if (!key) {
+    input?.focus?.({ preventScroll: true });
+    return;
+  }
+  if (CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase())) {
+    setStatus(t("Field name {key} is reserved.", { key }));
+    return;
+  }
+  const templates = normalizeCodexFieldTemplates(state.project.codexFieldTemplates);
+  if (templates[kind].some((existing) => existing.toLowerCase() === key.toLowerCase())) {
+    setStatus(t("Field {key} already in the template.", { key }));
+    return;
+  }
+  templates[kind] = [...templates[kind], key];
+  state.project.codexFieldTemplates = templates;
+  let updated = 0;
+  getCharacters().forEach((character) => {
+    if (character.kind !== kind) return;
+    if (applyCodexTemplateToCharacter(character)) updated += 1;
+  });
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderCharactersPage();
+  runAfterRender(() => dom.charactersPanel?.querySelector("[data-codex-template-input]")?.focus?.({ preventScroll: true }));
+  setStatus(t("Field {key} added to {count} entries.", { key, count: updated }));
+}
+
+function removeCodexTemplateField(keyValue) {
+  const kind = normalizeCodexKindFilter(state.codexKindFilter);
+  if (kind === CODEX_ALL_FILTER) return;
+  const key = String(keyValue || "").trim();
+  const templates = normalizeCodexFieldTemplates(state.project.codexFieldTemplates);
+  const next = templates[kind].filter((existing) => existing.toLowerCase() !== key.toLowerCase());
+  if (next.length === templates[kind].length) return;
+  templates[kind] = next;
+  state.project.codexFieldTemplates = templates;
+  setProjectDirty(true);
+  renderCharactersPage();
+  setStatus(t("Field {key} removed from the template. Entry values are kept.", { key }));
+}
+
+function removeCodexExtraField(id, index) {
+  const character = getCharacters().find((item) => item.id === id);
+  if (!character) return;
+  const fields = normalizeCodexExtraFields(character.extraFields);
+  if (!Number.isInteger(index) || index < 0 || index >= fields.length) return;
+  fields.splice(index, 1);
+  character.extraFields = fields;
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderWorkspaceFile();
 }
 
 function focusCharacter(id) {
@@ -15049,23 +17259,24 @@ function openCharacterSearch(id) {
   const character = getCharacters().find((item) => item.id === id);
   if (!character) return;
   state.characterFocusId = null;
+  state.codexSelectedEntryId = "";
   state.characterSearch = character.name;
   state.characterSearchIndex = -1;
   resetDocumentRenderLimit("characters");
   state.activeFileId = "characters";
   renderDocumentFileSwitch();
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     dom.characterSearchInput?.focus?.({ preventScroll: true });
     dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(character.id)}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
   });
-  setStatus(t("Search character: {name}", { name: character.name }));
+  setStatus(t("Search library: {name}", { name: character.name }));
 }
 
 function clearCharacterFocus() {
   state.characterFocusId = null;
   invalidateDocumentSurfaces("characters");
   renderAll();
-  setStatus("Character focus cleared.");
+  setStatus("Library focus cleared.");
 }
 
 function clearCharacterSearch() {
@@ -15073,40 +17284,90 @@ function clearCharacterSearch() {
   resetDocumentRenderLimit("characters");
   if (dom.characterSearchInput) dom.characterSearchInput.value = "";
   renderCharacterGridForSearch();
-  setStatus("Character search cleared.");
+  setStatus("Library search cleared.");
 }
 
-function toggleCharacterBacklinks(id) {
-  if (!id || !getCharacterById(id)) return;
-  if (!state.characterBacklinkExpandedIds || !(state.characterBacklinkExpandedIds instanceof Set)) {
-    state.characterBacklinkExpandedIds = new Set();
+function setCodexKindFilter(value) {
+  state.codexKindFilter = normalizeCodexKindFilter(value);
+  state.codexTagFilter = "";
+  resetDocumentRenderLimit("characters");
+  renderCharactersPage();
+  setStatus(state.codexKindFilter === CODEX_ALL_FILTER
+    ? t("Library category filter cleared.")
+    : `${t("Category")}: ${t(state.codexKindFilter)}`);
+}
+
+function setCodexTagFilter(value) {
+  const tag = normalizeOptionalString(value).trim();
+  if (!tag) return clearCodexTagFilter();
+  state.codexTagFilter = tag;
+  resetDocumentRenderLimit("characters");
+  renderCharactersPage();
+  setStatus(`${t("Tags")}: ${tag}`);
+}
+
+function clearCodexTagFilter() {
+  if (!state.codexTagFilter) return;
+  state.codexTagFilter = "";
+  resetDocumentRenderLimit("characters");
+  renderCharactersPage();
+  setStatus(t("Library tag filter cleared."));
+}
+
+function openCodexEntryDetail(id) {
+  const character = getCharacters().find((entry) => entry.id === id);
+  if (!character) return;
+  state.codexSelectedEntryId = id;
+  state.codexImagePickerCharacterId = "";
+  renderCharactersPage();
+  runAfterRender(() => dom.charactersPanel?.scrollTo?.({ top: 0, behavior: "smooth" }));
+  setStatus(t("Open entry: {name}", { name: character.name }));
+}
+
+function closeCodexEntryDetail() {
+  state.codexSelectedEntryId = "";
+  state.codexImagePickerCharacterId = "";
+  renderCharactersPage();
+  setStatus(t("All entries"));
+}
+
+function toggleCharacterBacklinkGroup(characterId, groupId) {
+  if (!characterId || !groupId || !getCharacterById(characterId)) return;
+  if (!(state.characterBacklinkGroupCollapsedKeys instanceof Set)) {
+    state.characterBacklinkGroupCollapsedKeys = new Set();
   }
-  if (state.characterBacklinkExpandedIds.has(id)) {
-    state.characterBacklinkExpandedIds.delete(id);
-    setStatus("Character links collapsed.");
-  } else {
-    state.characterBacklinkExpandedIds.add(id);
-    setStatus("Character links expanded.");
-  }
+  const key = getCharacterBacklinkGroupKey(characterId, groupId);
+  const expanded = state.characterBacklinkGroupCollapsedKeys.has(key);
+  if (expanded) state.characterBacklinkGroupCollapsedKeys.delete(key);
+  else state.characterBacklinkGroupCollapsedKeys.add(key);
   renderCharacterGridForSearch();
+  runAfterRender(() => {
+    const selector = `[data-character-id="${CSS.escape(characterId)}"][data-character-backlink-group="${CSS.escape(groupId)}"]`;
+    dom.charactersPanel?.querySelector(selector)?.focus?.({ preventScroll: true });
+  });
+  setStatus(expanded ? "Library links expanded." : "Library links collapsed.");
 }
 
 function addNodeCast() {
   const node = getNode(state.selectedNodeId);
   if (!node) return;
-  const characterId = dom.nodePanel?.querySelector("[data-new-cast-character]")?.value || "";
+  const characterId = dom.nodePanel?.querySelector("[data-cast-entry-context='new']")?.dataset?.castEntryId || "";
   if (!characterId) {
-    setStatus("Select a character first.");
+    setStatus("Select a library entry first.");
     return;
   }
-  const role = normalizeCastRole(dom.nodePanel?.querySelector("[data-new-cast-role]")?.value);
+  const codexEntry = getCharacterById(characterId);
+  if (!codexEntry) return;
+  const requestedRole = dom.nodePanel?.querySelector("[data-new-cast-role]")?.value;
+  const allowedRoles = getCodexRelationsForEntry(characterId);
+  const role = allowedRoles.includes(requestedRole) ? requestedRole : getDefaultCodexRelation(codexEntry);
   const cast = normalizeNodeCast(node.cast);
   if (!cast.some((entry) => entry.characterId === characterId && entry.role === role)) {
     cast.push({ characterId, role });
   }
   node.cast = cast;
   renderCharacterAwareSurfaces(node);
-  setStatus("Cast link added.");
+  setStatus("Library reference added.");
 }
 
 function deleteNodeCast(index) {
@@ -15118,7 +17379,7 @@ function deleteNodeCast(index) {
   if (cast.length) node.cast = cast;
   else delete node.cast;
   renderCharacterAwareSurfaces(node);
-  setStatus("Cast link removed.");
+  setStatus("Library reference removed.");
 }
 
 function setNodeCastField(index, field, value, rerender) {
@@ -15128,15 +17389,38 @@ function setNodeCastField(index, field, value, rerender) {
   const entry = cast[index];
   if (!entry) return;
   if (field === "characterId") {
-    if (!getCharacters().some((character) => character.id === value)) return;
+    const codexEntry = getCharacterById(value);
+    if (!codexEntry) return;
     entry.characterId = value;
+    if (!getCodexRelationsForEntry(value).includes(entry.role)) {
+      entry.role = getDefaultCodexRelation(codexEntry);
+    }
   }
   if (field === "role") {
-    entry.role = normalizeCastRole(value);
+    const normalizedRole = normalizeCastRole(value);
+    if (!getCodexRelationsForEntry(entry.characterId, entry.role).includes(normalizedRole)) return;
+    entry.role = normalizedRole;
   }
   node.cast = normalizeNodeCast(cast);
   setProjectDirty(true);
   renderCharacterAwareSurfaces(rerender ? node : null);
+}
+
+function moveNodeCastReference(fromIndex, targetIndex, placement = "before") {
+  const node = getNode(state.selectedNodeId);
+  if (!node || !Number.isInteger(fromIndex) || !Number.isInteger(targetIndex)) return false;
+  const cast = normalizeNodeCast(node.cast);
+  if (fromIndex < 0 || fromIndex >= cast.length || targetIndex < 0 || targetIndex >= cast.length || fromIndex === targetIndex) return false;
+  const insertionBeforeRemoval = targetIndex + (placement === "after" ? 1 : 0);
+  const [entry] = cast.splice(fromIndex, 1);
+  const insertionIndex = clamp(insertionBeforeRemoval - (fromIndex < insertionBeforeRemoval ? 1 : 0), 0, cast.length);
+  if (insertionIndex === fromIndex) return false;
+  cast.splice(insertionIndex, 0, entry);
+  node.cast = cast;
+  setProjectDirty(true);
+  renderCharacterAwareSurfaces(node);
+  setStatus("Library references reordered.");
+  return true;
 }
 
 function renderCharacterAwareSurfaces(nodeForPanel = null) {
@@ -15995,7 +18279,7 @@ function syncSplitDialogCast(node, sourceCast) {
   const nonSpeakerCast = (Array.isArray(sourceCast) ? sourceCast : [])
     .filter((entry) => entry?.role !== "Speaker")
     .map((entry) => cloneProject(entry));
-  const characterByName = new Map(getCharacters().map((character) => [character.name, character]));
+  const characterByName = new Map(getCastCharacters().map((character) => [character.name, character]));
   const speakerIds = new Set();
   (node.turns || []).forEach((turn) => {
     const character = characterByName.get(normalizeOptionalString(turn.speaker).trim());
@@ -16196,7 +18480,7 @@ function rerenderNodePanelAfterPointer(node) {
 
 function focusInspectorTarget(selector) {
   if (typeof document === "undefined") return;
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     const el = dom.nodePanel?.querySelector(selector);
     if (el && typeof el.focus === "function") {
       el.focus();
@@ -16434,7 +18718,7 @@ function showPlaybookChoiceEffectDraft(gateId) {
   state.activeFileId = "variables";
   state.playbookTab = "gates";
   renderPlaybookSurfaces();
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     const selector = `.effect-draft-row[data-draft-id="${CSS.escape(gateId)}"] [data-draft-field="key"]`;
     const element = dom.variablesPanel?.querySelector(selector);
     element?.focus?.({ preventScroll: true });
@@ -16628,7 +18912,7 @@ function showPlaybookActionDraft() {
   state.activeFileId = "variables";
   state.playbookTab = "actions";
   renderPlaybookSurfaces();
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     const element = dom.variablesPanel?.querySelector(`.playbook-action-draft-row [data-draft-field="target"]`);
     element?.focus?.({ preventScroll: true });
   });
@@ -17058,7 +19342,7 @@ function focusStoryNode(id) {
   state.selectedLinkId = null;
   state.panel = "story";
   renderAll();
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     const found = scrollStoryNodeIntoView(id);
     const label = node.title || getNodeDisplayId(node);
     setStatus(found
@@ -17193,14 +19477,14 @@ function focusSearchMatch(scope, match) {
   }
   if (scope === "characters") {
     focusCharacter(match);
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const card = dom.charactersPanel?.querySelector(`[data-character-card-id="${CSS.escape(match)}"]`);
       if (card?.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "center" });
     });
     return;
   }
   if (scope === "events") {
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       const row = dom.eventsPanel?.querySelector(`[data-event-row-id="${CSS.escape(match)}"]`);
       if (row?.scrollIntoView) row.scrollIntoView({ behavior: "smooth", block: "center" });
     });
@@ -17220,7 +19504,7 @@ function focusPlaybookJsonAtOffset(offset) {
   state.playbookJsonOpen = true;
   if (!wasOpen) renderVariablesPage();
   const searchInput = dom.playbookSearchInput;
-  const restoreSearchFocus = document.activeElement === searchInput;
+  const restoreSearchFocus = getScopeActiveElement() === searchInput;
   const searchCaretStart = restoreSearchFocus ? searchInput.selectionStart : null;
   const searchCaretEnd = restoreSearchFocus ? searchInput.selectionEnd : null;
   const searchDirection = restoreSearchFocus ? searchInput.selectionDirection : "none";
@@ -17261,7 +19545,7 @@ function restorePlaybookJsonSearchHighlight() {
     }
     const length = (state.playbookSearch || "").length;
     showPlaybookJsonSearchHighlight(textarea, offset, offset + Math.max(0, length));
-    if (document.activeElement === dom.playbookSearchInput) {
+    if (getScopeActiveElement() === dom.playbookSearchInput) {
       centerPlaybookJsonSearchMatch(textarea, offset);
     }
   });
@@ -17394,7 +19678,7 @@ function focusCanvasNodeForInlineEdit(id) {
   centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
   focusInlineNodeEditor(id);
   setStatus(`${node.title || getNodeDisplayId(node)} focused for editing.`);
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     focusInlineNodeEditor(id);
   });
 }
@@ -17409,7 +19693,7 @@ function focusCharacterNode(id) {
   state.panel = "story";
   renderAll();
   centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
-  requestAnimationFrame(() => {
+  runAfterRender(() => {
     scrollStoryNodeIntoView(id);
     setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
   });
@@ -17458,7 +19742,7 @@ function editNodeType(type) {
       dom.nodeTypeEventHiddenInput.closest("label").hidden = !isFrameKind(typeDef.kind);
     }
     dom.nodeTypeDialog.showModal();
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       dom.nodeTypeNameInput.focus();
       dom.nodeTypeNameInput.select();
     });
@@ -17740,6 +20024,873 @@ function setNodeField(field, value) {
     scheduleStoryPanelRender();
   }
   updateStatus();
+}
+
+function setNodeVaultFile(index, value) {
+  const node = getNode(state.selectedNodeId);
+  if (!node || !Number.isInteger(index) || index < 0) return;
+  const references = getNodeVaultFiles(node);
+  const previousReference = references[index]?.path || "";
+  const nextReference = normalizeNodeVaultFileReference(value);
+  if (index < references.length) {
+    if (nextReference) references[index] = { ...references[index], path: nextReference };
+    else references.splice(index, 1);
+  } else if (nextReference) {
+    references.push({ path: nextReference, preview: false });
+  }
+  if (references.length) node.vaultFiles = references;
+  else delete node.vaultFiles;
+  delete node.vaultFile;
+  delete node.vaultFilePreview;
+  if (previousReference) state.vaultFilePreviewCache.delete(previousReference);
+  if (nextReference) state.vaultFilePreviewCache.delete(nextReference);
+  nodeLayoutSizeCache.delete(node);
+  setProjectDirty(true);
+  renderNodes();
+  renderLinks();
+  renderMinimap();
+  scheduleStoryPanelRender();
+  updateStatus();
+}
+
+function normalizeNodeVaultFileReference(value) {
+  const source = String(value || "").trim();
+  const wikiMatch = source.match(/^\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]$/);
+  return (wikiMatch ? wikiMatch[1] : source).trim().replace(/^\/+/, "");
+}
+
+// Preview height in pixels for image previews on node cards. Accepts the legacy
+// s/m/l names and clamps numbers into the slider range.
+function normalizeVaultPreviewSize(value) {
+  if (value === "s") return 64;
+  if (value === "l") return 292;
+  const number = Number(value);
+  if (Number.isFinite(number) && number > 0) return Math.round(Math.min(320, Math.max(48, number)));
+  return 132;
+}
+
+function normalizeNodeVaultFiles(value, legacyReference = "", legacyPreview = false) {
+  const source = Array.isArray(value) ? value : [];
+  const normalized = [];
+  source.forEach((entry) => {
+    const path = normalizeNodeVaultFileReference(typeof entry === "string" ? entry : entry?.path || entry?.reference || entry?.vaultFile);
+    if (!path || normalized.some((item) => item.path === path)) return;
+    const fallback = getDefaultVisionBoardPlacement(normalized.length);
+    normalized.push({
+      path,
+      preview: Boolean(typeof entry === "object" && entry?.preview),
+      previewSize: normalizeVaultPreviewSize(typeof entry === "object" ? entry?.previewSize : null),
+      x: clampVisionBoardNumber(entry?.x, fallback.x, 0, 82),
+      y: clampVisionBoardNumber(entry?.y, fallback.y, 0, 76),
+      w: clampVisionBoardNumber(entry?.w, fallback.w, 14, 48)
+    });
+  });
+  const legacyPath = normalizeNodeVaultFileReference(legacyReference);
+  if (legacyPath && !normalized.some((entry) => entry.path === legacyPath)) {
+    normalized.unshift({ path: legacyPath, preview: Boolean(legacyPreview), previewSize: 132, ...getDefaultVisionBoardPlacement(0) });
+  }
+  return normalized;
+}
+
+function getNodeVaultFiles(node) {
+  return normalizeNodeVaultFiles(node?.vaultFiles, node?.vaultFile, node?.vaultFilePreview);
+}
+
+function normalizeVaultFileSuggestionQuery(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^\[\[/, "")
+    .replace(/^\[/, "")
+    .replace(/\]\]$/, "")
+    .split(/[|#]/, 1)[0]
+    .trim();
+}
+
+async function updateVaultFileSuggestions(target, options = {}) {
+  const host = window.NarrativeCanvasHost;
+  const source = String(target?.value || "").trim();
+  if (!target?.isConnected || !host?.searchVaultFiles || (!source && !options.force)) {
+    hideVaultFileSuggestions();
+    return;
+  }
+  const requestId = ++state.vaultFileSuggestionRequestId;
+  const query = normalizeVaultFileSuggestionQuery(source);
+  const imageOnly = Boolean(target.dataset?.characterImageFile || target.dataset?.characterImagePickerInput || target.dataset?.characterIconInput != null);
+  try {
+    const result = await host.searchVaultFiles(query, imageOnly ? 80 : 40, { imageOnly });
+    if (requestId !== state.vaultFileSuggestionRequestId || !target.isConnected) return;
+    let paths = Array.isArray(result)
+      ? result.map((path) => String(path || "").trim()).filter(Boolean)
+      : [];
+    if (imageOnly) {
+      paths = paths.filter((path) => CODEX_IMAGE_FILE_PATTERN.test(path));
+    }
+    if (!paths.length) {
+      hideVaultFileSuggestions();
+      return;
+    }
+    state.vaultFileSuggestions = { target, paths, activeIndex: 0 };
+    renderVaultFileSuggestions();
+  } catch (error) {
+    console.error(error);
+    hideVaultFileSuggestions();
+  }
+}
+
+function renderVaultFileSuggestions() {
+  const current = state.vaultFileSuggestions;
+  const target = current?.target;
+  const container = getVaultFileSuggestionContainer(target);
+  if (!current || !target?.isConnected || !container) {
+    hideVaultFileSuggestions();
+    return;
+  }
+  const imagePicker = Boolean(target.dataset?.characterImagePickerInput) || target.dataset?.characterIconInput != null;
+  const host = window.NarrativeCanvasHost;
+  container.innerHTML = current.paths.map((path, index) => {
+    const parts = path.split("/");
+    const name = parts.pop() || path;
+    const folder = parts.join("/");
+    const thumbnailUrl = imagePicker && host?.getVaultResourceUrl ? host.getVaultResourceUrl(path) : "";
+    return `
+      <button class="vault-file-suggestion${imagePicker ? " codex-image-suggestion" : ""}${index === current.activeIndex ? " active" : ""}" type="button" role="option" aria-selected="${index === current.activeIndex ? "true" : "false"}" data-action="select-vault-file-suggestion" data-vault-file-path="${escapeAttr(path)}">
+        ${thumbnailUrl ? `<img src="${escapeAttr(thumbnailUrl)}" alt="" loading="lazy">` : ""}
+        <span>
+          <strong>${escapeHtml(name)}</strong>
+          ${folder ? `<small>${escapeHtml(folder)}</small>` : ""}
+        </span>
+      </button>
+    `;
+  }).join("");
+  container.hidden = false;
+  target.setAttribute("aria-expanded", "true");
+  container.querySelector(".vault-file-suggestion.active")?.scrollIntoView?.({ block: "nearest" });
+}
+
+function hideVaultFileSuggestions() {
+  state.vaultFileSuggestionRequestId += 1;
+  const target = state.vaultFileSuggestions?.target;
+  const container = getVaultFileSuggestionContainer(target);
+  if (container) {
+    container.hidden = true;
+    container.replaceChildren();
+  }
+  target?.setAttribute?.("aria-expanded", "false");
+  state.vaultFileSuggestions = null;
+}
+
+function getVaultFileSuggestionContainer(target) {
+  return target?.closest?.(".node-vault-file-input-wrap, .codex-image-picker, .codex-vault-file-input-wrap")
+    ?.querySelector?.("[data-vault-file-suggestions]") || null;
+}
+
+function handleVaultFileSuggestionPointerDown(event) {
+  if (!event.target.closest?.("[data-vault-file-path]")) return;
+  event.preventDefault();
+}
+
+function handleVaultFileSuggestionKeyDown(event) {
+  const current = state.vaultFileSuggestions;
+  if (!current || event.target !== current.target) return false;
+  if (event.key === "Escape") {
+    if (current.target?.dataset?.characterImagePickerInput) {
+      closeCodexImagePicker(current.target.dataset.characterId);
+      event.preventDefault();
+      return true;
+    }
+    hideVaultFileSuggestions();
+    event.preventDefault();
+    return true;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    current.activeIndex = (current.activeIndex + direction + current.paths.length) % current.paths.length;
+    renderVaultFileSuggestions();
+    event.preventDefault();
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    const path = current.paths[current.activeIndex];
+    if (path) {
+      selectVaultFileSuggestion(path);
+      event.preventDefault();
+      return true;
+    }
+  }
+  return false;
+}
+
+function selectVaultFileSuggestion(path) {
+  const target = state.vaultFileSuggestions?.target
+    || dom.nodePanel?.querySelector?.("[data-node-vault-file-index]");
+  const reference = normalizeNodeVaultFileReference(path);
+  if (!target || !reference) return;
+  if (target.dataset?.characterImageFile || target.dataset?.characterImagePickerInput) {
+    const characterId = target.dataset.characterId;
+    hideVaultFileSuggestions();
+    assignCodexImageFile(characterId, reference);
+    return;
+  }
+  if (target.dataset?.characterVaultFileInput != null) {
+    addCodexVaultFile(target.dataset.characterId, reference);
+    return;
+  }
+  if (target.dataset?.characterIconInput != null) {
+    hideVaultFileSuggestions();
+    setCodexIcon(target.dataset.characterId, reference);
+    return;
+  }
+  const index = Number(target.dataset.nodeVaultFileIndex);
+  const node = getNode(state.selectedNodeId);
+  const references = getNodeVaultFiles(node);
+  if (references.some((entry, entryIndex) => entry.path === reference && entryIndex !== index)) {
+    hideVaultFileSuggestions();
+    setStatus("File already linked.");
+    return;
+  }
+  target.value = reference;
+  setNodeVaultFile(index, reference);
+  commitFocusedEdit(target);
+  hideVaultFileSuggestions();
+  state.vaultFileSuggestionSuppressFocusOnce = true;
+  renderInspector();
+  runAfterRender(() => {
+    const input = dom.nodePanel?.querySelector?.(`[data-node-vault-file-index="${Math.min(index, getNodeVaultFiles(getNode(state.selectedNodeId)).length)}"]`);
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange?.(input.value.length, input.value.length);
+  });
+}
+
+async function chooseCodexImageFile(characterId) {
+  const host = window.NarrativeCanvasHost;
+  if (!getCharacterById(characterId) || !host?.searchVaultFiles) return;
+  state.codexImagePickerCharacterId = characterId;
+  renderCharacterGridForSearch();
+  // Timer instead of requestAnimationFrame: rAF can be starved under headless/virtual-time
+  // test runs and throttled iframes, leaving the picker without its suggestion list.
+  window.setTimeout(() => {
+    const input = dom.charactersPanel?.querySelector?.(`[data-character-card-id="${CSS.escape(characterId)}"] [data-character-image-picker-input]`);
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    void updateVaultFileSuggestions(input, { force: true });
+  }, 0);
+}
+
+function closeCodexImagePicker(characterId = state.codexImagePickerCharacterId) {
+  if (characterId && state.codexImagePickerCharacterId !== characterId) return;
+  hideVaultFileSuggestions();
+  state.codexImagePickerCharacterId = "";
+  renderCharacterGridForSearch();
+}
+
+async function openCodexReference(reference) {
+  const host = window.NarrativeCanvasHost;
+  const normalized = normalizeNodeVaultFileReference(reference);
+  if (!normalized || !host?.openVaultFile) return;
+  try {
+    await leaveImmersiveFullscreenForVaultNavigation();
+    await host.openVaultFile(normalized);
+  } catch (error) {
+    console.error(error);
+    setStatus(t("Could not open the linked vault file."));
+  }
+}
+
+function clearCodexImageFile(characterId) {
+  const character = getCharacterById(characterId);
+  if (!getCharacterImages(character).length) return;
+  const historyBefore = getHistorySnapshot();
+  syncCharacterImageAliases(character, []);
+  if (state.codexImagePickerCharacterId === characterId) state.codexImagePickerCharacterId = "";
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderCharacterGridForSearch();
+  commitHistoryFromSnapshot(historyBefore);
+  setStatus("Library image removed.");
+}
+
+function assignCodexImageFile(characterId, reference) {
+  return assignCodexImageFiles(characterId, [reference]);
+}
+
+function assignCodexImageFiles(characterId, references) {
+  const character = getCharacterById(characterId);
+  const normalized = (references || [])
+    .map(normalizeNodeVaultFileReference)
+    .filter((path) => CODEX_IMAGE_FILE_PATTERN.test(path));
+  if (!character || !normalized.length) {
+    setStatus("Drop an image file.");
+    return false;
+  }
+  const images = getCharacterImages(character);
+  const existing = new Set(images.map((image) => image.path));
+  normalized.forEach((path) => {
+    if (existing.has(path)) return;
+    existing.add(path);
+    images.push({ path, ...getDefaultVisionBoardPlacement(images.length) });
+  });
+  const historyBefore = getHistorySnapshot();
+  syncCharacterImageAliases(character, images);
+  state.codexImagePickerCharacterId = "";
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderCharacterGridForSearch();
+  commitHistoryFromSnapshot(historyBefore);
+  setStatus("Library image assigned.");
+  return true;
+}
+
+function removeCodexImage(characterId, index) {
+  const character = getCharacterById(characterId);
+  const images = getCharacterImages(character);
+  if (!character || !images[index]) return;
+  const historyBefore = getHistorySnapshot();
+  images.splice(index, 1);
+  syncCharacterImageAliases(character, images);
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderCharacterGridForSearch();
+  if (state.visionBoardContext?.kind === "character" && state.visionBoardContext.id === characterId) renderFocusedVisionBoard();
+  commitHistoryFromSnapshot(historyBefore);
+  setStatus("Library image removed.");
+}
+
+function openLocalCodexImageInput(characterId) {
+  const input = dom.charactersPanel?.querySelector?.(`[data-codex-local-image-input][data-character-id="${CSS.escape(characterId || "")}"]`);
+  input?.click?.();
+}
+
+async function importLocalCodexImages(characterId, files) {
+  const host = window.NarrativeCanvasHost;
+  const images = (files || []).filter(isCodexImageFile);
+  if (!getCharacterById(characterId) || !images.length || !host?.importCodexImage) return;
+  try {
+    const references = [];
+    for (const file of images) {
+      references.push(await host.importCodexImage(file, getCharacterById(characterId)?.name || ""));
+    }
+    assignCodexImageFiles(characterId, references);
+  } catch (error) {
+    console.error(error);
+    setStatus("Could not import image.");
+  }
+}
+
+function getVisionBoardContextImages(context = state.visionBoardContext) {
+  if (!context) return [];
+  if (context.kind === "character") return getCharacterImages(getCharacterById(context.id));
+  if (context.kind === "node") return getNodeVaultFiles(getNode(context.id)).filter((entry) => CODEX_IMAGE_FILE_PATTERN.test(entry.path));
+  return [];
+}
+
+function openVisionBoard(kind, id) {
+  const normalizedKind = kind === "node" ? "node" : "character";
+  const context = { kind: normalizedKind, id: String(id || "") };
+  if (!getVisionBoardContextImages(context).length || !dom.visionBoardDialog?.showModal) return;
+  state.visionBoardContext = context;
+  renderFocusedVisionBoard();
+  if (!dom.visionBoardDialog.open) dom.visionBoardDialog.showModal();
+}
+
+function closeVisionBoard() {
+  state.visionBoardDrag = null;
+  state.visionBoardContext = null;
+  if (dom.visionBoardDialog?.open) dom.visionBoardDialog.close();
+}
+
+function renderFocusedVisionBoard() {
+  const context = state.visionBoardContext;
+  if (!context || !dom.visionBoardCanvas) return;
+  const images = getVisionBoardContextImages(context);
+  if (!images.length) {
+    closeVisionBoard();
+    return;
+  }
+  const title = context.kind === "node"
+    ? getNode(context.id)?.title || t("Linked images")
+    : getCharacterById(context.id)?.name || t("Preview images");
+  if (dom.visionBoardTitle) dom.visionBoardTitle.textContent = title;
+  dom.visionBoardCanvas.outerHTML = renderVisionBoard(context.kind, context.id, images, { focused: true });
+  dom.visionBoardCanvas = dom.visionBoardDialog.querySelector(".vision-board-canvas");
+}
+
+function handleVisionBoardPointerDown(event) {
+  const tile = event.target?.closest?.("#visionBoardDialog [data-vision-board-tile]");
+  if (!tile || event.target.closest?.("button") || event.button !== 0) return;
+  const board = tile.closest(".vision-board-canvas");
+  if (!board) return;
+  const rect = board.getBoundingClientRect();
+  state.visionBoardDrag = {
+    pointerId: event.pointerId,
+    // Dragging the corner grip resizes the tile; dragging anywhere else moves it.
+    mode: event.target.closest?.("[data-vision-board-resize]") ? "resize" : "move",
+    tile,
+    board,
+    kind: board.dataset.visionBoardKind,
+    id: board.dataset.visionBoardId,
+    index: Number(tile.dataset.visionBoardIndex),
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startX: Number(tile.style.getPropertyValue("--vision-x")) || 0,
+    startY: Number(tile.style.getPropertyValue("--vision-y")) || 0,
+    startW: Number(tile.style.getPropertyValue("--vision-w")) || 28,
+    rect
+  };
+  tile.setPointerCapture?.(event.pointerId);
+  tile.classList.add("is-moving");
+  event.preventDefault();
+}
+
+function handleVisionBoardPointerMove(event) {
+  const drag = state.visionBoardDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (drag.mode === "resize") {
+    const w = Math.max(10, Math.min(90, drag.startW + (event.clientX - drag.startClientX) / Math.max(1, drag.rect.width) * 100));
+    drag.tile.style.setProperty("--vision-w", w.toFixed(2));
+  } else {
+    const x = Math.max(0, Math.min(90, drag.startX + (event.clientX - drag.startClientX) / Math.max(1, drag.rect.width) * 100));
+    const y = Math.max(0, Math.min(88, drag.startY + (event.clientY - drag.startClientY) / Math.max(1, drag.rect.height) * 100));
+    drag.tile.style.setProperty("--vision-x", x.toFixed(2));
+    drag.tile.style.setProperty("--vision-y", y.toFixed(2));
+  }
+  event.preventDefault();
+}
+
+function handleVisionBoardPointerUp(event) {
+  const drag = state.visionBoardDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  drag.tile.releasePointerCapture?.(event.pointerId);
+  drag.tile.classList.remove("is-moving");
+  const x = Number(drag.tile.style.getPropertyValue("--vision-x"));
+  const y = Number(drag.tile.style.getPropertyValue("--vision-y"));
+  const w = Number(drag.tile.style.getPropertyValue("--vision-w"));
+  persistVisionBoardPosition(drag.kind, drag.id, drag.index, x, y, Number.isFinite(w) ? w : undefined);
+  state.visionBoardDrag = null;
+  event.preventDefault();
+}
+
+// Right-click layer menu for focused vision-board tiles: stacking follows the image
+// array order, so layer actions are array reorders.
+function closeVisionBoardLayerMenu() {
+  if (state.visionBoardLayerMenuDismiss) {
+    document.removeEventListener("pointerdown", state.visionBoardLayerMenuDismiss, { capture: true });
+    state.visionBoardLayerMenuDismiss = null;
+  }
+  state.visionBoardLayerMenu?.remove?.();
+  state.visionBoardLayerMenu = null;
+}
+
+function showVisionBoardLayerMenu(event, tile) {
+  closeVisionBoardLayerMenu();
+  const board = tile.closest(".vision-board-canvas");
+  if (!board || !dom.visionBoardDialog) return;
+  const kind = board.dataset.visionBoardKind;
+  const id = board.dataset.visionBoardId;
+  const index = Number(tile.dataset.visionBoardIndex);
+  const menu = document.createElement("div");
+  menu.className = "vision-board-layer-menu";
+  menu.innerHTML = [
+    ["front", t("Bring to front")],
+    ["forward", t("Bring forward")],
+    ["backward", t("Send backward")],
+    ["back", t("Send to back")]
+  ].map(([action, label]) => `<button type="button" data-vision-layer-action="${action}">${escapeHtml(label)}</button>`).join("");
+  const dialogRect = dom.visionBoardDialog.getBoundingClientRect();
+  menu.style.left = `${Math.round(event.clientX - dialogRect.left)}px`;
+  menu.style.top = `${Math.round(event.clientY - dialogRect.top)}px`;
+  menu.addEventListener("click", (clickEvent) => {
+    const button = clickEvent.target.closest("[data-vision-layer-action]");
+    if (!button) return;
+    clickEvent.preventDefault();
+    clickEvent.stopPropagation();
+    moveVisionBoardImageLayer(kind, id, index, button.dataset.visionLayerAction);
+    closeVisionBoardLayerMenu();
+  });
+  dom.visionBoardDialog.append(menu);
+  state.visionBoardLayerMenu = menu;
+  // Owned by state so closeVisionBoardLayerMenu() always tears it down — including
+  // when a menu item is chosen, not only when the pointer lands outside.
+  const dismiss = (pointerEvent) => {
+    if (menu.contains(getComposedEventTarget(pointerEvent))) return;
+    closeVisionBoardLayerMenu();
+  };
+  state.visionBoardLayerMenuDismiss = dismiss;
+  document.addEventListener("pointerdown", dismiss, { capture: true });
+}
+
+function moveVisionBoardImageLayer(kind, id, index, action) {
+  if (kind !== "character") return;
+  const character = getCharacterById(id);
+  const images = getCharacterImages(character);
+  if (!character || !images[index]) return;
+  const historyBefore = getHistorySnapshot();
+  const [entry] = images.splice(index, 1);
+  const target = action === "front"
+    ? images.length
+    : action === "back"
+      ? 0
+      : action === "forward"
+        ? Math.min(images.length, index + 1)
+        : Math.max(0, index - 1);
+  images.splice(target, 0, entry);
+  syncCharacterImageAliases(character, images);
+  invalidateCharacterRenderContext();
+  setProjectDirty(true);
+  renderFocusedVisionBoard();
+  renderCharacterGridForSearch();
+  commitHistoryFromSnapshot(historyBefore);
+  setStatus(t("Image layer updated."));
+}
+
+function persistVisionBoardPosition(kind, id, index, x, y, w) {
+  const historyBefore = getHistorySnapshot();
+  const sizePatch = Number.isFinite(w) ? { w } : {};
+  if (kind === "character") {
+    const character = getCharacterById(id);
+    const images = getCharacterImages(character);
+    if (!character || !images[index]) return;
+    images[index] = { ...images[index], x, y, ...sizePatch };
+    syncCharacterImageAliases(character, images);
+    invalidateCharacterRenderContext();
+    renderCharacterGridForSearch();
+  } else {
+    const node = getNode(id);
+    const references = getNodeVaultFiles(node);
+    const image = references.filter((entry) => CODEX_IMAGE_FILE_PATTERN.test(entry.path))[index];
+    const referenceIndex = references.findIndex((entry) => entry.path === image?.path);
+    if (!node || referenceIndex < 0) return;
+    references[referenceIndex] = { ...references[referenceIndex], x, y, ...sizePatch };
+    node.vaultFiles = references;
+    if (state.selectedNodeId === node.id) renderNodePanel(node);
+  }
+  setProjectDirty(true);
+  renderFocusedVisionBoard();
+  commitHistoryFromSnapshot(historyBefore);
+}
+
+function getCodexImageDropElement(event) {
+  return event?.target?.closest?.("[data-codex-image-drop]") || null;
+}
+
+function handleCodexImageDragOver(event) {
+  const dropElement = getCodexImageDropElement(event);
+  if (!dropElement) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  dropElement.classList.add("drag-over");
+}
+
+function handleCodexImageDragLeave(event) {
+  const dropElement = getCodexImageDropElement(event);
+  if (!dropElement || dropElement.contains(event.relatedTarget)) return;
+  dropElement.classList.remove("drag-over");
+}
+
+async function handleCodexImageDrop(event) {
+  const dropElement = getCodexImageDropElement(event);
+  if (!dropElement) return;
+  event.preventDefault();
+  event.stopPropagation();
+  dropElement.classList.remove("drag-over");
+  const characterId = dropElement.dataset.characterId;
+  const transfer = event.dataTransfer;
+  const localImages = [...(transfer?.files || [])].filter((file) => isCodexImageFile(file));
+  try {
+    const references = [];
+    if (localImages.length && window.NarrativeCanvasHost?.importCodexImage) {
+      for (const file of localImages) {
+        references.push(await window.NarrativeCanvasHost.importCodexImage(file, getCharacterById(characterId)?.name || ""));
+      }
+    }
+    if (!references.length) references.push(getCodexImageReferenceFromDataTransfer(transfer));
+    if (!assignCodexImageFiles(characterId, references)) setStatus("Drop an image file.");
+  } catch (error) {
+    console.error(error);
+    setStatus("Could not import image.");
+  }
+}
+
+function isCodexImageFile(file) {
+  return Boolean(file && (String(file.type || "").toLowerCase().startsWith("image/") || CODEX_IMAGE_FILE_PATTERN.test(String(file.name || ""))));
+}
+
+function getCodexImageReferenceFromDataTransfer(transfer) {
+  if (!transfer) return "";
+  const preferredTypes = ["application/vnd.obsidian.file", "application/json", "text/plain", "text/uri-list"];
+  for (const type of preferredTypes) {
+    let value = "";
+    try {
+      value = transfer.getData(type);
+    } catch (_error) {
+      value = "";
+    }
+    const reference = findCodexImageReference(value);
+    if (reference) return reference;
+  }
+  return "";
+}
+
+function findCodexImageReference(value, depth = 0) {
+  if (depth > 4 || value == null) return "";
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const reference = findCodexImageReference(item, depth + 1);
+      if (reference) return reference;
+    }
+    return "";
+  }
+  if (typeof value === "object") {
+    const preferredKeys = ["path", "filePath", "filepath", "source", "value"];
+    for (const key of preferredKeys) {
+      const reference = findCodexImageReference(value[key], depth + 1);
+      if (reference) return reference;
+    }
+    for (const item of Object.values(value)) {
+      const reference = findCodexImageReference(item, depth + 1);
+      if (reference) return reference;
+    }
+    return "";
+  }
+  const source = String(value || "").trim();
+  if (!source) return "";
+  if ((source.startsWith("{") && source.endsWith("}")) || (source.startsWith("[") && source.endsWith("]"))) {
+    try {
+      const reference = findCodexImageReference(JSON.parse(source), depth + 1);
+      if (reference) return reference;
+    } catch (_error) {
+      // Continue with plain-text parsing for non-JSON drag payloads.
+    }
+  }
+  const wikiMatch = source.match(/\[\[([^\]|#]+\.(?:avif|bmp|gif|jpe?g|png|svg|webp))(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/i);
+  if (wikiMatch) return normalizeNodeVaultFileReference(wikiMatch[1]);
+  for (const line of source.split(/\r?\n/)) {
+    const candidate = line.trim().replace(/^file:\/\//i, "").replace(/^['\"]|['\"]$/g, "");
+    if (CODEX_IMAGE_FILE_PATTERN.test(candidate)) {
+      try {
+        return normalizeNodeVaultFileReference(decodeURIComponent(candidate));
+      } catch (_error) {
+        return normalizeNodeVaultFileReference(candidate);
+      }
+    }
+  }
+  return "";
+}
+
+function toggleCodexImagePreview(characterId) {
+  const character = getCharacters().find((entry) => entry.id === characterId);
+  if (!character?.imageFile) return;
+  setCharacterField(characterId, "imagePreview", !character.imagePreview, true);
+}
+
+async function openNodeVaultFile(nodeId = state.selectedNodeId, index = 0) {
+  const node = getNode(nodeId || state.selectedNodeId);
+  const host = window.NarrativeCanvasHost;
+  const reference = getNodeVaultFiles(node)[Number.isInteger(index) && index >= 0 ? index : 0]?.path;
+  if (!reference) {
+    setStatus("No linked vault file.");
+    return;
+  }
+  if (!host?.openVaultFile) {
+    setStatus("Vault links open only in Obsidian.");
+    return;
+  }
+  try {
+    await leaveImmersiveFullscreenForVaultNavigation();
+    await host.openVaultFile(reference);
+  } catch (error) {
+    console.error(error);
+    setStatus("Could not open the linked vault file.");
+  }
+}
+
+async function leaveImmersiveFullscreenForVaultNavigation() {
+  const nativeFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  if (!state.immersiveFullscreen && !nativeFullscreen) return;
+  if (nativeFullscreen) {
+    const exited = await exitNativeFullscreen();
+    if (!exited && (document.fullscreenElement || document.webkitFullscreenElement)) {
+      throw new Error("Could not exit fullscreen before opening the vault file.");
+    }
+  }
+  if (state.immersiveFullscreen) {
+    state.immersiveFullscreen = false;
+    renderShellState();
+    handleWindowResize();
+  }
+  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function clearNodeVaultFile(index = 0) {
+  const node = getNode(state.selectedNodeId);
+  const references = getNodeVaultFiles(node);
+  if (!node || !references[index]) return;
+  const historyBefore = getHistorySnapshot();
+  const [removed] = references.splice(index, 1);
+  if (references.length) node.vaultFiles = references;
+  else delete node.vaultFiles;
+  delete node.vaultFile;
+  delete node.vaultFilePreview;
+  if (removed?.path) state.vaultFilePreviewCache.delete(removed.path);
+  nodeLayoutSizeCache.delete(node);
+  setProjectDirty(true);
+  renderInspector();
+  renderNodes();
+  renderLinks();
+  renderMinimap();
+  setStatus("Vault file link cleared.");
+  commitHistoryFromSnapshot(historyBefore);
+}
+
+function moveNodeVaultFileReference(fromIndex, targetIndex, placement = "before") {
+  const node = getNode(state.selectedNodeId);
+  if (!node || !Number.isInteger(fromIndex) || !Number.isInteger(targetIndex)) return false;
+  const references = getNodeVaultFiles(node);
+  if (fromIndex < 0 || fromIndex >= references.length || targetIndex < 0 || targetIndex >= references.length || fromIndex === targetIndex) return false;
+  const insertionBeforeRemoval = targetIndex + (placement === "after" ? 1 : 0);
+  const [entry] = references.splice(fromIndex, 1);
+  const insertionIndex = clamp(insertionBeforeRemoval - (fromIndex < insertionBeforeRemoval ? 1 : 0), 0, references.length);
+  if (insertionIndex === fromIndex) {
+    references.splice(fromIndex, 0, entry);
+    return false;
+  }
+  references.splice(insertionIndex, 0, entry);
+  node.vaultFiles = references;
+  nodeLayoutSizeCache.delete(node);
+  setProjectDirty(true);
+  renderInspector();
+  renderNodes();
+  renderLinks();
+  renderMinimap();
+  setStatus(t("Linked files reordered."));
+  return true;
+}
+
+// Slider on the node card: `input` events resize the preview live without a re-render
+// (the slider must survive its own drag); the final `change` commits and reflows.
+// --- Dropping a vault file from Obsidian's UI onto a node -----------------------
+// Valid drop zones: a node card on the canvas, or the inspector's Vault file section.
+function getVaultFileDropZone(target) {
+  if (!target?.closest) return null;
+  const nodeElement = target.closest(".node[data-node-id]");
+  if (nodeElement && dom.nodeLayer?.contains(nodeElement)) {
+    const node = getNode(nodeElement.dataset.nodeId);
+    if (node && !isFrameNode(node)) return { nodeId: node.id, element: nodeElement };
+  }
+  const section = target.closest(".node-vault-file-field");
+  if (section && dom.nodePanel?.contains(section)) {
+    const node = getNode(state.selectedNodeId);
+    if (node && !isFrameNode(node)) return { nodeId: node.id, element: section };
+  }
+  return null;
+}
+
+function parseVaultPathFromDataTransfer(dataTransfer) {
+  const text = dataTransfer?.getData?.("text/plain") || "";
+  const uri = text.match(/obsidian:\/\/open\?[^\s]*file=([^&\s]+)/);
+  if (uri) {
+    try { return decodeURIComponent(uri[1]); } catch (_error) { /* fall through */ }
+  }
+  const wiki = text.match(/^!?\[\[([^\]|#]+)/);
+  if (wiki) return wiki[1].trim();
+  return "";
+}
+
+function clearVaultDropHighlights() {
+  dom.scope?.querySelectorAll?.(".vault-file-drop-ready")
+    .forEach((element) => element.classList.remove("vault-file-drop-ready"));
+}
+
+function handleVaultFileDragOver(event) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.searchVaultFiles) return;
+  const zone = getVaultFileDropZone(event.target);
+  if (!zone) {
+    clearVaultDropHighlights();
+    return;
+  }
+  // During dragover the DataTransfer payload is unreadable; accept when Obsidian's
+  // drag manager reports a file or when any payload types are present.
+  if (!host.getDraggedVaultFile?.() && !(event.dataTransfer?.types || []).length) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "link";
+  if (!zone.element.classList.contains("vault-file-drop-ready")) {
+    clearVaultDropHighlights();
+    zone.element.classList.add("vault-file-drop-ready");
+  }
+}
+
+function handleVaultFileDrop(event) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.searchVaultFiles) return;
+  const zone = getVaultFileDropZone(event.target);
+  clearVaultDropHighlights();
+  if (!zone) return;
+  const path = host.getDraggedVaultFile?.() || parseVaultPathFromDataTransfer(event.dataTransfer);
+  if (!path) return;
+  event.preventDefault();
+  event.stopPropagation();
+  linkVaultFileToNode(zone.nodeId, path);
+}
+
+function linkVaultFileToNode(nodeId, pathValue) {
+  const node = getNode(nodeId);
+  const path = normalizeNodeVaultFileReference(pathValue);
+  if (!node || isFrameNode(node) || !path) return;
+  const references = getNodeVaultFiles(node);
+  if (references.some((entry) => entry.path === path)) {
+    setStatus("File already linked.");
+    return;
+  }
+  const historyBefore = getHistorySnapshot();
+  references.push({ path, preview: false, previewSize: 132, ...getDefaultVisionBoardPlacement(references.length) });
+  node.vaultFiles = references;
+  nodeLayoutSizeCache.delete(node);
+  selectNode(nodeId, false);
+  setProjectDirty(true);
+  renderInspector();
+  renderNodes();
+  renderLinks();
+  renderMinimap();
+  commitHistoryFromSnapshot(historyBefore);
+  setStatus(t("Vault file linked."));
+}
+
+function setNodeVaultPreviewSize(nodeId, index, sizeValue, commit) {
+  const node = getNode(nodeId);
+  const references = getNodeVaultFiles(node);
+  if (!node || !references[index]) return;
+  const size = normalizeVaultPreviewSize(sizeValue);
+  references[index].previewSize = size;
+  node.vaultFiles = references;
+  const preview = getNodeElementById(node.id)?.querySelector?.(`[data-node-vault-preview-index="${index}"]`);
+  preview?.style?.setProperty("--vault-preview-h", `${size}px`);
+  if (!commit) return;
+  nodeLayoutSizeCache.delete(node);
+  setProjectDirty(true);
+  renderNodes();
+  renderLinks();
+  renderMinimap();
+}
+
+function toggleNodeVaultFilePreview(nodeId = state.selectedNodeId, index = 0) {
+  const node = getNode(nodeId || state.selectedNodeId);
+  const references = getNodeVaultFiles(node);
+  if (!references[index] || !window.NarrativeCanvasHost?.readVaultFile) return;
+  const historyBefore = getHistorySnapshot();
+  references[index] = { ...references[index], preview: !references[index].preview };
+  node.vaultFiles = references;
+  delete node.vaultFile;
+  delete node.vaultFilePreview;
+  nodeLayoutSizeCache.delete(node);
+  setProjectDirty(true);
+  renderNodes();
+  renderLinks();
+  renderMinimap();
+  if (state.selectedNodeId === node.id) renderNodePanel(node);
+  setStatus(references[index].preview ? t("Linked file preview enabled.") : t("Linked file preview disabled."));
+  commitHistoryFromSnapshot(historyBefore);
 }
 
 function setNodeCustomField(key, value, rerender) {
@@ -18335,7 +21486,7 @@ function showNewProjectConfirm() {
   if (dom.confirmDialog?.showModal) {
     dom.confirmDialog.returnValue = "";
     dom.confirmDialog.showModal();
-    requestAnimationFrame(() => {
+    runAfterRender(() => {
       dom.newProjectNameInput?.focus();
       dom.newProjectNameInput?.select();
     });
@@ -18415,6 +21566,7 @@ async function saveCurrentState(options = {}) {
       if (host.saveProject) {
         const projectTarget = await host.saveProject(savedStateJson);
         if (projectTarget) targets.push(projectTarget);
+        await reloadCodexFiles({ render: state.activeFileId === "characters", silent: true, markDirty: false });
       } else if (host.saveState) {
         const stateTarget = await host.saveState(savedState);
         if (stateTarget) targets.push(stateTarget);
@@ -18459,6 +21611,7 @@ async function createVaultProjectForNewProject() {
       filenameProjectTitle: projectTitle
     });
     if (target) {
+      await reloadCodexFiles({ render: state.activeFileId === "characters", silent: true, markDirty: false });
       setProjectDirty(false);
       renderProjectFileStatus();
       setStatus(`New project created at ${target}.`);
@@ -18521,6 +21674,44 @@ async function loadCurrentVaultProject() {
   return true;
 }
 
+async function reloadCodexFiles(options = {}) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.loadCodexEntries) return false;
+  try {
+    const loaded = await host.loadCodexEntries();
+    if (!Array.isArray(loaded) || !loaded.length) return false;
+    const current = getCharacters();
+    const currentById = new Map(current.map((entry) => [entry.id, entry]));
+    let changed = false;
+    loaded.forEach((source, index) => {
+      const external = normalizeCharacter(source, index);
+      if (!external) return;
+      const existing = currentById.get(external.id);
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(external)) {
+          Object.assign(existing, external);
+          changed = true;
+        }
+        return;
+      }
+      current.push(external);
+      currentById.set(external.id, external);
+      changed = true;
+    });
+    if (!changed) return false;
+    state.project.characters = normalizeCharacters(current);
+    invalidateCharacterRenderContext();
+    if (options.markDirty !== false) setProjectDirty(true);
+    if (options.render !== false) renderCharacterAwareSurfaces();
+    if (!options.silent) setStatus(t("Library files reloaded."));
+    return true;
+  } catch (error) {
+    console.error(error);
+    if (!options.silent) setStatus(t("Could not reload library files."));
+    return false;
+  }
+}
+
 async function loadSavedState(announce = true) {
   const host = window.NarrativeCanvasHost;
   if (host?.loadProject) {
@@ -18576,8 +21767,12 @@ function buildSavedState() {
     exportImageScale: state.exportImageScale,
     view: { ...state.view },
     sidebar: getSavedSidebarState(),
+    aiButtonPos: state.aiButtonPos ? { ...state.aiButtonPos } : null,
+    codexBacklinkCollapsed: state.characterBacklinkGroupCollapsedKeys instanceof Set ? [...state.characterBacklinkGroupCollapsedKeys] : [],
     search: state.search,
     characterSearch: state.characterSearch,
+    codexKindFilter: state.codexKindFilter,
+    codexTagFilter: state.codexTagFilter,
     eventSearch: state.eventSearch,
     playbookSearch: state.playbookSearch,
     playbookJsonOpen: state.playbookJsonOpen,
@@ -18599,8 +21794,12 @@ function buildSavedStateForProject(project, uiOverrides = {}) {
       exportImageScale: state.exportImageScale,
       view: { x: 0, y: 0, scale: DEFAULT_CANVAS_ZOOM },
       sidebar: getSavedSidebarState(),
+      aiButtonPos: null,
+      codexBacklinkCollapsed: [],
       search: "",
       characterSearch: "",
+      codexKindFilter: CODEX_ALL_FILTER,
+      codexTagFilter: "",
       eventSearch: "",
       playbookSearch: "",
       playbookJsonOpen: false,
@@ -18625,8 +21824,15 @@ function applySavedState(saved) {
   state.theme = ui.theme === "light" ? "light" : "dark";
   state.exportImageScale = normalizeExportImageScale(ui.exportImageScale);
   applySavedSidebarState(ui.sidebar);
+  state.aiButtonPos = ui.aiButtonPos && Number.isFinite(ui.aiButtonPos.left) && Number.isFinite(ui.aiButtonPos.top)
+    ? { left: ui.aiButtonPos.left, top: ui.aiButtonPos.top }
+    : null;
+  applyAiButtonPosition();
+  state.characterBacklinkGroupCollapsedKeys = new Set(Array.isArray(ui.codexBacklinkCollapsed) ? ui.codexBacklinkCollapsed.filter((key) => typeof key === "string") : []);
   state.search = typeof ui.search === "string" ? ui.search : "";
   state.characterSearch = typeof ui.characterSearch === "string" ? ui.characterSearch : "";
+  state.codexKindFilter = normalizeCodexKindFilter(ui.codexKindFilter);
+  state.codexTagFilter = normalizeOptionalString(ui.codexTagFilter).trim();
   state.eventSearch = typeof ui.eventSearch === "string" ? ui.eventSearch : "";
   state.playbookSearch = typeof ui.playbookSearch === "string" ? ui.playbookSearch : "";
   state.searchIndex = -1;
@@ -18723,6 +21929,7 @@ async function loadFromVault(announce = true) {
     const restoredView = applySavedState(payload);
     if (!state.selectedNodeId) state.selectedNodeId = state.project.nodes[0]?.id || null;
     setProjectDirty(false);
+    await reloadCodexFiles({ render: false, silent: true });
     if (announce) setStatus(`Loaded ${getHostProjectFileLabel()}.`);
     return restoredView;
   } catch (error) {
@@ -18839,13 +22046,13 @@ function exportTwee() {
 }
 
 function exportCharactersMarkdown() {
-  downloadBlob(new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }), "Characters.md");
-  setStatus("Characters Markdown exported.");
+  downloadBlob(new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }), "Narrative-Library.md");
+  setStatus(t("Narrative Library Markdown exported."));
 }
 
 function exportCharactersJson() {
-  downloadJsonFile(buildCharactersJsonDocument(), "Characters.json");
-  setStatus("Characters JSON exported.");
+  downloadJsonFile(buildCharactersJsonDocument(), "Narrative-Library.json");
+  setStatus(t("Narrative Library JSON exported."));
 }
 
 function exportVariablesJson() {
@@ -18900,8 +22107,8 @@ async function exportAll() {
       { name: "Events Sheet.csv", blob: new Blob([buildEventSheetCsv()], { type: "text/csv;charset=utf-8" }) },
       { name: `${slug}-events.json`, blob: new Blob([JSON.stringify(buildEventSheetJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
       { name: "Node Fields.csv", blob: new Blob([buildNodeFieldsCsv()], { type: "text/csv;charset=utf-8" }) },
-      { name: "Characters.md", blob: new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }) },
-      { name: "Characters.json", blob: new Blob([JSON.stringify(buildCharactersJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
+      { name: "Narrative-Library.md", blob: new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }) },
+      { name: "Narrative-Library.json", blob: new Blob([JSON.stringify(buildCharactersJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
       { name: PLAYBOOK_FILE_NAME, blob: new Blob([buildVariablesJson()], { type: "application/json" }) }
     ];
     const svg = buildExportSvg();
@@ -19100,12 +22307,21 @@ function buildRuntimeExportDocument() {
     startNode: model.startNode ? model.nodeNameMap[model.startNode.id] : "",
     variables: model.variables,
     variableNames: Object.values(model.variableNameMap),
-    characters: getCharacters().map((character) => ({
+    characters: getCastCharacters().map((character) => ({
       id: character.id,
       name: character.name,
       role: character.role,
       voice: character.voice,
       notes: character.notes
+    })),
+    codex: getCharacters().map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      kind: entry.kind,
+      role: entry.role,
+      voice: entry.voice,
+      tags: entry.tags,
+      notes: entry.notes
     })),
     nodes,
     links,
@@ -19263,14 +22479,16 @@ function getExportNodeBody(node, script, model) {
 }
 
 function getRuntimeExportCast(node) {
-  const characters = new Map(getCharacters().map((character) => [character.id, character]));
-  return (Array.isArray(node?.cast) ? node.cast : [])
+  const entries = new Map(getCharacters().map((entry) => [entry.id, entry]));
+  return normalizeNodeCast(node?.cast)
     .map((entry) => {
-      const character = characters.get(entry.characterId);
-      if (!character) return null;
+      const codexEntry = entries.get(entry.characterId);
+      if (!codexEntry) return null;
       return {
-        characterId: character.id,
-        name: character.name,
+        codexId: codexEntry.id,
+        characterId: codexEntry.id,
+        name: codexEntry.name,
+        kind: codexEntry.kind,
         role: entry.role || "Present"
       };
     })
@@ -20788,11 +24006,16 @@ function makePlainHeaderValue(value) {
 function buildCharactersMarkdown() {
   const characters = getCharacters();
   const backlinkIndex = buildCharacterBacklinkIndex(characters);
-  const lines = [`# Characters`, ""];
+  const lines = [`# Narrative Library`, ""];
   characters.forEach((character) => {
     lines.push(`## ${character.name || "Unnamed Character"}`);
+    lines.push(`- Category: ${character.kind || "Character"}`);
+    if (character.tags) lines.push(`- Tags: ${parseCodexTags(character.tags).join(", ")}`);
     if (character.role) lines.push(`- Role: ${character.role}`);
     if (character.voice) lines.push(`- Voice: ${character.voice}`);
+    normalizeCodexExtraFields(character.extraFields)
+      .filter((field) => field.key)
+      .forEach((field) => lines.push(`- ${field.key}: ${field.value}`));
     if (character.notes) lines.push("", character.notes);
     getCharacterBacklinkGroups(character, backlinkIndex)
       .filter((group) => group.items.length)
@@ -22638,6 +25861,8 @@ function normalizeProject(project) {
     eventRowOrder: normalizeEventRowOrder(project.eventRowOrder),
     nodeTypes: nodeTypesList,
     customNodeTypes: [],
+    codexFieldTemplates: normalizeCodexFieldTemplates(project.codexFieldTemplates),
+    customCodexKinds: normalizeCustomCodexKinds(project.customCodexKinds),
     characters: normalizeProjectCharacters(project),
     deletedNodes: Array.isArray(project.deletedNodes) ? project.deletedNodes : [],
     nodes: Array.isArray(project.nodes) ? project.nodes.map((node) => normalizeNode(node, eventFrameTypes, eventSheet.columns, nodeTypeTemplates)) : [],
@@ -22733,8 +25958,9 @@ function inferLegacyDialogTurns(project, templateMap = null) {
   });
 }
 
-function syncDialogCastFromTurns(node, characters = getCharacters()) {
+function syncDialogCastFromTurns(node, characters = getCastCharacters()) {
   if (!node || !Array.isArray(node.turns) || !Array.isArray(characters) || !characters.length) return;
+  characters = characters.filter((character) => normalizeCodexKind(character?.kind) === "Character");
   const cast = Array.isArray(node.cast) ? node.cast : [];
   const existingSpeakerCharIds = new Set(cast.filter((c) => c.role === "Speaker").map((c) => c.characterId));
   const speakerNames = new Set(node.turns.map((t) => String(t.speaker || "").trim()).filter(Boolean));
@@ -23224,6 +26450,10 @@ function normalizeNode(node, eventFrameTypes = null, eventColumns = null, templa
     delete normalized.storyOrder;
   }
   normalized.choices = parseChoiceLines(normalized.choices);
+  normalized.vaultFiles = normalizeNodeVaultFiles(normalized.vaultFiles, normalized.vaultFile, normalized.vaultFilePreview);
+  delete normalized.vaultFile;
+  delete normalized.vaultFilePreview;
+  if (!normalized.vaultFiles.length) delete normalized.vaultFiles;
   normalized.customFields = normalizeNodeCustomFields(normalized.customFields);
   normalized.cast = normalizeNodeCast(normalized.cast);
   if (!normalized.cast.length) delete normalized.cast;
@@ -23766,6 +26996,16 @@ function previousPreview() {
   renderPreviewNode(state.playNodeId, { skipVisit: true });
 }
 
+function jumpToPreviewStep(stepIndexValue) {
+  const stepIndex = Number(stepIndexValue);
+  const currentIndex = getPreviewCurrentPathIndex();
+  if (!Number.isInteger(stepIndex) || stepIndex < 0 || stepIndex >= currentIndex) return;
+  if (!restorePreviewStep(stepIndex)) return;
+  renderPreviewNode(state.playNodeId, { skipVisit: true });
+  scrollPreviewToCurrentCard();
+  setStatus(t("Returned to card {number}.", { number: stepIndex + 1 }));
+}
+
 function executePreviewManualAction(nodeId, actionIdValue) {
   const node = getNode(nodeId);
   if (!node) return;
@@ -23781,6 +27021,104 @@ function executePreviewManualAction(nodeId, actionIdValue) {
     capturePreviewStep(node.id);
   }
   renderPreviewNode(node.id, { skipVisit: true });
+}
+
+// Play keeps a scrollable log of the cards the reader just passed; older cards fall out
+// of the visible span so long sessions stay light.
+const PLAY_HISTORY_CARD_LIMIT = 30;
+
+function renderPreviewHistoryCards() {
+  const index = getPreviewCurrentPathIndex();
+  if (index <= 0) return "";
+  const start = Math.max(0, index - PLAY_HISTORY_CARD_LIMIT);
+  const cards = [];
+  for (let i = start; i < index; i += 1) {
+    const node = getNode(state.playPath[i]);
+    if (!node) continue;
+    const step = Array.isArray(state.playSteps) ? state.playSteps[i] : null;
+    cards.push(renderPreviewHistoryCard(node, step, i));
+  }
+  if (!cards.length) return "";
+  const trimmedNotice = start > 0
+    ? `<div class="play-history-trimmed">${escapeHtml(t("Showing the last {count} cards.", { count: PLAY_HISTORY_CARD_LIMIT }))}</div>`
+    : "";
+  return `<section class="play-history" aria-label="${escapeAttr(t("Recent cards"))}">${trimmedNotice}${cards.join("")}</section>`;
+}
+
+// Linked image previews (the ones enabled on the node card) also show on play cards.
+function renderPlayCardImages(node) {
+  const host = window.NarrativeCanvasHost;
+  if (!host?.getVaultResourceUrl) return "";
+  const images = getNodeVaultFiles(node).filter((entry) => entry.preview && CODEX_IMAGE_FILE_PATTERN.test(entry.path));
+  if (!images.length) return "";
+  return `<div class="play-card-images">${images.map((entry) => `<img src="${escapeAttr(host.getVaultResourceUrl(entry.path))}" alt="" loading="lazy" draggable="false">`).join("")}</div>`;
+}
+
+// Runs `callback` with `state.playVariables` temporarily swapped to a snapshot, so
+// templated text renders against the values of that moment.
+function withPreviewVariables(variables, callback) {
+  const activeVariables = state.playVariables;
+  if (variables) state.playVariables = variables;
+  try {
+    return callback();
+  } finally {
+    state.playVariables = activeVariables;
+  }
+}
+
+function renderPreviewHistoryCard(node, step, index) {
+  // Render each past card against the variable snapshot captured at that step, so
+  // templated text shows what the reader actually saw back then.
+  return withPreviewVariables(step?.variables, () => {
+    const runtimeScript = getNodeRuntimeScript(node);
+    const title = renderRuntimeTemplate(runtimeScript.title, node, getNodeDisplayTitle(node, node.type));
+    const turns = getRuntimeDialogTurns(node);
+    const body = turns.length
+      ? turns.map((turn) => formatRuntimeDialogTurn(turn)).join("\n")
+      : renderRuntimeTemplate(runtimeScript.body, node, displayBody(node));
+    // A step can only be restored when its snapshot exists; without one the jump
+    // button is omitted rather than silently failing.
+    const canRestore = Boolean(step?.nodeId);
+    return `
+      <article class="play-history-card">
+        <div class="play-meta">
+          <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
+          <span>${index + 1}</span>
+        </div>
+        <h4>${escapeHtml(title)}</h4>
+        <p>${escapeHtml(body)}</p>
+        ${renderPlayCardImages(node)}
+        ${canRestore ? `
+          <button class="play-history-jump" type="button" data-action="play-history-jump" data-play-step-index="${index}" title="${escapeAttr(t("Rewind the story to this card. Later steps are discarded."))}">
+            ↩ ${escapeHtml(t("Return to this card"))}
+          </button>
+        ` : ""}
+      </article>
+    `;
+  });
+}
+
+function getPreviewScroller() {
+  return dom.playDialog?.querySelector?.(".play-scroll") || null;
+}
+
+function isPreviewScrollerNearBottom() {
+  const scroller = getPreviewScroller();
+  if (!scroller) return true;
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+}
+
+function scrollPreviewToCurrentCard() {
+  // Scroll synchronously right after the DOM swap, then once more on a short timer to
+  // absorb late layout shifts (images, debug details). Timer instead of rAF: rAF can be
+  // starved under headless/virtual-time test runs.
+  const scroller = getPreviewScroller();
+  if (!scroller) return;
+  scroller.scrollTop = scroller.scrollHeight;
+  window.setTimeout(() => {
+    const settled = getPreviewScroller();
+    if (settled) settled.scrollTop = settled.scrollHeight;
+  }, 50);
 }
 
 function renderPreviewNode(nodeId, options = {}) {
@@ -23824,17 +27162,25 @@ function renderPreviewNode(nodeId, options = {}) {
   dom.playTitle.textContent = runtimeTitle;
   const customFields = renderPreviewCustomFields(node);
   const debugDetails = renderPreviewDebugDetails(node, { requirementsSource, branchConditionSource: "" });
+  // Measure before the DOM swap: a reader parked at the bottom follows the story;
+  // one scrolled up into history keeps their place on passive refreshes.
+  const followStory = !options.skipVisit || isPreviewScrollerNearBottom();
   dom.playBody.innerHTML = `
-    <div class="play-meta">
-      <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
-      <span>${pageNumber} / ${pageTotal}</span>
+    ${renderPreviewHistoryCards()}
+    <div class="play-current-card">
+      <div class="play-meta">
+        <span>${escapeHtml(getNodeTypeLabel(node.type))} ${escapeHtml(getNodeDisplayId(node))}</span>
+        <span>${pageNumber} / ${pageTotal}</span>
+      </div>
+      <h3>${escapeHtml(runtimeTitle)}</h3>
+      <p>${escapeHtml(runtimeBody)}</p>
+      ${renderPlayCardImages(node)}
+      ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
+      ${customFields}
+      ${debugDetails}
     </div>
-    <h3>${escapeHtml(runtimeTitle)}</h3>
-    <p>${escapeHtml(runtimeBody)}</p>
-    ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
-    ${customFields}
-    ${debugDetails}
   `;
+  if (followStory) scrollPreviewToCurrentCard();
   if (!options.skipCanvasFocus) focusCanvasOnPreviewNode(node);
 
   if (dialogTurns.length && dialogTurnIndex < dialogTurns.length - 1) {
@@ -24923,6 +28269,10 @@ function getCharacters() {
   return state.project.characters;
 }
 
+function getCastCharacters() {
+  return getCharacters().filter((entry) => entry.kind === "Character");
+}
+
 function normalizeCharacters(characters) {
   if (!Array.isArray(characters)) return [];
   const seen = new Set();
@@ -24938,14 +28288,186 @@ function normalizeCharacters(characters) {
 function normalizeCharacter(character, index) {
   if (!character || typeof character !== "object") return null;
   const name = String(character.name || `Character ${index + 1}`).trim() || `Character ${index + 1}`;
+  const images = normalizeVisionBoardImages(character.images, character.imageFile || character.image || "");
   return {
     id: String(character.id || `c${index}`).trim() || `c${index}`,
     name,
+    kind: normalizeCodexKind(character.kind || character.category || "Character"),
     role: String(character.role || ""),
     voice: String(character.voice || ""),
+    tags: String(character.tags || ""),
     notes: String(character.notes || ""),
+    extraFields: normalizeCodexExtraFields(character.extraFields),
+    vaultFiles: normalizeCodexVaultFiles(character.vaultFiles ?? character.files),
+    canvasFile: normalizeNodeVaultFileReference(character.canvasFile ?? character.canvas ?? ""),
+    icon: normalizeNodeVaultFileReference(character.icon ?? ""),
+    codexFile: normalizeNodeVaultFileReference(character.codexFile || ""),
+    images,
+    imageFile: images[0]?.path || "",
+    imagePreview: images.length ? Boolean(character.imagePreview ?? true) : false,
     hidden: Boolean(character.hidden)
   };
+}
+
+// Frontmatter keys managed by the built-in fields; custom fields may not shadow them.
+const CODEX_RESERVED_FRONTMATTER_KEYS = new Set([
+  "narrative_canvas_codex", "id", "name", "category", "kind", "role", "voice",
+  "tags", "notes", "images", "image", "image_preview", "hidden", "files", "canvas", "icon"
+]);
+
+function normalizeCodexVaultFiles(value) {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  return source
+    .map((entry) => normalizeNodeVaultFileReference(typeof entry === "string" ? entry : entry?.path || ""))
+    .filter((path) => {
+      if (!path || seen.has(path)) return false;
+      seen.add(path);
+      return true;
+    });
+}
+
+function normalizeCodexExtraFields(value) {
+  const source = Array.isArray(value)
+    ? value
+    : (value && typeof value === "object" ? Object.entries(value).map(([key, entry]) => ({ key, value: entry })) : []);
+  const normalized = [];
+  source.forEach((entry) => {
+    const key = String(entry?.key ?? "").trim();
+    if (CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase())) return;
+    const raw = entry?.value;
+    const fieldValue = raw == null ? "" : (typeof raw === "object" ? JSON.stringify(raw) : String(raw));
+    normalized.push({ key, value: fieldValue });
+  });
+  return normalized;
+}
+
+// Per-category custom-field templates: { Character: ["faction", ...], Location: [...], ... }.
+// Template keys are prefilled on new entries of that category and merged into existing ones
+// when a key is added; removing a template key never deletes entry values.
+function normalizeCodexFieldTemplates(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const normalized = {};
+  const kinds = [...new Set([...CODEX_KINDS, ...Object.keys(source).map((kind) => String(kind || "").trim()).filter(Boolean)])];
+  kinds.forEach((kind) => {
+    const seen = new Set();
+    normalized[kind] = (Array.isArray(source[kind]) ? source[kind] : [])
+      .map((key) => String(key || "").trim())
+      .filter((key) => {
+        const lower = key.toLowerCase();
+        if (!key || CODEX_RESERVED_FRONTMATTER_KEYS.has(lower) || seen.has(lower)) return false;
+        seen.add(lower);
+        return true;
+      });
+  });
+  return normalized;
+}
+
+function getCodexFieldTemplate(kind) {
+  const templates = normalizeCodexFieldTemplates(state.project.codexFieldTemplates);
+  state.project.codexFieldTemplates = templates;
+  return templates[normalizeCodexKind(kind)] || [];
+}
+
+function applyCodexTemplateToCharacter(character) {
+  const template = getCodexFieldTemplate(character.kind);
+  if (!template.length) return false;
+  const fields = normalizeCodexExtraFields(character.extraFields);
+  const present = new Set(fields.map((field) => field.key.toLowerCase()).filter(Boolean));
+  let changed = false;
+  template.forEach((key) => {
+    if (present.has(key.toLowerCase())) return;
+    fields.push({ key, value: "" });
+    changed = true;
+  });
+  if (changed) character.extraFields = fields;
+  return changed;
+}
+
+function normalizeVisionBoardImages(value, legacyReference = "") {
+  const source = Array.isArray(value) ? value : [];
+  const normalized = [];
+  source.forEach((entry, index) => {
+    const path = normalizeNodeVaultFileReference(typeof entry === "string" ? entry : entry?.path || entry?.image || entry?.reference);
+    if (!path || !CODEX_IMAGE_FILE_PATTERN.test(path) || normalized.some((item) => item.path === path)) return;
+    const fallback = getDefaultVisionBoardPlacement(index);
+    normalized.push({
+      path,
+      x: clampVisionBoardNumber(entry?.x, fallback.x, 0, 90),
+      y: clampVisionBoardNumber(entry?.y, fallback.y, 0, 88),
+      w: clampVisionBoardNumber(entry?.w, fallback.w, 10, 90)
+    });
+  });
+  const legacyPath = normalizeNodeVaultFileReference(legacyReference);
+  if (legacyPath && CODEX_IMAGE_FILE_PATTERN.test(legacyPath) && !normalized.some((entry) => entry.path === legacyPath)) {
+    const fallback = getDefaultVisionBoardPlacement(normalized.length);
+    normalized.unshift({ path: legacyPath, ...fallback });
+  }
+  return normalized.map((entry, index) => ({ ...getDefaultVisionBoardPlacement(index), ...entry }));
+}
+
+function clampVisionBoardNumber(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+}
+
+function getDefaultVisionBoardPlacement(index) {
+  const column = index % 3;
+  const row = Math.floor(index / 3) % 3;
+  return { x: 4 + column * 31, y: 5 + row * 30, w: 28 };
+}
+
+function getCharacterImages(character) {
+  return normalizeVisionBoardImages(character?.images, character?.imageFile || character?.image || "");
+}
+
+function syncCharacterImageAliases(character, images = getCharacterImages(character)) {
+  character.images = images;
+  character.imageFile = images[0]?.path || "";
+  character.imagePreview = images.length > 0;
+}
+
+function normalizeCodexKind(value) {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  if (normalized === "character") return "Character";
+  if (normalized === "location") return "Location";
+  if (normalized === "item") return "Item";
+  if (normalized === "lore") return "Lore";
+  // Custom categories keep their name; only an empty value falls back.
+  return raw || "Character";
+}
+
+function normalizeCustomCodexKinds(value) {
+  const seen = new Set(CODEX_KINDS.map((kind) => kind.toLowerCase()));
+  return (Array.isArray(value) ? value : [])
+    .map((kind) => String(kind || "").trim())
+    .filter((kind) => {
+      const lower = kind.toLowerCase();
+      if (!kind || lower === "all" || seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+}
+
+// Built-in categories plus user-defined ones plus any category already used by an
+// entry (e.g. typed straight into a markdown frontmatter `category`).
+function getCodexKindsList() {
+  const kinds = [...CODEX_KINDS];
+  const push = (kind) => {
+    const name = String(kind || "").trim();
+    if (name && !kinds.some((existing) => existing.toLowerCase() === name.toLowerCase())) kinds.push(name);
+  };
+  (Array.isArray(state.project?.customCodexKinds) ? state.project.customCodexKinds : []).forEach(push);
+  getCharacters().forEach((entry) => push(entry.kind));
+  return kinds;
+}
+
+function normalizeCodexKindFilter(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized.toLowerCase() === CODEX_ALL_FILTER.toLowerCase()) return CODEX_ALL_FILTER;
+  const kind = normalizeCodexKind(normalized);
+  return getCodexKindsList().some((existing) => existing.toLowerCase() === kind.toLowerCase()) ? kind : CODEX_ALL_FILTER;
 }
 
 function inferCharacters(project) {
@@ -24966,7 +28488,7 @@ function normalizeNodeCast(cast) {
   const seen = new Set();
   return cast
     .map((entry) => {
-      const characterId = String(entry?.characterId || entry?.id || "").trim();
+      const characterId = String(entry?.codexId || entry?.characterId || entry?.id || "").trim();
       if (!characterId) return null;
       const role = normalizeCastRole(entry?.role || entry?.relation);
       return { characterId, role };
@@ -24978,7 +28500,7 @@ function normalizeNodeCast(cast) {
       seen.add(key);
       return true;
     })
-    .slice(0, 24);
+    .slice(0, 64);
 }
 
 function normalizeCastRole(value) {
@@ -25039,14 +28561,14 @@ function getNodeCharacterLinks(node, options = {}) {
   }
 
   const dialogSpeaker = isDialogNode(node) && node.title
-    ? getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase())
+    ? getUniqueCastCharacterByName(node.title)
     : null;
   if (dialogSpeaker) links.push(createCharacterLink(dialogSpeaker, "Speaker", "dialog"));
 
   const fieldText = getNodeCharacterFieldText(node);
   if (fieldText) {
-    getCharactersMentionedInText(fieldText, dialogSpeaker?.id).forEach((character) => {
-      links.push(createCharacterLink(character, "Present", "field"));
+    getCharactersMentionedInText(fieldText, dialogSpeaker?.id).forEach((entry) => {
+      links.push(createCharacterLink(entry, getDefaultCodexRelation(entry), "field"));
     });
   }
 
@@ -25130,18 +28652,31 @@ function getCharacterMentionContext() {
   const cached = state.derived.characterMentionContext;
   const characters = getCharacters();
   if (cached?.characters === characters && cached.length === characters.length) return cached;
-  const byName = new Map();
+  const candidatesByName = new Map();
   characters.forEach((character) => {
-    const name = String(character.name || "").trim();
-    if (name) byName.set(name.toLowerCase(), character);
+    const name = String(character.name || "").trim().toLowerCase();
+    if (!name) return;
+    if (!candidatesByName.has(name)) candidatesByName.set(name, []);
+    candidatesByName.get(name).push(character);
+  });
+  const byName = new Map();
+  candidatesByName.forEach((entries, name) => {
+    if (entries.length === 1) byName.set(name, entries[0]);
   });
   const alternatives = [...byName.keys()]
     .sort((a, b) => b.length - a.length)
     .map(escapeRegExp);
   const pattern = alternatives.length ? new RegExp(alternatives.join("|"), "gi") : null;
-  const context = { characters, length: characters.length, byName, pattern };
+  const context = { characters, length: characters.length, byName, candidatesByName, pattern };
   state.derived.characterMentionContext = context;
   return context;
+}
+
+function getUniqueCastCharacterByName(value) {
+  const normalizedName = String(value || "").trim().toLowerCase();
+  if (!normalizedName) return null;
+  const matches = getCastCharacters().filter((entry) => String(entry.name || "").trim().toLowerCase() === normalizedName);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function isNodeRelatedToCharacter(node, characterId) {
@@ -25220,14 +28755,15 @@ function buildCharacterBacklinkIndex(characters = getCharacters()) {
     });
 
     if (isDialogNode(node) && node.title) {
-      const speaker = getCharacterMentionContext().byName.get(String(node.title).trim().toLowerCase());
+      const speaker = getUniqueCastCharacterByName(node.title);
       if (speaker) addDirectLink(speaker.id, "Speaker", getCastRelationLabel("Speaker"), "dialog");
     }
 
     const fieldText = getNodeCharacterFieldText(node);
     if (fieldText) {
-      getCharactersMentionedInText(fieldText).forEach((character) => {
-        addDirectLink(character.id, "Present", getCastRelationLabel("Present"), "field");
+      getCharactersMentionedInText(fieldText).forEach((entry) => {
+        const role = getDefaultCodexRelation(entry);
+        addDirectLink(entry.id, role, getCastRelationLabel(role), "field");
       });
     }
 
@@ -25248,7 +28784,7 @@ function buildCharacterBacklinkIndex(characters = getCharacters()) {
       directCharacterIdsByNodeId.get(child.id)?.forEach((characterId) => eventCharacterIds.add(characterId));
     });
     eventCharacterIds.forEach((characterId) => {
-      if (characterIds.has(characterId)) addIndexedCharacterBacklink(index, characterId, "EventFrames", node, "Characters", "event");
+      if (characterIds.has(characterId)) addIndexedCharacterBacklink(index, characterId, "EventFrames", node, t("Library references"), "event");
     });
   });
 
@@ -25602,7 +29138,7 @@ function moveStoryNode(nodeId, placement) {
   state.panel = "story";
   markProjectStructureChanged();
   renderAll();
-  requestAnimationFrame(() => scrollStoryNodeIntoView(nodeId));
+  runAfterRender(() => scrollStoryNodeIntoView(nodeId));
   setStatus(parent
     ? `${node.title || getNodeDisplayId(node)} moved inside ${parent.title || getNodeDisplayId(parent)}.`
     : `${node.title || getNodeDisplayId(node)} moved in Story.`);
@@ -26467,7 +30003,16 @@ function defaultNodeHeight(node, width = defaultNodeWidth(node)) {
   const choiceFollowupLines = choiceFollowupLabels.length
     ? Math.min(3, Math.max(1, estimateWrappedLineCount(choiceFollowupLabels.join(" · "), width - 28, 7)))
     : 0;
-  const contentHeight = 34 + 26 + titleLines * 17 + bodyLines * 17 + castLine * 24 + choicesLine * 24 + choiceFollowupLines * 23;
+  const vaultFileHeight = window.NarrativeCanvasHost?.readVaultFile
+    ? getNodeVaultFiles(node).reduce((height, entry) => {
+      if (!entry.preview) return height + 42;
+      if (CODEX_IMAGE_FILE_PATTERN.test(entry.path)) {
+        return height + normalizeVaultPreviewSize(entry.previewSize) + 46;
+      }
+      return height + 174;
+    }, 0)
+    : 0;
+  const contentHeight = 34 + 26 + titleLines * 17 + bodyLines * 17 + castLine * 24 + choicesLine * 24 + choiceFollowupLines * 23 + vaultFileHeight;
   return Math.round(clamp(contentHeight, minNodeHeight(node), maxNodeHeight(node)));
 }
 
@@ -26495,6 +30040,7 @@ function getNodeLayoutSignature(node, manualWidth, manualHeight) {
     displayBody(node),
     parseChoiceLines(node?.choices).join("\n"),
     normalizeNodeCast(node?.cast).map((entry) => `${entry.role}:${entry.characterId}`).join("|"),
+    getNodeVaultFiles(node).map((entry) => `${entry.path}:${entry.preview ? "preview" : "link"}`).join("|"),
     getNodeCustomFieldEntries(node).map((field) => `${field.key}:${field.value}`).join("|")
   ].join("\u001f");
 }
@@ -26570,7 +30116,9 @@ function maxNodeWidth(node) {
 }
 
 function maxNodeHeight(node) {
-  return isFrameNode(node) ? Number.POSITIVE_INFINITY : 620;
+  // Nodes with several previews legitimately grow tall; the reader can always
+  // resize smaller by hand.
+  return isFrameNode(node) ? Number.POSITIVE_INFINITY : 1400;
 }
 
 // DOM-measuring size, for the few callers that want the actual rendered box
@@ -26883,7 +30431,7 @@ function updateStatus() {
   if (!dom.statusText) return;
   if (!state.statusOverride) {
     if (state.activeFileId === "characters") {
-      dom.statusText.textContent = `${getFileViewLabel("characters")} - ${t("{characters} characters, {links} character links", { characters: getCharacters().length, links: getTotalCharacterLinkCount() })}`;
+      dom.statusText.textContent = `${getFileViewLabel("characters")} - ${t("{entries} library entries, {links} node links", { entries: getCharacters().length, links: getTotalCharacterLinkCount() })}`;
       return;
     }
     if (state.activeFileId === "variables") {

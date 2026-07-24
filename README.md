@@ -2,7 +2,7 @@
 
 [![Verify plugin artifacts](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg?branch=main)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml?query=branch%3Amain)
 
-Current release: [1.2.9](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.2.9) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+Current release: [1.3.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.3.0) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 Obsidian Community Plugins: [Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
@@ -54,9 +54,11 @@ Plugin settings:
 
 - `Language` options: `Follow Obsidian`, `中文`, and `English`.
 - `Sample project` opens the bundled sample project.
-- `Project save folder` and `New project file name` control where new `.ncanvas` files are created.
+- `New project root folder` and `New project file name` control the project location and naming. Each new project gets its own folder containing the `.ncanvas` file and a `Library` folder. Existing projects that already use `Codex/` keep that folder for compatibility.
 - `Auto-save interval` (seconds) sets how often Narrative Canvas writes the active project file. Empty means Obsidian’s own autosave behavior applies.
 - `Current project` shows the path that the ribbon button will open next, with a clear action.
+
+The ribbon button adapts to the vault: with several `.ncanvas` projects it opens a project picker, with exactly one it opens that project directly, and with none it creates a new default project.
 
 Canvas editing, navigation, zoom, search, preview, and node-creation commands are available under `Settings → Hotkeys`. The plugin does not assign default key combinations, so each command can be bound without overriding existing vault shortcuts.
 
@@ -68,7 +70,7 @@ Canvas editing, navigation, zoom, search, preview, and node-creation commands ar
 4. Use frames to group nodes. Frames are shown in Events Sheet by default; frame-only types can be hidden there via node type settings.
 5. Select a node and edit it in the Inspector.
 6. Use `Story` to inspect the reachable graph from `Entry`.
-7. Click `Play` to preview the current narrative path.
+7. Click `Play` to preview the current narrative path. The preview keeps a scrollable log of the cards you just passed — scroll up to reread recent story, limited to the last 30 cards, and use `Return to this card` on a past card to rewind the story to that step.
 8. Save or export when structure is ready. PNG export presets are `4096 x 4096`, `6144 x 6144`, `8192 x 8192`, and `12000 x 12000`, and filenames include the final rendered size. Very large canvases are auto-scaled to stay within browser raster limits.
 
 ### Default Node Types
@@ -116,28 +118,43 @@ You can rename, hide, or delete columns. Hidden columns are collected in each ta
 
 `Re-sort by graph` clears manual row order and sorts rows by current canvas graph position.
 
-### Characters
+### Narrative Library
 
-![Characters page](assets/screenshots/characters.png)
+![Narrative Library page](assets/screenshots/characters.png)
 
-`Characters` can be linked to nodes using Cast chips:
+`Narrative Library` contains Characters, Locations, Items, and Lore. A node's `Library references` section can link any entry and store an appropriate relation: Character references include `POV`, `Speaker`, and `Present`; Locations use `Setting`; Items use `Featured` or `Used`; Lore uses `Referenced` or `Revealed`. Entry pickers are comboboxes: click or focus to browse the category-grouped menu, or type to search by name. Drag the handle beside a reference to reorder it, or focus the handle and press the Up/Down arrow key.
 
-- `POV`
-- `Speaker`
-- `Present`
-- `Mentioned`
-- `Target`
-- `Owner`
+The Narrative Library overview uses compact masonry cards that automatically add columns as the panel grows. A single filtered result keeps the same compact card width instead of expanding into a full form. Select a card to edit the complete entry on its detail page. The detail page uses two columns: the entry's fields on the left and its `Referenced nodes` on the right, so backlinks stay visible while editing.
 
-You can also create references in node text with `@Character Name`. Character pages show backlinks in story order, including speaker scenes, present scenes, mentions, ownership, and frame scenes.
+Every entry supports custom fields. Add, rename, or remove key–value pairs under `Custom fields`; in the plugin they round-trip as plain frontmatter keys in the entry's managed Markdown file, so fields added in either place stay in sync. Frontmatter keys the plugin does not manage are read back as custom fields.
 
-Use Character focus to highlight related nodes.
+Each category also has a `Category fields` template, edited from that category's tab on the overview. Template keys are prefilled on new entries and merged into existing entries of the category; removing a template key keeps entry values. The Library tab remembers the last-opened entry detail across file switches — re-click the tab to return to the overview, where focused entries carry a highlight badge.
 
-### Document
+Beyond the four built-in categories, the `+` button beside the category tabs creates **custom categories**; an empty custom category can be removed from its tab. Custom names round-trip through the markdown `category` frontmatter, so a category typed straight into a note appears in the Library automatically.
+
+Entries can carry an **icon** image, shown on overview covers, the detail header, and the cast chips on canvas nodes. Overview covers pick, in order: the icon, a scaled snapshot of the entry's canvas board, the preview-image board layout, or a category placeholder.
+
+In the plugin, `Create board` turns an entry's images and linked files into a real Obsidian `.canvas` board: the file is embedded at the end of the entry's note, previewed read-only in the detail page (click to open; it refreshes when the `.canvas` changes), and `Detach board` reverts to the image/file sections. In the focused vision board, images can be dragged, resized from the corner grip, and layered via the right-click menu. Icons, linked vault files, and canvas boards are Obsidian-only; the standalone web app keeps the categories, fields, tags, and preview images.
+
+Type `@` in node text to search every library category. Selecting a suggestion creates an explicit ID-based reference, while the visible text remains readable. Category labels disambiguate names shared by different entries. Library entries show their node backlinks in story order.
+
+Each backlink relation is an independent collapsible section. Its header shows the relation and matching node count; expanding it reveals the ordered node list.
+
+Tags use removable tokens. Press Enter or type a comma to confirm a tag, use Backspace on an empty input to remove the last tag, or choose an existing tag from the suggestion menu.
+
+In the plugin, each managed library Markdown file stores its ID, name, category, category-specific fields, tags, notes, visibility, and preview-image board in frontmatter. The Markdown body remains available for free-form material and is preserved during synchronization. Older managed files that stored notes in the body are migrated on their next save.
+
+Library entries can reference multiple preview images. The detail page shows them in a compact embedded vision board; `Focus` opens a larger board where images can be repositioned, opened in the vault, or removed. Choose existing vault images without moving them, or import local files into the project's `Library` using the vault attachment-folder setting as a relative subfolder. Image files linked in Node Inspector use the same embedded and focused board.
+
+Use library focus to highlight related nodes. Dialog Speaker fields remain Character-only.
+
+In the plugin, a node's `Vault file` section can link multiple notes or other vault files. Each reference can be opened, removed, and previewed as Markdown on the canvas independently, and the ordered list can be rearranged by dragging the handle beside each row or with the handle's Up/Down arrow keys. Image files preview as images with an inline size slider on the card row. You can also **drag a file from Obsidian's file explorer onto a node card or onto the Vault file section** to link it. Existing single-file links migrate automatically when loaded.
+
+### Edit document
 
 ![Document editor in Twee mode](assets/screenshots/document.png)
 
-`Document.md` is a full-page, VSCode-style editor for the project's runtime narrative. A slim tab strip shows the file name, a `Plain text` / `Ink` / `Yarn` / `Twee` format switch, and the live sync status; below it an edge-to-edge monospace editor with a synced line-number gutter fills the whole pane. `Tab` and `Shift+Tab` indent and outdent, and lines do not soft-wrap, so scripts read the same as in a code editor.
+`Edit document` sits directly below the canvas in the file list. It is a full-page, VSCode-style editor for the project's runtime narrative. A slim tab strip shows the file name, a `Plain text` / `Ink` / `Yarn` / `Twee` format switch, and the live sync status; below it an edge-to-edge monospace editor with a synced line-number gutter fills the whole pane. `Tab` and `Shift+Tab` indent and outdent, and lines do not soft-wrap, so scripts read the same as in a code editor.
 
 Edit existing narrative content directly and changes sync back to the project: project title and notes, node titles and bodies, variables, existing choices, conditions, effects, and routes are compared field by field before they are merged. Canvas layout and metadata the format cannot express stay unchanged. Add or delete nodes, choices, and routes on the canvas or in the inspector; stable node IDs and body-boundary markers keep incomplete source edits from changing structure. Switching formats re-renders the same project as Plain text (Story Markdown), Ink, Yarn, or Twee 3 / SugarCube.
 
@@ -171,7 +188,7 @@ Projects saved in older versions continue to load through normalization: legacy 
 The top toolbar supports these export types:
 
 - **Text Source Mode**: after `Import MD`, this mode flag is written automatically. Project file control remains unified across project JSON, Story MD, sidecars, and engine exports.
-- **Runtime JSON**: a stripped runtime IR for external tools or custom loaders. It removes canvas layout fields while keeping nodes, links, state variables, cast, conditions, effects, play rules, and report output.
+- **Runtime JSON**: a stripped runtime IR for external tools or custom loaders. It removes canvas layout fields while keeping nodes, links, state variables, ordered library references, the compatibility Character list, conditions, effects, play rules, and report output.
 - **Story MD**: exports a readable `story.md` draft of the runtime graph including node IDs (in comments), body, conditions, choices, effects, and `goto` targets. It is used for review and text-first exploration. **Import MD** reads this format back into a canvas project and intentionally replaces the current project via explicit action.
 - **Layout JSON** exports a schema-sidecar keyed by node/link IDs for canvas-only layout data. **Import Layout** restores positions, frames, ports, collapsed states, and link metadata after Story MD import.
 - **State Schema**: exports `<slug>-state.schema.json` for Story MD workflows, including variables, portable `exportKey` names, initial values, read/write/template references, validation status, and export warning blocks. **Import State** restores variables from this sidecar after `Import MD`.

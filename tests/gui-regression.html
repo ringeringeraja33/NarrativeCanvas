@@ -401,7 +401,7 @@
         win.NarrativeCanvasApp?.setLanguage?.("zh", { persist: false, force: true });
         await wait(120);
         const fileLabels = [...doc.querySelectorAll(".nc-file-item-label")].map((item) => item.textContent.trim());
-        assert(`${label}: Chinese file tabs are localized`, ["叙事画布", "事件表", "角色", "演示设置"].every((text) => fileLabels.includes(text)), fileLabels.join(" | "));
+        assert(`${label}: Chinese file tabs are localized`, ["叙事画布", "编辑文档", "事件表", "资料库", "演示设置"].every((text) => fileLabels.includes(text)), fileLabels.join(" | "));
         assert(`${label}: Chinese play button says demo`, doc.querySelector("[data-action='play']")?.textContent.trim() === "演示");
         click(doc.querySelector("[data-file-id='variables']"));
         await waitFor(`${label}: Chinese playbook opens`, () => doc.querySelector(".playbook-tabs"));
@@ -681,7 +681,7 @@
         setControlValue(win, search, "mara");
         assert(`${label}: character search accepts input`, search.value === "mara");
         setControlValue(win, search, "");
-        click(doc.querySelector("[data-action='add-character']"));
+        click(doc.querySelector("[data-action='add-codex-entry']"));
         await waitFor(`${label}: add character creates editable card`, () => doc.querySelector("[data-character-field='name']"));
         const nameInput = doc.querySelector("[data-character-field='name']");
         const characterId = nameInput?.dataset.characterId || "";
@@ -691,8 +691,10 @@
         click(card?.querySelector("[data-action='focus-character']"));
         await waitFor(`${label}: unlinked character focus switches to story`, () => doc.querySelector("#canvasPanel")?.classList.contains("active"));
         click(doc.querySelector("[data-file-id='characters']"));
-        await waitFor(`${label}: focused unlinked character card returns`, () => Boolean(doc.querySelector(`[data-character-card-id='${characterId}'].focused`)));
-        card = doc.querySelector(`[data-character-card-id='${characterId}']`);
+        // Switching back to the Library tab restores the last-opened entry detail directly.
+        await waitFor(`${label}: focused unlinked character card returns`, () => Boolean(doc.querySelector(`[data-character-card-id='${characterId}']`)));
+        await waitFor(`${label}: focused entry detail reopens`, () => Boolean(doc.querySelector(`.character-card[data-character-card-id='${characterId}'].focused`)));
+        card = doc.querySelector(`.character-card[data-character-card-id='${characterId}']`);
         click(card?.querySelector("[data-action='clear-character-focus']"));
         await waitFor(`${label}: focused unlinked character can be cleared`, () => {
           const focusedCard = doc.querySelector(`[data-character-card-id='${characterId}'].focused`);
@@ -700,13 +702,13 @@
           const focusButton = doc.querySelector(`[data-character-card-id='${characterId}'] [data-action='focus-character']`);
           return !focusedCard && !focusChip && Boolean(focusButton);
         });
-        card = doc.querySelector(`[data-character-card-id='${characterId}']`);
+        card = doc.querySelector(`.character-card[data-character-card-id='${characterId}']`);
         click(card?.querySelector("[data-action='hide-character']"));
         await waitFor(`${label}: character card hide button removes card`, () => !doc.querySelector(`[data-character-id='${characterId}'][data-character-field='name']`));
         const restoreButton = doc.querySelector(`[data-action='show-character'][data-character-id='${characterId}']`);
         assert(`${label}: hidden character restore button appears`, Boolean(restoreButton && doc.querySelector("[data-character-restore-bar]")));
         click(restoreButton);
-        await waitFor(`${label}: hidden character can be restored`, () => Boolean(doc.querySelector(`[data-character-id='${characterId}'][data-character-field='name']`)));
+        await waitFor(`${label}: hidden character can be restored`, () => Boolean(doc.querySelector(`[data-action='open-codex-entry-detail'][data-character-id='${characterId}']`)));
         assertCardsDoNotOverflow(label, doc, ".character-card");
       }
 
@@ -854,9 +856,10 @@
       }
 
       async function loadPluginFrame() {
-        const [html, css, appJs] = await Promise.all([
+        const [html, css, pluginCss, appJs] = await Promise.all([
           fetch(`${assetUrl("index.html")}?gui=${Date.now()}`).then((response) => response.text()),
-          fetch(`${assetUrl("styles.css")}?gui=${Date.now()}`).then((response) => response.text()),
+          fetch(`${assetUrl("canvas.css")}?gui=${Date.now()}`).then((response) => response.text()),
+          fetch(`${assetUrl("plugin.css")}?gui=${Date.now()}`).then((response) => response.text()),
           fetch(`${assetUrl("app.js")}?gui=${Date.now()}`).then((response) => response.text())
         ]);
         const frame = document.createElement("iframe");
@@ -904,19 +907,43 @@
         `;
         doc.head.append(hostileTheme);
 
-        const style = doc.createElement("style");
-        style.textContent = css;
-        doc.head.append(style);
+        // Mirror the real plugin mount: document level only carries plugin.css chrome;
+        // the app and its stylesheet live inside a shadow root, out of theme reach.
+        const chrome = doc.createElement("style");
+        chrome.textContent = pluginCss;
+        doc.head.append(chrome);
 
         const host = doc.createElement("div");
         host.className = "narrative-canvas-plugin-host";
         host.style.setProperty("--nc-plugin-content-font", '"Cascadia Code", ui-monospace');
-        host.innerHTML = extractBodyHtml(html);
         doc.body.append(host);
+        const shadow = host.attachShadow({ mode: "open" });
+        const style = doc.createElement("style");
+        style.textContent = css
+          .replace(/:root(\[[^\]]+\])/g, ":host($1)")
+          .replace(/:root\b/g, ":host")
+          .replace(/(^|\n)html,\s*\nbody\b/, "$1:host")
+          .replace(/(^|\n)body\b/g, "$1:host");
+        const mountRoot = doc.createElement("template");
+        mountRoot.innerHTML = extractBodyHtml(html);
+        shadow.append(style, mountRoot.content);
+
+        // Shared assertions expect a document-like scope; delegate tree queries to the
+        // shadow root and page-level members to the iframe document.
+        const scopeDoc = {
+          querySelector: (selector) => shadow.querySelector(selector),
+          querySelectorAll: (selector) => shadow.querySelectorAll(selector),
+          elementFromPoint: (x, y) => shadow.elementFromPoint(x, y),
+          get activeElement() { return shadow.activeElement; },
+          get body() { return doc.body; },
+          get documentElement() { return doc.documentElement; },
+          get defaultView() { return win; },
+          createElement: (tag) => doc.createElement(tag)
+        };
 
         win.__saveProjectCalls = [];
         win.NarrativeCanvasHost = {
-          root: host,
+          root: shadow,
           loadProject: async () => null,
           saveProject: async (savedStateJson) => {
             win.__saveProjectCalls.push(savedStateJson);
@@ -934,8 +961,8 @@
         script.textContent = appJs;
         doc.body.append(script);
         await win.NarrativeCanvasApp.init();
-        await waitFor("plugin GUI app ready", () => Boolean(doc.querySelector(".narrative-canvas-plugin-host .app-shell[data-theme]")));
-        return { frame, win, doc };
+        await waitFor("plugin GUI app ready", () => Boolean(shadow.querySelector(".app-shell[data-theme]")));
+        return { frame, win, doc: scopeDoc };
       }
 
       async function assertPluginThemeAndFontIsolation(target) {

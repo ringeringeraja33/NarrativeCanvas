@@ -1,11 +1,37 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const projectRoot = path.resolve(__dirname, "..");
 const mainPath = path.join(projectRoot, "main.js");
 const indexPath = path.join(projectRoot, "index.html");
 const appPath = path.join(projectRoot, "app.js");
+const canvasCssPath = path.join(projectRoot, "canvas.css");
+const manifestPath = path.join(projectRoot, "manifest.json");
 const checkOnly = process.argv.includes("--check");
+
+// The web app's asset URLs carry a ?v= cache-buster. Derive it deterministically from the
+// manifest version plus a content hash of app.js and canvas.css, so it changes exactly when
+// the assets change and no one has to bump it by hand.
+function computeAssetVersionToken() {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const hash = crypto.createHash("sha256");
+  hash.update(fs.readFileSync(appPath));
+  hash.update(fs.readFileSync(canvasCssPath));
+  return `${manifest.version}-${hash.digest("hex").slice(0, 8)}`;
+}
+
+function syncIndexAssetVersion(html) {
+  const token = computeAssetVersionToken();
+  const next = html.replace(/(\.\/(?:app\.js|canvas\.css))\?v=[^"]*/g, `$1?v=${token}`);
+  if (next === html) return html;
+  if (checkOnly) {
+    console.error("index.html asset ?v= token is stale. Run: node scripts/build-plugin-bundle.cjs");
+    process.exit(1);
+  }
+  fs.writeFileSync(indexPath, next, "utf8");
+  return next;
+}
 
 function jsStringLine(line) {
   return JSON.stringify(line)
@@ -18,6 +44,25 @@ function buildIndexConstant(html) {
   const lines = html.replace(/\r\n/g, "\n").trimEnd().split("\n");
   return [
     "const CANVAS_INDEX_HTML = [",
+    ...lines.map((line) => `  ${jsStringLine(line)},`),
+    "].join(\"\\n\");"
+  ].join("\n");
+}
+
+// canvas.css is injected into the view's shadow root. `:root`/`html`/`body` selectors
+// become `:host` so the shadow host carries the page-level styling and theme/lang
+// attributes set on it keep matching.
+function buildStyleConstant(css) {
+  const source = css.replace(/\r\n/g, "\n");
+  const converted = source
+    .replace(/^html,\s*\nbody\b/m, ":host")
+    .replace(/^body\b/gm, ":host")
+    .replace(/^html\b/gm, ":host")
+    .replace(/:root(\[[^\]]+\])/g, ":host($1)")
+    .replace(/:root\b/g, ":host");
+  const lines = converted.trimEnd().split("\n");
+  return [
+    "const CANVAS_STYLE_CSS = [",
     ...lines.map((line) => `  ${jsStringLine(line)},`),
     "].join(\"\\n\");"
   ].join("\n");
@@ -96,7 +141,7 @@ function replaceFunctionBlock(source, signaturePattern, replacement) {
 }
 
 const main = fs.readFileSync(mainPath, "utf8").replace(/\r\n/g, "\n");
-const html = fs.readFileSync(indexPath, "utf8");
+const html = syncIndexAssetVersion(fs.readFileSync(indexPath, "utf8"));
 const rawApp = fs.readFileSync(appPath, "utf8");
 
 // Strip the web-only localStorage branch out of getWebProjectStorage when bundling
@@ -168,6 +213,11 @@ for (const [pattern, replacement] of pluginOnlyRewrites) {
 let next = main.replace(
   /const CANVAS_INDEX_HTML = \[[\s\S]*?\]\.join\("\\n"\);/,
   buildIndexConstant(html)
+);
+
+next = next.replace(
+  /const CANVAS_STYLE_CSS = \[[\s\S]*?\]\.join\("\\n"\);/,
+  buildStyleConstant(fs.readFileSync(canvasCssPath, "utf8"))
 );
 
 const appStartMarker = "function installNarrativeCanvasApp() {\n  // BEGIN bundled app.js\n";

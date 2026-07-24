@@ -67,13 +67,55 @@
         {
           name: "characters-cast-chips",
           file: "fixtures/characters-cast-chips.ncanvas",
-          checks(doc, saved, downloads) {
+          async checks(doc, saved, downloads) {
             const dialog = saved.project.nodes.find((node) => node.id === "n1");
-            assert("characters: cast entries preserved", Array.isArray(dialog?.cast) && dialog.cast.length === 2);
+            assert("codex: ordered references preserved", JSON.stringify(dialog?.cast?.map((entry) => `${entry.characterId}:${entry.role}`)) === JSON.stringify([
+              "c0:Speaker",
+              "c1:Present",
+              "loc0:Setting",
+              "item0:Used",
+              "lore0:Revealed"
+            ]));
+            assert("codex: all categories preserved", ["Character", "Location", "Item", "Lore"].every((kind) => saved.project.characters.some((entry) => entry.kind === kind)));
             assert("characters: search restored", doc.querySelector("[data-character-search]")?.value === "Mara");
             assert("characters: backlink rendered", doc.body.textContent.includes("Dialog"));
-            assert("characters: md export downloaded", downloads.some((item) => item.filename === "Characters.md"));
-            assert("characters: json export downloaded", downloads.some((item) => item.filename === "Characters.json"));
+            assert("codex: md export downloaded", downloads.some((item) => item.filename === "Narrative-Library.md"));
+            assert("codex: json export downloaded", downloads.some((item) => item.filename === "Narrative-Library.json"));
+            clickElement(doc.querySelector('[data-file-id="adventure"]'));
+            await waitFor("codex: canvas opened for runtime export", () => doc.querySelector(".app-shell")?.dataset.activeFile === "adventure");
+            clickElement(doc.querySelector('.node[data-node-id="n1"]'));
+            await waitFor("codex: node inspector opened", () => Boolean(doc.querySelector('.cast-editor [data-node-section="cast"]')));
+            const castToggle = doc.querySelector('.cast-editor [data-node-section="cast"]');
+            if (castToggle?.getAttribute("aria-expanded") !== "true") clickElement(castToggle);
+            await waitFor("codex: reference editor expanded", () => doc.querySelectorAll("[data-node-cast-row-index]").length === 5);
+            const libraryReferenceText = doc.querySelector(".cast-editor")?.textContent || "";
+            assert("codex: reference editor replaces the old character-only field", libraryReferenceText.includes("Library references") || libraryReferenceText.includes("资料"), libraryReferenceText);
+            const newEntryInput = doc.querySelector("[data-cast-entry-context='new']");
+            newEntryInput?.focus();
+            await waitFor("codex: every category is selectable in the reference editor", () => doc.querySelectorAll(".cast-add-row .cast-entry-suggestion-group").length === 4);
+            newEntryInput?.blur();
+            const lastDragHandle = doc.querySelector('[data-node-cast-drag="4"]');
+            lastDragHandle?.dispatchEvent(new doc.defaultView.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+            await waitFor("codex: keyboard reorder applied", () => doc.querySelector('[data-node-cast-row-index="3"] [data-cast-entry-input]')?.dataset.castEntryId === "lore0");
+            await doc.defaultView.NarrativeCanvasApp.save();
+            const reorderedState = JSON.parse(await doc.defaultView.NarrativeCanvasHost.loadProject());
+            const reordered = reorderedState.project.nodes.find((node) => node.id === "n1")?.cast?.map((entry) => entry.characterId);
+            assert("codex: reordered references persist", JSON.stringify(reordered) === JSON.stringify(["c0", "c1", "loc0", "lore0", "item0"]));
+            const bodyField = doc.querySelector('textarea[data-node-field="body"]');
+            bodyField.value = `${bodyField.value}\n@Old`;
+            bodyField.setSelectionRange(bodyField.value.length, bodyField.value.length);
+            bodyField.dispatchEvent(new doc.defaultView.InputEvent("input", { bubbles: true, inputType: "insertText", data: "d" }));
+            await waitFor("codex: location appears in @ suggestions", () => Boolean(doc.querySelector('.mention-option-kind[data-codex-kind="Location"]')));
+            const locationKindText = doc.querySelector('.mention-option-kind[data-codex-kind="Location"]')?.textContent.trim();
+            assert("codex: @ suggestion identifies its category", locationKindText === "Location" || locationKindText === "地点", locationKindText);
+            clickElement(doc.querySelector('.mention-option-kind[data-codex-kind="Location"]')?.closest("[data-mention-index]"));
+            await waitFor("codex: @ selection creates an explicit reference", () => [...doc.querySelectorAll('[data-cast-entry-input]')].filter((control) => control.dataset.castEntryId === "loc0").length === 2);
+            clickElement(doc.querySelector('[data-action="export-runtime-json"]'));
+            await waitFor("codex: runtime export downloaded", () => downloads.some((item) => item.filename === "characters-cast-chips-runtime.json"));
+            const runtime = JSON.parse(await readDownloadText(downloads, "characters-cast-chips-runtime.json"));
+            const runtimeDialog = runtime.nodes.find((node) => node.id === "n1");
+            assert("codex: runtime export includes stable ids and kinds", runtimeDialog?.cast?.some((entry) => entry.codexId === "loc0" && entry.characterId === "loc0" && entry.kind === "Location" && entry.role === "Setting"));
+            assert("codex: runtime export separates character compatibility data from the full Codex", runtime.characters.length === 2 && runtime.codex.length === 5 && runtime.codex.some((entry) => entry.id === "item0" && entry.kind === "Item"));
           },
           exports: ["export-characters-md", "export-characters-json"]
         },
@@ -163,7 +205,7 @@
             const expectedExportAllFragments = [
               "-story.md", "-layout.json", "-state.schema.json", "-export.profile.json", "-runtime.json",
               ".yarn", ".ink", ".twee", "-events.json", "Events Sheet.csv", "Node Fields.csv",
-              "Characters.md", "Characters.json", "PLAYBOOK_FILE_NAME", "svgToPngBlob", "createZipBlob(files)", "-export.zip"
+              "Narrative-Library.md", "Narrative-Library.json", "PLAYBOOK_FILE_NAME", "svgToPngBlob", "createZipBlob(files)", "-export.zip"
             ];
             assert("state key: export-all function exists", Boolean(exportAllSource));
             assert("state key: export-all includes every structured export", expectedExportAllFragments.every((fragment) => exportAllSource.includes(fragment)));

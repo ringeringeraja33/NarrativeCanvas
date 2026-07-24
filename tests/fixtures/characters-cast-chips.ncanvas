@@ -3,7 +3,7 @@
   "savedAt": "2026-06-04T00:00:00.000Z",
   "project": {
     "title": "Characters Cast Chips",
-    "notes": "Characters page and cast chips should survive roundtrip.",
+    "notes": "Codex and cast chips should survive roundtrip.",
     "characters": [
       {
         "id": "c0",
@@ -17,7 +17,32 @@
         "name": "Ivo",
         "role": "Guide",
         "voice": "Dry",
+        "tags": "tunnels",
         "notes": "Knows the tunnels."
+      },
+      {
+        "id": "loc0",
+        "name": "Old Station",
+        "kind": "Location",
+        "role": "Underground district",
+        "voice": "Abandoned",
+        "notes": "The route begins here."
+      },
+      {
+        "id": "item0",
+        "name": "Route Ledger",
+        "kind": "Item",
+        "role": "Evidence",
+        "voice": "Unique",
+        "notes": "Records every tunnel crossing."
+      },
+      {
+        "id": "lore0",
+        "name": "Tunnel Accord",
+        "kind": "Lore",
+        "role": "Faction rule",
+        "voice": "Active",
+        "notes": "No guide may erase a route."
       }
     ],
     "nodes": [
@@ -44,6 +69,18 @@
           {
             "characterId": "c1",
             "role": "Present"
+          },
+          {
+            "characterId": "loc0",
+            "role": "Setting"
+          },
+          {
+            "characterId": "item0",
+            "role": "Used"
+          },
+          {
+            "characterId": "lore0",
+            "role": "Revealed"
           }
         ]
       }

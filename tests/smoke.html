@@ -554,7 +554,15 @@
         const outsideTarget = doc.querySelector(".workspace-global-bar");
         const inspectorPin = inspectorWindow.querySelector("[data-floating-window-pin='inspector']");
         const inspectorClose = inspectorWindow.querySelector("[data-action='close-floating-inspector']");
-        assert(`${label}: centered inspector is modeless`, inspectorWindow.getAttribute("aria-modal") === "false" && win.getComputedStyle(overlay).pointerEvents === "none");
+        assert(`${label}: centered inspector blocks canvas pointer events`, inspectorWindow.getAttribute("aria-modal") === "true" && win.getComputedStyle(overlay).pointerEvents === "auto");
+        const inspectorRectForHitTest = inspectorWindow.getBoundingClientRect();
+        const overlayRectForHitTest = overlay.getBoundingClientRect();
+        const inspectorHitX = (Math.max(0, inspectorRectForHitTest.left) + Math.min(win.innerWidth, inspectorRectForHitTest.right)) / 2;
+        const inspectorHitY = (Math.max(0, inspectorRectForHitTest.top) + Math.min(win.innerHeight, inspectorRectForHitTest.bottom)) / 2;
+        const insideInspectorHit = doc.elementFromPoint(inspectorHitX, inspectorHitY);
+        const overlayBackdropHit = doc.elementFromPoint(overlayRectForHitTest.left + 4, overlayRectForHitTest.top + 4);
+        assert(`${label}: inspector window intercepts clicks across its body`, Boolean(insideInspectorHit && inspectorWindow.contains(insideInspectorHit)), `hit=${insideInspectorHit?.className || insideInspectorHit?.tagName || ""}`);
+        assert(`${label}: inspector backdrop intercepts clicks before the canvas`, overlayBackdropHit === overlay, `hit=${overlayBackdropHit?.id || overlayBackdropHit?.className || overlayBackdropHit?.tagName || ""}`);
         assert(`${label}: centered inspector pin sits beside close`, inspectorPin && inspectorClose?.previousElementSibling === inspectorPin);
         assert(`${label}: centered inspector is wider than sidebar`, inspectorWindow?.getBoundingClientRect().width > doc.querySelector(".sidebar-right")?.getBoundingClientRect().width);
         const inspectorBeforeMove = inspectorWindow.getBoundingClientRect();
@@ -650,11 +658,11 @@
           setControlValue(win, characterSearch, "");
           await wait(80);
         }
-        click(doc.querySelector("[data-action='add-character']"));
+        click(doc.querySelector("[data-action='add-codex-entry']"));
         await waitFor(`${label}: character can be added before delete-all check`, () => Boolean(doc.querySelector("#charactersPanel [data-action='delete-character']")));
         const deleteCharacterButton = doc.querySelector("#charactersPanel [data-action='delete-character']");
         if (deleteCharacterButton) click(deleteCharacterButton);
-        const noCharactersText = localizedEmptyText(win, "No characters yet.", "还没有角色。");
+        const noCharactersText = localizedEmptyText(win, "No library entries yet.", "还没有资料条目。");
         await waitFor(`${label}: last character can be deleted`, () => doc.querySelector("#charactersPanel")?.textContent.includes(noCharactersText));
         await win.NarrativeCanvasApp.save({ silent: true });
         const savedWithoutCharacters = readSavedProject(win);
@@ -803,6 +811,7 @@
         win.__createdProjectPaths = [];
         win.__createdProjectStates = [];
         win.__createdProjectOptions = [];
+        win.__markdownRenderCalls = [];
         win.NarrativeCanvasHost = {
           root: host,
           loadProject: async () => null,
@@ -828,6 +837,16 @@
             return ensuredProjectPath;
           },
           previewNewProjectFile: async (_savedStateJson, options = {}) => `${options.filenameProjectTitle || "Untitled"}-smoke-${newProjectIndex + 1}.ncanvas`,
+          searchVaultFiles: async () => ["Notes/preview.md", "Notes/second.md", "Assets/portrait.svg", "Assets/location.svg"],
+          openVaultFile: async (path) => { win.__openedVaultFile = path; return path; },
+          readVaultFile: async (path) => ({ path, text: path === "Notes/second.md" ? "# Second preview" : "# Rendered preview\n\n**Bold text** and [a link](https://example.com).", isMarkdown: true }),
+          getVaultResourceUrl: () => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' fill='%237c5cff'/%3E%3C/svg%3E",
+          loadCodexEntries: async () => [],
+          renderVaultMarkdown: async (markdown, container, sourcePath) => {
+            win.__markdownRenderCalls.push({ markdown, sourcePath });
+            container.innerHTML = '<h1>Rendered preview</h1><p><strong>Bold text</strong> and <a href="https://example.com">a link</a>.</p>';
+            return true;
+          },
           getProjectFile: () => ensuredProjectPath
         };
 
@@ -837,6 +856,126 @@
         await win.NarrativeCanvasApp.init();
         await waitFor("plugin app ready", () => Boolean(doc.querySelector(".narrative-canvas-plugin-host .app-shell[data-theme]")));
         return { frame, win, doc };
+      }
+
+      async function verifyVaultMarkdownCardPreview(label, win, doc) {
+        if (!win.NarrativeCanvasHost?.renderVaultMarkdown) return;
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas opens for Markdown Vault preview`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
+        const sectionToggle = doc.querySelector("#nodePanel [data-action='toggle-node-section'][data-node-section='vaultFile']");
+        if (sectionToggle?.getAttribute("aria-expanded") !== "true") click(sectionToggle);
+        await waitFor(`${label}: Vault file section expands for Markdown preview`, () => Boolean(doc.querySelector("#nodePanel [data-node-vault-file-index]")));
+        const focusVaultInput = (input) => {
+          if (!input) return;
+          input.focus();
+          input.dispatchEvent(new win.FocusEvent("focusin", { bubbles: true }));
+        };
+        focusVaultInput(doc.querySelector("#nodePanel [data-node-vault-file-index]"));
+        await waitFor(`${label}: Vault file suggestion appears for Markdown preview`, () => Boolean(doc.querySelector("#nodePanel [data-vault-file-path='Notes/preview.md']")));
+        click(doc.querySelector("#nodePanel [data-vault-file-path='Notes/preview.md']"));
+        await waitFor(`${label}: linked Markdown file exposes preview switch`, () => Boolean(doc.querySelector(".node [data-action='toggle-node-vault-preview']")));
+        click(doc.querySelector(".node [data-action='toggle-node-vault-preview']"));
+        await waitFor(`${label}: canvas Vault preview renders Markdown`, () => Boolean(doc.querySelector(".node-vault-preview.is-markdown h1")));
+        const preview = doc.querySelector(".node-vault-preview.is-markdown");
+        assert(`${label}: Markdown Vault preview renders heading and emphasis`, preview?.querySelector("h1")?.textContent === "Rendered preview" && preview?.querySelector("strong")?.textContent === "Bold text");
+        assert(`${label}: Markdown Vault preview preserves links`, preview?.querySelector("a")?.getAttribute("href") === "https://example.com");
+        assert(`${label}: Markdown Vault preview uses resolved source path`, win.__markdownRenderCalls.at(-1)?.sourcePath === "Notes/preview.md");
+        focusVaultInput(doc.querySelector("#nodePanel .node-vault-file-item.is-add [data-node-vault-file-index]"));
+        await waitFor(`${label}: second Vault file suggestion appears`, () => Boolean(doc.querySelector("#nodePanel [data-vault-file-path='Notes/second.md']")));
+        click(doc.querySelector("#nodePanel [data-vault-file-path='Notes/second.md']"));
+        await waitFor(`${label}: two Vault files stay linked`, () => doc.querySelectorAll("#nodePanel .node-vault-file-item:not(.is-add)").length === 2);
+        const linkedInputs = Array.from(doc.querySelectorAll("#nodePanel .node-vault-file-item:not(.is-add) [data-node-vault-file-index]"));
+        assert(`${label}: multiple Vault files preserve order`, linkedInputs[0]?.value === "Notes/preview.md" && linkedInputs.find((input) => input.value === "Notes/second.md"));
+        await win.NarrativeCanvasApp.save({ silent: true });
+        const savedLinkedNode = readSavedProject(win)?.project?.nodes?.find((node) => node.vaultFiles?.length === 2);
+        assert(`${label}: multiple Vault files persist in the canonical array`, savedLinkedNode?.vaultFiles?.map((entry) => entry.path).join("|") === "Notes/preview.md|Notes/second.md" && !("vaultFile" in savedLinkedNode));
+        const secondPreviewToggle = doc.querySelector(".node [data-action='toggle-node-vault-preview'][data-node-vault-file-index='1']");
+        click(secondPreviewToggle);
+        await waitFor(`${label}: each linked Vault file can preview independently`, () => doc.querySelectorAll(".node-vault-preview.is-markdown").length === 2);
+        doc.querySelector("#nodePanel [data-node-vault-drag='1']")?.dispatchEvent(new win.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+        await waitFor(`${label}: linked Vault files can be reordered`, () => doc.querySelector("#nodePanel .node-vault-file-item:not(.is-add) input")?.value === "Notes/second.md");
+        const vaultDragHandle = doc.querySelector("#nodePanel [data-node-vault-drag='1']");
+        const vaultDropRow = doc.querySelector("#nodePanel [data-node-vault-row-index='0']");
+        assert(`${label}: linked Vault files expose drag handles`, Boolean(vaultDragHandle && vaultDropRow));
+        if (vaultDragHandle && vaultDropRow) {
+          const handleRect = vaultDragHandle.getBoundingClientRect();
+          const dropRect = vaultDropRow.getBoundingClientRect();
+          vaultDragHandle.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 41, button: 0, clientX: handleRect.x + 4, clientY: handleRect.y + 4 }));
+          win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 41, clientX: dropRect.x + 20, clientY: dropRect.y + 2 }));
+          win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 41, clientX: dropRect.x + 20, clientY: dropRect.y + 2 }));
+          await waitFor(`${label}: dragging reorders linked Vault files`, () => doc.querySelector("#nodePanel .node-vault-file-item:not(.is-add) input")?.value === "Notes/preview.md");
+        }
+        click(doc.querySelector("#nodePanel [data-action='clear-node-vault-file'][data-node-vault-file-index='0']"));
+        await waitFor(`${label}: removing one Vault file preserves the other`, () => doc.querySelectorAll("#nodePanel .node-vault-file-item:not(.is-add)").length === 1 && Boolean(doc.querySelector(".node-vault-preview")));
+        click(doc.querySelector("#nodePanel [data-action='clear-node-vault-file'][data-node-vault-file-index='0']"));
+        await waitFor(`${label}: Markdown Vault preview cleanup removes card preview`, () => !doc.querySelector(".node-vault-preview"));
+        focusVaultInput(doc.querySelector("#nodePanel .node-vault-file-item.is-add [data-node-vault-file-index]"));
+        await waitFor(`${label}: image Vault suggestion appears in the inspector`, () => Boolean(doc.querySelector("#nodePanel [data-vault-file-path='Assets/portrait.svg']")));
+        click(doc.querySelector("#nodePanel [data-vault-file-path='Assets/portrait.svg']"));
+        await waitFor(`${label}: linked image exposes a preview switch`, () => Boolean(doc.querySelector(".node [data-action='toggle-node-vault-preview'][data-node-vault-file-index='0']")));
+        click(doc.querySelector(".node [data-action='toggle-node-vault-preview'][data-node-vault-file-index='0']"));
+        await waitFor(`${label}: linked image previews as an image on the card`, () => Boolean(doc.querySelector(".node-vault-preview.is-image img")));
+        await waitFor(`${label}: image preview size slider appears on the card`, () => Boolean(doc.querySelector(".node .node-vault-size-slider")));
+        const sizeSlider = doc.querySelector(".node .node-vault-size-slider");
+        setControlValue(win, sizeSlider, "292");
+        sizeSlider.dispatchEvent(new win.Event("change", { bubbles: true }));
+        await waitFor(`${label}: slider resizes the card image preview`, () => (doc.querySelector(".node-vault-preview.is-image")?.style.getPropertyValue("--vault-preview-h") || "").trim() === "292px");
+        await win.NarrativeCanvasApp.save({ silent: true });
+        const sizedNode = readSavedProject(win)?.project?.nodes?.find((node) => (node.vaultFiles || []).some((entry) => entry.previewSize === 292));
+        assert(`${label}: image preview size persists in project data`, Boolean(sizedNode));
+        click(doc.querySelector("#nodePanel [data-action='clear-node-vault-file'][data-node-vault-file-index='0']"));
+        // Dropping a file dragged from the Obsidian UI onto a node card links it.
+        win.NarrativeCanvasHost.getDraggedVaultFile = () => "Notes/preview.md";
+        const dropTarget = doc.querySelector(".node[data-node-id='n1']");
+        dropTarget.dispatchEvent(new win.DragEvent("dragover", { bubbles: true, cancelable: true }));
+        dropTarget.dispatchEvent(new win.DragEvent("drop", { bubbles: true, cancelable: true }));
+        delete win.NarrativeCanvasHost.getDraggedVaultFile;
+        await waitFor(`${label}: dropping an Obsidian file onto a node links it`, () => {
+          const node = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((entry) => entry.id === dropTarget.dataset.nodeId);
+          return (node?.vaultFiles || []).some((entry) => entry.path === "Notes/preview.md");
+        });
+      }
+
+      async function verifyCodexImageFile(label, win, doc) {
+        if (!win.NarrativeCanvasHost?.loadCodexEntries) return;
+        click(doc.querySelector("[data-file-id='characters']"));
+        await waitFor(`${label}: Codex opens for image file`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "characters");
+        if (!doc.querySelector("[data-character-card-id]")) click(doc.querySelector("[data-action='add-codex-entry']"));
+        await waitFor(`${label}: Codex entry exists for image file`, () => Boolean(doc.querySelector("[data-character-card-id]")));
+        if (!doc.querySelector("[data-codex-image-drop]")) click(doc.querySelector("[data-action='open-codex-entry-detail']"));
+        await waitFor(`${label}: Codex detail opens for image file`, () => Boolean(doc.querySelector("[data-codex-image-drop]")));
+        const card = doc.querySelector("[data-character-card-id]");
+        assert(`${label}: Codex image target stays plugin-only`, Boolean(card?.querySelector("[data-codex-image-drop]")));
+        click(card?.querySelector("[data-action='choose-codex-image-file']"));
+        await waitFor(`${label}: Codex image suggestion appears`, () => Boolean(doc.querySelector("[data-vault-file-path='Assets/portrait.svg']")));
+        assert(`${label}: Codex image suggestions exclude non-image files`, !doc.querySelector("[data-vault-file-path='Notes/preview.md']"));
+        click(doc.querySelector("[data-vault-file-path='Assets/portrait.svg']"));
+        await waitFor(`${label}: Codex image renders in the embedded vision board`, () => Boolean(doc.querySelector('[data-character-card-id] .vision-board-tile[title="Assets/portrait.svg"] img')));
+        click(doc.querySelector("[data-character-card-id] [data-action='choose-codex-image-file']"));
+        await waitFor(`${label}: second Codex image suggestion appears`, () => Boolean(doc.querySelector("[data-vault-file-path='Assets/location.svg']")));
+        assert(`${label}: local image import is inside the compact picker`, Boolean(doc.querySelector("[data-codex-image-picker] [data-action='import-local-codex-images']")));
+        click(doc.querySelector("[data-vault-file-path='Assets/location.svg']"));
+        await waitFor(`${label}: multiple Codex images share one embedded board`, () => doc.querySelectorAll("[data-character-card-id] .vision-board-canvas.is-embedded .vision-board-tile").length === 2);
+        assert(`${label}: Codex image editor stays compact`, !doc.querySelector(".codex-image-target") && Boolean(doc.querySelector("[data-codex-local-image-input][multiple]")) && doc.querySelectorAll("[data-character-card-id] [data-action='choose-codex-image-file']").length === 1);
+        click(doc.querySelector("[data-character-card-id] [data-action='open-vision-board']"));
+        await waitFor(`${label}: focused Codex vision board opens`, () => doc.querySelector("#visionBoardDialog")?.open && doc.querySelectorAll("#visionBoardCanvas .vision-board-tile").length === 2);
+        click(doc.querySelector("#visionBoardDialog [data-action='close-vision-board']"));
+        assert(`${label}: Codex omits the raw image path input`, !doc.querySelector("[data-character-image-file]"));
+        const detailColumns = doc.querySelector(".codex-detail-columns");
+        assert(`${label}: entry detail shows referenced nodes in the left column`, detailColumns?.firstElementChild?.classList.contains("codex-detail-references"));
+        const detailFieldRow = doc.querySelector(".codex-detail-main .field-row");
+        assert(`${label}: entry detail stacks one field per row`, detailFieldRow ? win.getComputedStyle(detailFieldRow).gridTemplateColumns.trim().split(/\s+/).length === 1 : false);
+        const codexVaultInput = doc.querySelector("[data-character-vault-file-input]");
+        assert(`${label}: entry detail offers a vault file search input`, Boolean(codexVaultInput));
+        codexVaultInput.focus();
+        codexVaultInput.dispatchEvent(new win.FocusEvent("focusin", { bubbles: true }));
+        await waitFor(`${label}: entry vault file suggestion appears`, () => Boolean(doc.querySelector(".codex-vault-file-input-wrap [data-vault-file-path='Notes/preview.md']")));
+        click(doc.querySelector(".codex-vault-file-input-wrap [data-vault-file-path='Notes/preview.md']"));
+        await waitFor(`${label}: entry links the vault file`, () => Boolean(doc.querySelector(".codex-vault-file-row [data-vault-file-reference='Notes/preview.md']")));
+        const savedEntryFiles = win.NarrativeCanvasApp.getSavedState()?.project?.characters?.find((entry) => (entry.vaultFiles || []).length)?.vaultFiles;
+        assert(`${label}: entry vault files persist in project data`, JSON.stringify(savedEntryFiles) === JSON.stringify(["Notes/preview.md"]));
+        click(doc.querySelector(".codex-vault-file-row [data-action='remove-codex-vault-file']"));
+        await waitFor(`${label}: entry vault file can be removed`, () => !doc.querySelector(".codex-vault-file-row"));
       }
 
       async function runCoreChecks(label, target) {
@@ -1185,13 +1324,26 @@
         assert(`${label}: canvas query hides on characters`, isElementHidden(win, doc.querySelector("#queryInput")));
         const characterGrid = doc.querySelector(".character-grid");
         const characterGridStyle = win.getComputedStyle(characterGrid);
+        await wait(80);
         assert(
           `${label}: character cards use masonry grid`,
           characterGridStyle.display === "grid" && doc.querySelector(".character-column") && Number.parseFloat(characterGridStyle.gap) >= 12,
           `display=${characterGridStyle.display} gap=${characterGridStyle.gap} columns=${doc.querySelectorAll(".character-column").length}`
         );
-        const characterCard = doc.querySelector(".character-card");
-        assert(`${label}: character cards do not overflow`, characterCard && characterCard.scrollWidth <= characterCard.clientWidth + 1, `scroll=${characterCard?.scrollWidth} client=${characterCard?.clientWidth}`);
+        const overviewCard = doc.querySelector(".codex-overview-card");
+        assert(`${label}: character cards do not overflow`, overviewCard && overviewCard.scrollWidth <= overviewCard.clientWidth + 1, `scroll=${overviewCard?.scrollWidth} client=${overviewCard?.clientWidth}`);
+        assert(
+          `${label}: a single Codex result keeps a compact waterfall column`,
+          overviewCard && (characterGrid.getBoundingClientRect().width < 600 || overviewCard.getBoundingClientRect().width < characterGrid.getBoundingClientRect().width * 0.7),
+          `card=${overviewCard?.getBoundingClientRect().width} grid=${characterGrid.getBoundingClientRect().width}`
+        );
+        assert(`${label}: codex exposes all category tabs`, doc.querySelectorAll("[data-codex-category-tabs] [data-codex-kind]").length === 5);
+        click(overviewCard);
+        await waitFor(`${label}: Codex overview card opens detail editor`, () => Boolean(doc.querySelector(".codex-detail-editor .character-card")));
+        const characterCard = doc.querySelector(".codex-detail-editor .character-card");
+        assert(`${label}: Codex detail exposes category and tag fields`, Boolean(characterCard?.querySelector("[data-character-field='kind']") && characterCard?.querySelector("[data-character-tag-editor]")));
+        click(doc.querySelector("[data-action='close-codex-entry-detail']"));
+        await waitFor(`${label}: Codex detail returns to overview`, () => Boolean(doc.querySelector(".character-grid .codex-overview-card")));
         setControlValue(win, characterSearch, "mara");
         assert(`${label}: characters search accepts input`, characterSearch.value === "mara");
         assert(`${label}: character filter bar updates`, doc.querySelector("[data-character-filter-bar]")?.textContent.toLowerCase().includes("mara"));
@@ -1653,8 +1805,12 @@
         assert(`${label}: canvas can reset to 3 percent before focus checks`, doc.querySelector("#zoomReadout")?.textContent === "3%");
         const singleFocusNode = doc.querySelector(".node[data-node-id='n5']") || doc.querySelector(".node[data-node-id]");
         click(singleFocusNode);
-        await waitFor(`${label}: single-click node focuses at 100 percent`, () => doc.querySelector("#zoomReadout")?.textContent === "100%");
+        await waitFor(`${label}: single-click selects the node`, () => Boolean(doc.querySelector(".node.selected[data-node-id]")) || win.NarrativeCanvasApp.getSavedState()?.ui?.selectedNodeId === singleFocusNode.dataset.nodeId);
+        assert(`${label}: single-click keeps the current zoom`, doc.querySelector("#zoomReadout")?.textContent === "3%", doc.querySelector("#zoomReadout")?.textContent);
         assert(`${label}: single-click node does not open inline editor`, !doc.querySelector("[data-inline-node-field]"));
+        for (let index = 0; index < 12; index += 1) {
+          click(doc.querySelector("[data-action='zoom-in']"));
+        }
         await win.NarrativeCanvasApp.save({ silent: true });
         const savedLinksBeforePortCreate = readSavedProject(win)?.project?.links || [];
         const savedLinkCountBeforePortCreate = savedLinksBeforePortCreate.length;
@@ -1791,13 +1947,25 @@
         const mentionPopoverStyle = win.getComputedStyle(mentionPopover);
         assert(`${label}: mention menu uses vertical scrolling`, mentionPopoverStyle.overflowY === "auto" && mentionPopover.scrollHeight > mentionPopover.clientHeight + 1, `overflowY=${mentionPopoverStyle.overflowY} scroll=${mentionPopover.scrollHeight} client=${mentionPopover.clientHeight}`);
         assert(`${label}: mention menu does not show horizontal scrollbar`, mentionPopoverStyle.overflowX === "hidden" && mentionPopover.scrollWidth <= mentionPopover.clientWidth + 1, `overflowX=${mentionPopoverStyle.overflowX} scroll=${mentionPopover.scrollWidth} client=${mentionPopover.clientWidth}`);
+        const firstMentionName = mentionPopover.querySelector("[data-mention-index='0'] .mention-option-main strong")?.textContent.trim() || "";
         click(mentionPopover.querySelector("[data-mention-index='0']"));
         await wait(80);
         assert(`${label}: mention menu fully hides after selecting character`, isElementHidden(win, mentionPopover) && mentionPopover.innerHTML === "");
-        assert(`${label}: mention insert writes selected character`, mentionBodyField.value.includes("@You"));
+        assert(`${label}: mention insert writes selected character`, Boolean(firstMentionName) && mentionBodyField.value.includes(`@${firstMentionName}`), `first=${firstMentionName} value=${mentionBodyField.value}`);
         const queryInput = doc.querySelector("#queryInput");
         setControlValue(win, queryInput, "boarding");
         assert(`${label}: global search accepts input`, queryInput.value === "boarding");
+
+        const aiBall = doc.querySelector("#aiFloatingButton");
+        const aiBallRect = aiBall.getBoundingClientRect();
+        aiBall.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 51, button: 0, clientX: aiBallRect.x + 8, clientY: aiBallRect.y + 8 }));
+        win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 51, clientX: aiBallRect.x + 128, clientY: aiBallRect.y - 96 }));
+        win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 51, clientX: aiBallRect.x + 128, clientY: aiBallRect.y - 96 }));
+        await waitFor(`${label}: AI ball drag repositions the launcher`, () => aiBall.style.left !== "" && aiBall.style.top !== "");
+        const aiBallMoved = aiBall.getBoundingClientRect();
+        assert(`${label}: AI ball moves with the pointer`, Math.abs(aiBallMoved.x - (aiBallRect.x + 120)) < 8 && Math.abs(aiBallMoved.y - (aiBallRect.y - 104)) < 8, `dx=${Math.round(aiBallMoved.x - aiBallRect.x)} dy=${Math.round(aiBallMoved.y - aiBallRect.y)}`);
+        click(aiBall);
+        assert(`${label}: click after drag does not toggle the AI window`, doc.querySelector("#aiFloatingWindow")?.hidden !== false);
 
         const leftToggle = doc.querySelector("[data-sidebar-toggle='left']");
         click(leftToggle);
@@ -1989,6 +2157,8 @@
         await verifyCanvasRadialMenu(label, win, doc);
         await verifyFrameContextMenu(label, win, doc);
         await verifyInspectorFloatAndPlaySync(label, win, doc);
+        await verifyVaultMarkdownCardPreview(label, win, doc);
+        await verifyCodexImageFile(label, win, doc);
         await verifyProjectDocument(label, win, doc);
 
         const status = doc.querySelector(".status-bar").getBoundingClientRect();
@@ -2029,7 +2199,7 @@
           assert(`${label}: new project title uses input`, doc.querySelector("#vaultProjectTitle")?.textContent === "Smoke Draft");
           assert(`${label}: new project save state is saved after file creation`, doc.querySelector("#projectDirtyIndicator")?.dataset.saveState === "saved");
           click(doc.querySelector("[data-file-id='characters']"));
-          await waitFor(`${label}: new project characters page re-renders`, () => doc.querySelector("#charactersPanel")?.textContent.includes("No characters yet."));
+          await waitFor(`${label}: new project characters page re-renders`, () => doc.querySelector("#charactersPanel")?.textContent.includes("No library entries yet."));
           assert(`${label}: new project characters page drops sample names`, !doc.querySelector("#charactersPanel")?.textContent.includes("Co-writer"));
           await verifyCanDeleteAllCharactersAndVariables(label, win, doc);
 
