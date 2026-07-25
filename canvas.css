@@ -1547,9 +1547,50 @@ button {
 
 .expand-editor-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
+}
+
+.expand-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.expand-editor-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--background-modifier-border);
+}
+
+.expand-format-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.expand-format-button:hover {
+  border-color: var(--background-modifier-border);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 .expand-editor-header {

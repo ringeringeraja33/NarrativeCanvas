@@ -37,6 +37,8 @@ const DEFAULT_SETTINGS = {
   autoSaveIntervalSeconds: DEFAULT_AUTO_SAVE_INTERVAL_SECONDS,
   language: DEFAULT_LANGUAGE_SETTING,
   contentFont: DEFAULT_CONTENT_FONT_SETTING,
+  spellCheck: false,
+  aiNarrativeKnowledge: false,
   aiEndpoint: "",
   aiApiKey: "",
   aiModel: "",
@@ -46,6 +48,10 @@ const DEFAULT_SETTINGS = {
 const PLUGIN_TEXT = {
   zh: {
     "Auto-save interval": "自动保存间隔",
+    "Spell check": "拼写检查",
+    "Show the browser's spell-check underlines in Narrative Canvas text fields. Off by default.": "在 Narrative Canvas 的文本框中显示浏览器的拼写检查下划线。默认关闭。",
+    "Narrative craft guidance": "叙事创作指导",
+    "Prime the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft. Off by default; it adds tokens to each request.": "为 AI 注入精简的叙事、人物与结构原则，使其建议更贴合成熟的叙事创作方法。默认关闭；开启会增加每次请求的 token 消耗。",
     "Choose the Narrative Canvas interface language. Auto follows Obsidian's interface language.": "选择 Narrative Canvas 界面语言。自动会跟随 Obsidian 界面语言。",
     "Content font": "正文字体",
     "Choose the font used for Play and narrative content.": "选择 Play 和叙事正文使用的字体。",
@@ -623,6 +629,7 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     this.applyContentFontSettings();
     window.NarrativeCanvasApp?.configureAutoSave?.();
     window.NarrativeCanvasApp?.setLanguage?.(this.getEffectiveLanguage());
+    window.NarrativeCanvasApp?.applySpellCheckSetting?.();
   }
 
   async clearCurrentProjectPath() {
@@ -1427,6 +1434,8 @@ class NarrativeCanvasView extends ItemView {
         saveProject: (savedStateJson) => this.plugin.saveProjectFile(savedStateJson),
         getAutoSaveIntervalMs: () => this.plugin.getAutoSaveIntervalMs(),
         getLanguage: () => this.plugin.getEffectiveLanguage(),
+        getSpellCheck: () => Boolean(this.plugin.settings?.spellCheck),
+        getAiNarrativeKnowledge: () => Boolean(this.plugin.settings?.aiNarrativeKnowledge),
         aiChat: (payload) => this.plugin.requestAi(payload),
         aiChatStream: (payload, onDelta, signal) => this.plugin.requestAiStream(payload, onDelta, signal),
         hasAiConfig: () => this.plugin.hasAiConfig(),
@@ -1674,6 +1683,19 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName(text("Spell check"))
+      .setDesc(text("Show the browser's spell-check underlines in Narrative Canvas text fields. Off by default."))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(Boolean(this.plugin.settings.spellCheck))
+          .onChange(async (value) => {
+            this.plugin.settings.spellCheck = Boolean(value);
+            await this.plugin.savePluginData();
+            this.plugin.notifyCanvasSettingsChanged();
+          });
+      });
+
+    new Setting(containerEl)
       .setName(text("Current project"))
       .setDesc(this.plugin.getCurrentProjectPath() || text("No project file selected. The ribbon button will create a new project with the default name."))
       .addButton((button) => {
@@ -1692,6 +1714,17 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("API endpoint").setDesc("OpenAI-compatible chat completions endpoint. Gemini works via https://generativelanguage.googleapis.com/v1beta/openai/chat/completions.").addText((input) => input.setPlaceholder("https://api.example.com/v1/chat/completions").setValue(this.plugin.settings.aiEndpoint || "").onChange(async (value) => { this.plugin.settings.aiEndpoint = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
     new Setting(containerEl).setName("API key").setDesc("Stored in this plugin's local data.json.").addText((input) => { input.inputEl.type = "password"; input.setValue(this.plugin.settings.aiApiKey || "").onChange(async (value) => { this.plugin.settings.aiApiKey = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }); });
     new Setting(containerEl).setName("Model").setDesc("For Gemini, e.g. gemini-2.0-flash.").addText((input) => input.setPlaceholder("model-name").setValue(this.plugin.settings.aiModel || "").onChange(async (value) => { this.plugin.settings.aiModel = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
+    new Setting(containerEl)
+      .setName(text("Narrative craft guidance"))
+      .setDesc(text("Prime the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft. Off by default; it adds tokens to each request."))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(Boolean(this.plugin.settings.aiNarrativeKnowledge))
+          .onChange(async (value) => {
+            this.plugin.settings.aiNarrativeKnowledge = Boolean(value);
+            await this.plugin.savePluginData();
+          });
+      });
 
   }
 }
@@ -1704,6 +1737,8 @@ function normalizeSettings(rawSettings) {
     autoSaveIntervalSeconds: normalizeAutoSaveIntervalSeconds(source.autoSaveIntervalSeconds),
     language: normalizeLanguageSetting(source.language),
     contentFont: normalizeContentFontSetting(source.contentFont),
+    spellCheck: Boolean(source.spellCheck),
+    aiNarrativeKnowledge: Boolean(source.aiNarrativeKnowledge),
     aiEndpoint: String(source.aiEndpoint || "").trim(),
     aiApiKey: String(source.aiApiKey || "").trim(),
     aiModel: String(source.aiModel || "").trim(),
@@ -3630,9 +3665,50 @@ const CANVAS_STYLE_CSS = [
   "",
   ".expand-editor-shell {",
   "  display: grid;",
-  "  grid-template-rows: auto minmax(0, 1fr);",
+  "  grid-template-rows: auto auto minmax(0, 1fr);",
   "  width: 100%;",
   "  height: 100%;",
+  "}",
+  "",
+  ".expand-editor-toolbar {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  gap: 4px;",
+  "  padding: 8px 12px;",
+  "  border-bottom: 1px solid var(--background-modifier-border);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".expand-editor-toolbar-sep {",
+  "  width: 1px;",
+  "  height: 20px;",
+  "  margin: 0 4px;",
+  "  background: var(--background-modifier-border);",
+  "}",
+  "",
+  ".expand-format-button {",
+  "  display: inline-flex;",
+  "  align-items: center;",
+  "  justify-content: center;",
+  "  min-width: 30px;",
+  "  height: 28px;",
+  "  padding: 0 8px;",
+  "  border: 1px solid transparent;",
+  "  border-radius: var(--radius-s);",
+  "  appearance: none;",
+  "  -webkit-appearance: none;",
+  "  background: transparent;",
+  "  box-shadow: none;",
+  "  color: var(--text-muted);",
+  "  font-size: 13px;",
+  "  font-weight: 600;",
+  "  cursor: pointer;",
+  "}",
+  "",
+  ".expand-format-button:hover {",
+  "  border-color: var(--background-modifier-border);",
+  "  background: var(--background-modifier-hover);",
+  "  color: var(--text-normal);",
   "}",
   "",
   ".expand-editor-header {",
@@ -12456,10 +12532,10 @@ const CANVAS_INDEX_HTML = [
   "    \u003clink rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"./assets/icons/favicon-32x32.png\"\u003e",
   "    \u003clink rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"./assets/icons/apple-touch-icon.png\"\u003e",
   "    \u003clink rel=\"manifest\" href=\"./site.webmanifest\"\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.1-a96dd595\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.2-803b7a90\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
-  "    \u003cdiv class=\"app-shell\"\u003e",
+  "    \u003cdiv class=\"app-shell\" spellcheck=\"false\"\u003e",
   "      \u003caside class=\"sidebar sidebar-left\" data-sidebar=\"left\"\u003e",
   "        \u003cheader class=\"pane-header\"\u003e",
   "          \u003cdiv class=\"pane-title\"\u003e",
@@ -12876,6 +12952,16 @@ const CANVAS_INDEX_HTML = [
   "          \u003c/div\u003e",
   "          \u003cbutton class=\"icon-button\" type=\"button\" data-action=\"close-expand-editor\" aria-label=\"Close editor\" title=\"Close editor\"\u003ex\u003c/button\u003e",
   "        \u003c/header\u003e",
+  "        \u003cdiv class=\"expand-editor-toolbar\" role=\"toolbar\" aria-label=\"Formatting\"\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"bold\" title=\"Bold\" aria-label=\"Bold\"\u003e\u003cb\u003eB\u003c/b\u003e\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"italic\" title=\"Italic\" aria-label=\"Italic\"\u003e\u003ci\u003eI\u003c/i\u003e\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"strike\" title=\"Strikethrough\" aria-label=\"Strikethrough\"\u003e\u003cs\u003eS\u003c/s\u003e\u003c/button\u003e",
+  "          \u003cspan class=\"expand-editor-toolbar-sep\" aria-hidden=\"true\"\u003e\u003c/span\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"h2\" title=\"Heading 2\" aria-label=\"Heading 2\"\u003eH2\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"h3\" title=\"Heading 3\" aria-label=\"Heading 3\"\u003eH3\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"quote\" title=\"Quote\" aria-label=\"Quote\"\u003e\u0026gt;\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"list\" title=\"Bullet list\" aria-label=\"Bullet list\"\u003e•\u003c/button\u003e",
+  "        \u003c/div\u003e",
   "        \u003ctextarea id=\"expandEditorInput\" class=\"expand-editor-input\" spellcheck=\"false\" aria-label=\"Expanded text editor\"\u003e\u003c/textarea\u003e",
   "      \u003c/div\u003e",
   "    \u003c/dialog\u003e",
@@ -13022,7 +13108,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=1.3.1-a96dd595\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=1.3.2-803b7a90\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -14246,6 +14332,7 @@ function installNarrativeCanvasApp() {
       "Reject": "拒绝",
       "Send": "发送",
       "Connection settings": "连接设置",
+      "Narrative craft guidance": "叙事创作指导",
       "Save settings": "保存设置",
       "Context": "上下文",
       "Entire canvas": "整个画布",
@@ -14325,6 +14412,7 @@ function installNarrativeCanvasApp() {
       "Summary": "简介",
       "Open large editor": "打开大编辑器",
       "Edit text": "编辑文本",
+      "text": "文本",
       "New field name": "新字段名",
       "Remove template field: {key}": "移除模板字段：{key}",
       "Remove from template. Entry values are kept.": "从模板移除。条目中的已有值会保留。",
@@ -15536,6 +15624,7 @@ function installNarrativeCanvasApp() {
     reloadCodexFiles,
     refreshCodexCanvasPreviews,
     refreshAiLauncher,
+    applySpellCheckSetting,
     importStoryMarkdownText,
     importStoryLayoutText,
     importStateSchemaText
@@ -17226,9 +17315,38 @@ function installNarrativeCanvasApp() {
     updateStatus();
   }
 
+  // Spell check is off by default so writers don't get red underlines on names, Ink/
+  // Yarn syntax, or variable keys. Setting `spellcheck` on the app-shell cascades to
+  // every descendant field that doesn't override it. The plugin exposes a toggle.
+  function isSpellCheckEnabled() {
+    const host = window.NarrativeCanvasHost;
+    if (host?.getSpellCheck) return Boolean(host.getSpellCheck());
+    try {
+      return getWebProjectStorage()?.getItem("narrative-canvas-spellcheck-v1") === "1";
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function applySpellCheckSetting() {
+    const shell = dom.root?.classList?.contains("app-shell") ? dom.root : dom.root?.querySelector?.(".app-shell");
+    shell?.setAttribute("spellcheck", isSpellCheckEnabled() ? "true" : "false");
+  }
+
+  function isAiNarrativeKnowledgeEnabled() {
+    const host = window.NarrativeCanvasHost;
+    if (host?.getAiNarrativeKnowledge) return Boolean(host.getAiNarrativeKnowledge());
+    try {
+      return getWebProjectStorage()?.getItem("narrative-canvas-ai-knowledge-v1") === "1";
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function renderShellState() {
     dom.root?.setAttribute("data-theme", state.theme);
     dom.root?.setAttribute("lang", state.language === "zh" ? "zh-CN" : "en");
+    applySpellCheckSetting();
     dom.themeHost?.setAttribute("data-theme", state.theme);
     dom.themeHost?.setAttribute("lang", state.language === "zh" ? "zh-CN" : "en");
     localizeStaticShell();
@@ -24174,7 +24292,7 @@ function installNarrativeCanvasApp() {
     const patch = state.aiPendingPatch;
     const operations = Array.isArray(patch?.operations) ? patch.operations : [];
     const proposal = patch ? `<section class="ai-proposal"><h3>${escapeHtml(patch.summary || t("Canvas change proposal"))}</h3><ol>${operations.map((op) => `<li><code>${escapeHtml(op.op || "")}</code> ${escapeHtml(op.node?.title || op.id || op.from || "")}</li>`).join("")}</ol><div class="ai-actions"><button data-action="ai-apply-patch" type="button">${t("Apply to canvas")}</button><button data-action="ai-reject-patch" type="button">${t("Reject")}</button></div></section>` : "";
-    const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
+    const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><label class="ai-config-check"><input type="checkbox" data-ai-config="narrativeKnowledge"${isAiNarrativeKnowledgeEnabled() ? " checked" : ""}>${t("Narrative craft guidance")}</label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
     const composerLocked = state.aiBusy;
     dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span>${state.aiMessages.length ? `<button class="ai-copy-button" data-action="ai-copy-conversation" type="button" title="${escapeAttr(t("Copy conversation"))}" aria-label="${escapeAttr(t("Copy conversation"))}">${aiCopyIcon()}<span>${escapeHtml(t("Copy conversation"))}</span></button>` : ""}</div><div class="ai-messages" aria-live="polite">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<div class="ai-composer"><textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change. Enter to send; Shift+Enter for a new line."))}" ${composerLocked ? "disabled" : ""}>${escapeHtml(state.aiPromptDraft)}</textarea><div class="ai-composer-toolbar"><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Responding...") : t("Send")}</button>${state.aiBusy ? `<button data-action="ai-stop" type="button">${t("Stop")}</button>` : ""}<button data-action="ai-clear" type="button">${t("Clear")}</button></div></div></div></div>`;
     dom.aiPanel.querySelector(".ai-messages")?.scrollTo?.({ top: 999999 });
@@ -24235,6 +24353,49 @@ function installNarrativeCanvasApp() {
 
   function closeExpandEditor() {
     if (dom.expandEditorDialog?.open) dom.expandEditorDialog.close();
+  }
+
+  // Lightweight Markdown formatting for the expanded text editor. Inline styles wrap
+  // the selection; block styles toggle a prefix on each selected line.
+  function applyExpandEditorFormat(action) {
+    const input = dom.expandEditorInput;
+    if (!input) return;
+    const value = input.value;
+    const start = input.selectionStart ?? value.length;
+    const end = input.selectionEnd ?? start;
+    const selected = value.slice(start, end);
+    const inlineWrap = { bold: "**", italic: "*", strike: "~~" }[action];
+
+    let nextValue;
+    let nextStart;
+    let nextEnd;
+    if (inlineWrap) {
+      const inner = selected || t("text");
+      nextValue = `${value.slice(0, start)}${inlineWrap}${inner}${inlineWrap}${value.slice(end)}`;
+      nextStart = start + inlineWrap.length;
+      nextEnd = nextStart + inner.length;
+    } else {
+      const prefix = { h2: "## ", h3: "### ", quote: "> ", list: "- " }[action];
+      if (!prefix) return;
+      // Expand the range to whole lines, then toggle the prefix on each.
+      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+      let lineEnd = value.indexOf("\n", end);
+      if (lineEnd === -1) lineEnd = value.length;
+      const block = value.slice(lineStart, lineEnd);
+      const allPrefixed = block.split("\n").every((line) => line.startsWith(prefix));
+      const nextBlock = block.split("\n")
+        .map((line) => (allPrefixed ? line.slice(prefix.length) : `${prefix}${line}`))
+        .join("\n");
+      nextValue = `${value.slice(0, lineStart)}${nextBlock}${value.slice(lineEnd)}`;
+      nextStart = lineStart;
+      nextEnd = lineStart + nextBlock.length;
+    }
+
+    input.value = nextValue;
+    input.setSelectionRange(nextStart, nextEnd);
+    input.focus();
+    // Route through the same input path as typing so the node field and history update.
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   function handleExpandEditorClose() {
@@ -24315,6 +24476,17 @@ function installNarrativeCanvasApp() {
       links: state.project.links.filter((link) => !selected.size || nodes.some((node) => node.id === link.from || node.id === link.to))
     };
   }
+
+  // Optional, opt-in craft primer (Settings → AI → Narrative craft guidance). Kept
+  // compact so it costs a bounded number of tokens per request.
+  const AI_NARRATIVE_KNOWLEDGE_PROMPT = `Apply established narrative craft when advising or editing:
+  - Structure: give the story a clear shape (setup, escalating complications, climax, resolution). Every scene should turn on a change in value and advance goal, conflict, or stakes. Cut scenes that do not.
+  - Causality: connect events with "therefore/but", not "and then". Plant setups before payoffs; honor foreshadowing.
+  - Character: drive people by concrete wants (external goal) and needs (internal lack). Reveal character through choices under pressure. Give antagonists their own coherent logic. Track arcs of change.
+  - Conflict & stakes: keep dramatic tension via opposing forces and meaningful consequences; raise stakes as the story proceeds.
+  - Scene craft: enter late, leave early; ground exposition in action and subtext; let dialogue carry conflict and voice rather than plain information.
+  - Branching: make choices reflect values and produce consequences that matter; avoid false choices; keep routes thematically coherent.
+  Use these as guidance, not rigid rules; respect the author's intent and existing material.`;
 
   function aiSystemPrompt() {
     return `You are the Narrative Canvas copilot. Discuss narrative design in the user's language. Respect contextScope: focused-neighborhood is partial, so never claim that an unlisted node or link is missing; ask for Entire canvas context before making whole-project integrity claims. When canvas edits are requested, finish with exactly one JSON object inside a fenced json block: {"summary":"...","operations":[{"op":"addNode","tempId":"new_1","node":{"type":"Dialog","title":"...","body":"","frameId":"","turns":[{"speaker":"...","line":"..."}]},"placement":{"x":500,"y":300}}]}. Every operation MUST include op. Allowed operations: addNode {op,tempId,node,placement}, updateNode {op,id,changes}, addLink {op,from,to,label,choiceOptionId}, deleteLink {op,id}. Never delete nodes. Node types include Content, Dialog, Choice, Marker, Clue, StorySequence and other existing project types. Preserve existing text unless asked. For addNode, include type,title,body,frameId; Dialog turns use {speaker,line}; Choice must include matching choiceOptions and choices. Keep operations <= 12.`;
@@ -24425,7 +24597,10 @@ function installNarrativeCanvasApp() {
       else scheduleAiStreamFrame();
     };
     try {
-      const payload = { messages: [{ role: "system", content: aiSystemPrompt() }, { role: "system", content: `Canvas context:\n${JSON.stringify(buildAiContext())}` }, ...payloadMessages], temperature: 0.4 };
+      const systemMessages = [{ role: "system", content: aiSystemPrompt() }];
+      if (isAiNarrativeKnowledgeEnabled()) systemMessages.push({ role: "system", content: AI_NARRATIVE_KNOWLEDGE_PROMPT });
+      systemMessages.push({ role: "system", content: `Canvas context:\n${JSON.stringify(buildAiContext())}` });
+      const payload = { messages: [...systemMessages, ...payloadMessages], temperature: 0.4 };
       let content = "";
       if (window.NarrativeCanvasHost?.aiChatStream) content = await window.NarrativeCanvasHost.aiChatStream(payload, onDelta, signal);
       else if (window.NarrativeCanvasHost?.aiChat) content = aiResponseContent(await window.NarrativeCanvasHost.aiChat(payload));
@@ -26615,6 +26790,7 @@ function installNarrativeCanvasApp() {
     if (action === "close-vision-board") { closeVisionBoard(); return; }
     if (action === "expand-node-field") { openExpandEditor(target.dataset.nodeId, target.dataset.expandField, target.dataset.expandTitle); return; }
     if (action === "close-expand-editor") { closeExpandEditor(); return; }
+    if (action === "expand-editor-format") { applyExpandEditorFormat(target.dataset.format); return; }
     if (action === "open-codex-reference") { void openCodexReference(target.dataset.vaultFileReference); return; }
     if (action === "remove-codex-image") { removeCodexImage(target.dataset.characterId, Number(target.dataset.codexImageIndex)); return; }
     if (action === "remove-codex-vault-file") { removeCodexVaultFile(target.dataset.characterId, Number(target.dataset.codexVaultFileIndex)); return; }

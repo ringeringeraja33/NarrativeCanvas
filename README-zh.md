@@ -16,6 +16,8 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 界面支持英文与中文。网页端提供 `EN / 中` 浮动切换按钮；Obsidian 插件设置提供 `语言` 选项，支持跟随 Obsidian 界面语言。
 
+多行节点文本框带有展开按钮，可打开大号居中编辑器，并配有格式工具栏（加粗、斜体、删除线、H2/H3、引用、无序列表），对选区包裹或加行前缀 Markdown。所有文本框默认关闭拼写检查下划线；Obsidian 插件设置提供 `拼写检查` 开关可开启。
+
 ![Narrative Canvas 主画布](assets/screenshots/main-canvas-zh.png)
 
 ### 安全提醒
@@ -203,6 +205,8 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 画布左下角的 **AI** 按钮会打开实验性助手。用你自己的语言讨论剧情，再让它修改画布——它会回复一份操作建议（新增/更新节点、新增/删除连线），你可以**应用到画布**或**拒绝**；在应用之前画布不会改变。当前选中的节点会作为上下文传入，面板支持中英文。消息按 Markdown 显示，支持文本、单条复制和整段对话复制；回车发送，Shift+回车换行。窗口支持拖拽、缩放和置顶；关闭后再次点击 AI 按钮，会恢复默认位置与大小。
 
 网页端点开**连接设置**，填入任意 OpenAI 兼容接口（endpoint、API key、模型），配置仅保存在本地浏览器。插件端在插件设置中填写相同字段，API key 保存在插件本地 `data.json`，请求通过 Obsidian 的 `requestUrl` 发送。该功能为实验性，标记为 **Beta**。
+
+可选的**叙事创作指导**开关（默认关闭）会为 AI 注入精简的叙事、人物与结构原则，使其建议更贴合成熟的叙事创作方法；仅在开启时按有限量增加每次请求的 token。
 
 任意 OpenAI 兼容服务均可使用。例如 Google **Gemini** 提供 OpenAI 兼容端点——填入 `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`、Gemini API key（来自 Google AI Studio）以及 `gemini-2.0-flash` 之类的模型即可。
 

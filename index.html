@@ -10,10 +10,10 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32x32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png">
     <link rel="manifest" href="./site.webmanifest">
-    <link rel="stylesheet" href="./canvas.css?v=1.3.1-a96dd595">
+    <link rel="stylesheet" href="./canvas.css?v=1.3.2-803b7a90">
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" spellcheck="false">
       <aside class="sidebar sidebar-left" data-sidebar="left">
         <header class="pane-header">
           <div class="pane-title">
@@ -430,6 +430,16 @@
           </div>
           <button class="icon-button" type="button" data-action="close-expand-editor" aria-label="Close editor" title="Close editor">x</button>
         </header>
+        <div class="expand-editor-toolbar" role="toolbar" aria-label="Formatting">
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="bold" title="Bold" aria-label="Bold"><b>B</b></button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="italic" title="Italic" aria-label="Italic"><i>I</i></button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="strike" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button>
+          <span class="expand-editor-toolbar-sep" aria-hidden="true"></span>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="h2" title="Heading 2" aria-label="Heading 2">H2</button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="h3" title="Heading 3" aria-label="Heading 3">H3</button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="quote" title="Quote" aria-label="Quote">&gt;</button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="list" title="Bullet list" aria-label="Bullet list">•</button>
+        </div>
         <textarea id="expandEditorInput" class="expand-editor-input" spellcheck="false" aria-label="Expanded text editor"></textarea>
       </div>
     </dialog>
@@ -576,6 +586,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=1.3.1-a96dd595"></script>
+    <script src="./app.js?v=1.3.2-803b7a90"></script>
   </body>
 </html>

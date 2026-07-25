@@ -1,13 +1,13 @@
-# Narrative Canvas 1.3.1
+# Narrative Canvas 1.3.2
 
 ## English
 
-- The in-canvas AI launcher is now hidden inside Obsidian until the AI endpoint, API key, and model are all configured, and it appears or hides live as you edit those settings ([#9](https://github.com/ringeringeraja33/NarrativeCanvas/issues/9)). In the standalone web app it stays visible, since its configuration form lives behind the button.
-- Node text fields have an **expand button** that opens a large centered editor for comfortable long-form writing; edits write straight through to the node and sync back to the inspector on close ([#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)).
-- Documented that the AI assistant works with **Google Gemini** through its OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, model e.g. `gemini-2.0-flash`); the settings hints now mention it ([#11](https://github.com/ringeringeraja33/NarrativeCanvas/issues/11)).
+- The large centered node editor now has a **formatting toolbar** (bold, italic, strikethrough, H2/H3, quote, bullet list) that wraps or line-prefixes the selection with Markdown and writes straight through to the node ([#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)).
+- Added a **Spell check** setting (off by default) so the browser's red spell-check underlines no longer appear on names, Ink/Yarn syntax, or variable keys in Narrative Canvas text fields; turn it on in plugin settings if you want it ([#7](https://github.com/ringeringeraja33/NarrativeCanvas/issues/7)).
+- Added an optional **Narrative craft guidance** toggle (off by default) that primes the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft. It adds a bounded amount of tokens per request only when enabled ([#12](https://github.com/ringeringeraja33/NarrativeCanvas/issues/12)).
 
 ## 中文
 
-- 画布内的 AI 悬浮按钮在 Obsidian 中会先隐藏，直到 AI 端点、API key 和模型三项都配置完成；编辑这些设置时按钮会即时显示或隐藏（[#9](https://github.com/ringeringeraja33/NarrativeCanvas/issues/9)）。独立网页版仍保持显示，因为其配置表单就在按钮后面。
-- 节点文本字段新增**展开按钮**，可打开一个大号居中编辑器，方便长文写作；编辑直接写入节点，关闭时同步回检查器（[#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)）。
-- 说明 AI 助手可通过 Google Gemini 的 OpenAI 兼容端点使用（`https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`，模型如 `gemini-2.0-flash`）；设置项提示已补充相关说明（[#11](https://github.com/ringeringeraja33/NarrativeCanvas/issues/11)）。
+- 大号居中的节点编辑器新增**格式工具栏**（加粗、斜体、删除线、H2/H3、引用、无序列表），对选区包裹或加行前缀 Markdown，并直接写入节点（[#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)）。
+- 新增**拼写检查**设置（默认关闭），Narrative Canvas 文本框不再对人物名、Ink/Yarn 语法或变量键显示浏览器的红色拼写波浪线；需要时可在插件设置中开启（[#7](https://github.com/ringeringeraja33/NarrativeCanvas/issues/7)）。
+- 新增可选的**叙事创作指导**开关（默认关闭），开启后为 AI 注入精简的叙事、人物与结构原则，使其建议更贴合成熟的叙事创作方法；仅在开启时按有限量增加每次请求的 token（[#12](https://github.com/ringeringeraja33/NarrativeCanvas/issues/12)）。

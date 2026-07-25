@@ -961,6 +961,7 @@
         await waitFor(`${label}: focused Codex vision board opens`, () => doc.querySelector("#visionBoardDialog")?.open && doc.querySelectorAll("#visionBoardCanvas .vision-board-tile").length === 2);
         click(doc.querySelector("#visionBoardDialog [data-action='close-vision-board']"));
         assert(`${label}: Codex omits the raw image path input`, !doc.querySelector("[data-character-image-file]"));
+        assert(`${label}: text fields default to spell-check off`, doc.querySelector(".app-shell")?.getAttribute("spellcheck") === "false");
         const detailColumns = doc.querySelector(".codex-detail-columns");
         assert(`${label}: entry detail shows referenced nodes in the left column`, detailColumns?.firstElementChild?.classList.contains("codex-detail-references"));
         const detailFieldRow = doc.querySelector(".codex-detail-main .field-row");
@@ -1823,6 +1824,13 @@
           const expandInput = doc.querySelector("#expandEditorInput");
           setControlValue(win, expandInput, "Large editor body edit");
           await waitFor(`${label}: large editor writes through to the node`, () => readSavedProject(win) && win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
+          assert(`${label}: large editor offers a formatting toolbar`, Boolean(doc.querySelector("#expandEditorDialog .expand-editor-toolbar [data-action='expand-editor-format']")));
+          expandInput.focus();
+          expandInput.setSelectionRange(0, 5);
+          click(doc.querySelector("#expandEditorDialog [data-action='expand-editor-format'][data-format='bold']"));
+          await waitFor(`${label}: toolbar wraps the selection in bold markdown`, () => expandInput.value.startsWith("**Large**"));
+          setControlValue(win, expandInput, "Large editor body edit");
+          await waitFor(`${label}: node body restored before closing`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
           click(doc.querySelector("#expandEditorDialog [data-action='close-expand-editor']"));
           await waitFor(`${label}: large editor closes and syncs the inspector`, () => !doc.querySelector("#expandEditorDialog")?.open && doc.querySelector("#nodePanel [data-node-field='body']")?.value === "Large editor body edit");
         }

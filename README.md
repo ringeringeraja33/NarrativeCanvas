@@ -16,6 +16,8 @@ It is intended for structure planning, branch validation, pitch preparation, and
 
 The interface supports both English and Chinese. The web app has an `EN / 中` floating language switch, and the Obsidian plugin has a `Language` setting that can follow Obsidian’s language.
 
+Multi-line node text fields have an expand button that opens a large centered editor with a formatting toolbar (bold, italic, strikethrough, H2/H3, quote, bullet list) that wraps or prefixes the selection with Markdown. Spell-check underlines are off by default across all text fields; the Obsidian plugin has a `Spell check` setting to turn them on.
+
 ![Narrative Canvas main canvas](assets/screenshots/main-canvas.png)
 
 ## Safety Notes
@@ -206,6 +208,8 @@ All exporters share one mapping of node slugs and variable names. Complex variab
 The **AI** button at the bottom-left of the canvas opens an experimental copilot. Discuss the story in your own language, then ask it to change the canvas — it replies with a proposal of operations (add / update nodes, add / remove links) that you **Apply to canvas** or **Reject**. Nothing changes until you apply. The current node selection is passed as context, and the panel is bilingual. Messages render Markdown, support text, and can be copied individually or as a full conversation. Press Enter to send and Shift+Enter to insert a new line. The window can be dragged, resized, and pinned; reopening it from the AI button restores its default position and size.
 
 In the web app, open **Connection settings** and point it at any OpenAI-compatible endpoint (endpoint URL, API key, model); that config is stored only in your browser. In the Obsidian plugin, configure the same fields in plugin settings; the API key is stored in the plugin's local `data.json`, and requests use Obsidian's `requestUrl`. The feature is experimental and marked **Beta**.
+
+An optional **Narrative craft guidance** toggle (off by default) primes the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft; it adds a bounded amount of tokens per request only when enabled.
 
 Any OpenAI-compatible provider works. For example, Google **Gemini** exposes an OpenAI-compatible endpoint — use `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` with a Gemini API key (from Google AI Studio) and a model such as `gemini-2.0-flash`.
 
