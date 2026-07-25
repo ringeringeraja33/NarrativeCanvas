@@ -596,6 +596,7 @@
         click(doc.querySelector("[data-action='play']"));
         const playDialog = doc.querySelector("#playDialog");
         await waitFor(`${label}: play panel opens`, () => playDialog?.open);
+        assert(`${label}: Play preview renders Markdown from the node body`, Boolean(playDialog.querySelector(".play-current-card .play-body-text")));
         click(playDialog.querySelector("[data-action='toggle-play-float']"));
         await waitFor(`${label}: play panel floats to center`, () => playDialog.classList.contains("floating"));
         const playPin = playDialog.querySelector("[data-floating-window-pin='play']");
@@ -1825,14 +1826,14 @@
           setControlValue(win, expandInput, "Large editor body edit");
           await waitFor(`${label}: large editor writes through to the node`, () => readSavedProject(win) && win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
           assert(`${label}: large editor offers a formatting toolbar`, Boolean(doc.querySelector("#expandEditorDialog .expand-editor-toolbar [data-action='expand-editor-format']")));
+          setControlValue(win, expandInput, "Large body");
+          await waitFor(`${label}: node body reset before formatting`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large body"));
           expandInput.focus();
           expandInput.setSelectionRange(0, 5);
           click(doc.querySelector("#expandEditorDialog [data-action='expand-editor-format'][data-format='bold']"));
-          await waitFor(`${label}: toolbar wraps the selection in bold markdown`, () => expandInput.value.startsWith("**Large**"));
-          setControlValue(win, expandInput, "Large editor body edit");
-          await waitFor(`${label}: node body restored before closing`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
+          await waitFor(`${label}: toolbar wraps the selection in bold markdown`, () => expandInput.value === "**Large** body" && win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "**Large** body"));
           click(doc.querySelector("#expandEditorDialog [data-action='close-expand-editor']"));
-          await waitFor(`${label}: large editor closes and syncs the inspector`, () => !doc.querySelector("#expandEditorDialog")?.open && doc.querySelector("#nodePanel [data-node-field='body']")?.value === "Large editor body edit");
+          await waitFor(`${label}: large editor closes and syncs the inspector`, () => !doc.querySelector("#expandEditorDialog")?.open && doc.querySelector("#nodePanel [data-node-field='body']")?.value === "**Large** body");
         }
         for (let index = 0; index < 12; index += 1) {
           click(doc.querySelector("[data-action='zoom-in']"));

@@ -27214,6 +27214,39 @@ function renderPreviewHistoryCards() {
   return `<section class="play-history" aria-label="${escapeAttr(t("Recent cards"))}">${trimmedNotice}${cards.join("")}</section>`;
 }
 
+// Renders the limited Markdown the node editor's toolbar produces into safe HTML for
+// the Play preview (the reader-facing view). HTML is escaped first, then a small,
+// fixed set of block and inline markers is converted — no raw HTML passes through.
+function renderNarrativeMarkdown(text) {
+  const source = String(text ?? "");
+  const inline = (line) => escapeHtml(line)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+    .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+  const lines = source.split("\n");
+  const out = [];
+  let listItems = null;
+  const flushList = () => {
+    if (listItems) { out.push(`<ul>${listItems.join("")}</ul>`); listItems = null; }
+  };
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, "");
+    const listMatch = line.match(/^\s*-\s+(.*)$/);
+    if (listMatch) { (listItems ||= []).push(`<li>${inline(listMatch[1])}</li>`); continue; }
+    flushList();
+    const h3 = line.match(/^###\s+(.*)$/);
+    const h2 = line.match(/^##\s+(.*)$/);
+    const quote = line.match(/^>\s+(.*)$/);
+    if (h3) out.push(`<h5>${inline(h3[1])}</h5>`);
+    else if (h2) out.push(`<h4>${inline(h2[1])}</h4>`);
+    else if (quote) out.push(`<blockquote>${inline(quote[1])}</blockquote>`);
+    else if (line.trim() === "") out.push("<br>");
+    else out.push(`<p>${inline(line)}</p>`);
+  }
+  flushList();
+  return out.join("");
+}
+
 // Linked image previews (the ones enabled on the node card) also show on play cards.
 function renderPlayCardImages(node) {
   const host = window.NarrativeCanvasHost;
@@ -27255,7 +27288,7 @@ function renderPreviewHistoryCard(node, step, index) {
           <span>${index + 1}</span>
         </div>
         <h4>${escapeHtml(title)}</h4>
-        <p>${escapeHtml(body)}</p>
+        <div class="play-body-text">${turns.length ? `<p>${escapeHtml(body)}</p>` : renderNarrativeMarkdown(body)}</div>
         ${renderPlayCardImages(node)}
         ${canRestore ? `
           <button class="play-history-jump" type="button" data-action="play-history-jump" data-play-step-index="${index}" title="${escapeAttr(t("Rewind the story to this card. Later steps are discarded."))}">
@@ -27342,7 +27375,7 @@ function renderPreviewNode(nodeId, options = {}) {
         <span>${pageNumber} / ${pageTotal}</span>
       </div>
       <h3>${escapeHtml(runtimeTitle)}</h3>
-      <p>${escapeHtml(runtimeBody)}</p>
+      <div class="play-body-text">${dialogTurns.length ? `<p>${escapeHtml(runtimeBody)}</p>` : renderNarrativeMarkdown(runtimeBody)}</div>
       ${renderPlayCardImages(node)}
       ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
       ${customFields}

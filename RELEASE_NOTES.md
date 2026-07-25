@@ -1,13 +1,11 @@
-# Narrative Canvas 1.3.2
+# Narrative Canvas 1.3.3
 
 ## English
 
-- The large centered node editor now has a **formatting toolbar** (bold, italic, strikethrough, H2/H3, quote, bullet list) that wraps or line-prefixes the selection with Markdown and writes straight through to the node ([#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)).
-- Added a **Spell check** setting (off by default) so the browser's red spell-check underlines no longer appear on names, Ink/Yarn syntax, or variable keys in Narrative Canvas text fields; turn it on in plugin settings if you want it ([#7](https://github.com/ringeringeraja33/NarrativeCanvas/issues/7)).
-- Added an optional **Narrative craft guidance** toggle (off by default) that primes the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft. It adds a bounded amount of tokens per request only when enabled ([#12](https://github.com/ringeringeraja33/NarrativeCanvas/issues/12)).
+- The Play preview now **renders the Markdown** produced by the node editor's formatting toolbar — bold, italic, strikethrough, `##`/`###` headings, `>` quotes, and `-` bullet lists show as formatted text for the reader instead of literal markers ([#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)). The markup is escaped before conversion, so no raw HTML passes through; node bodies remain plain text in the inspector and exports.
+- Fixed a CI-only smoke-test timeout in the large-editor check.
 
 ## 中文
 
-- 大号居中的节点编辑器新增**格式工具栏**（加粗、斜体、删除线、H2/H3、引用、无序列表），对选区包裹或加行前缀 Markdown，并直接写入节点（[#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)）。
-- 新增**拼写检查**设置（默认关闭），Narrative Canvas 文本框不再对人物名、Ink/Yarn 语法或变量键显示浏览器的红色拼写波浪线；需要时可在插件设置中开启（[#7](https://github.com/ringeringeraja33/NarrativeCanvas/issues/7)）。
-- 新增可选的**叙事创作指导**开关（默认关闭），开启后为 AI 注入精简的叙事、人物与结构原则，使其建议更贴合成熟的叙事创作方法；仅在开启时按有限量增加每次请求的 token（[#12](https://github.com/ringeringeraja33/NarrativeCanvas/issues/12)）。
+- 演示预览现在会**渲染节点编辑器格式工具栏生成的 Markdown**——加粗、斜体、删除线、`##`/`###` 标题、`>` 引用和 `-` 无序列表会以格式化文本呈现给读者，而不再显示字面标记（[#10](https://github.com/ringeringeraja33/NarrativeCanvas/issues/10)）。标记会先转义再转换，不会有原始 HTML 通过；节点正文在检查器和导出中仍为纯文本。
+- 修复大编辑器检查在 CI 环境下的冒烟测试超时。

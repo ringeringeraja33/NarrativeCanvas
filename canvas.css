@@ -9685,6 +9685,44 @@ select:focus {
   white-space: pre-wrap;
 }
 
+/* Rendered narrative Markdown in the Play preview. */
+.play-body-text p {
+  margin: 0 0 0.6em;
+  white-space: pre-wrap;
+}
+
+.play-body-text p:last-child {
+  margin-bottom: 0;
+}
+
+.play-body-text h4 {
+  margin: 0.4em 0 0.3em;
+  font-family: var(--nc-font-interface);
+  font-size: 17px;
+}
+
+.play-body-text h5 {
+  margin: 0.4em 0 0.3em;
+  font-family: var(--nc-font-interface);
+  font-size: 15px;
+}
+
+.play-body-text blockquote {
+  margin: 0 0 0.6em;
+  padding-left: 12px;
+  border-left: 3px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.play-body-text ul {
+  margin: 0 0 0.6em;
+  padding-left: 20px;
+}
+
+.play-body-text li {
+  margin: 2px 0;
+}
+
 .play-fields {
   display: grid;
   gap: 8px;

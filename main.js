@@ -11803,6 +11803,44 @@ const CANVAS_STYLE_CSS = [
   "  white-space: pre-wrap;",
   "}",
   "",
+  "/* Rendered narrative Markdown in the Play preview. */",
+  ".play-body-text p {",
+  "  margin: 0 0 0.6em;",
+  "  white-space: pre-wrap;",
+  "}",
+  "",
+  ".play-body-text p:last-child {",
+  "  margin-bottom: 0;",
+  "}",
+  "",
+  ".play-body-text h4 {",
+  "  margin: 0.4em 0 0.3em;",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 17px;",
+  "}",
+  "",
+  ".play-body-text h5 {",
+  "  margin: 0.4em 0 0.3em;",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 15px;",
+  "}",
+  "",
+  ".play-body-text blockquote {",
+  "  margin: 0 0 0.6em;",
+  "  padding-left: 12px;",
+  "  border-left: 3px solid var(--background-modifier-border);",
+  "  color: var(--text-muted);",
+  "}",
+  "",
+  ".play-body-text ul {",
+  "  margin: 0 0 0.6em;",
+  "  padding-left: 20px;",
+  "}",
+  "",
+  ".play-body-text li {",
+  "  margin: 2px 0;",
+  "}",
+  "",
   ".play-fields {",
   "  display: grid;",
   "  gap: 8px;",
@@ -12532,7 +12570,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003clink rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"./assets/icons/favicon-32x32.png\"\u003e",
   "    \u003clink rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"./assets/icons/apple-touch-icon.png\"\u003e",
   "    \u003clink rel=\"manifest\" href=\"./site.webmanifest\"\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.2-803b7a90\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.3-f394f8c7\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\" spellcheck=\"false\"\u003e",
@@ -13108,7 +13146,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=1.3.2-803b7a90\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=1.3.3-f394f8c7\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -40274,6 +40312,39 @@ function installNarrativeCanvasApp() {
     return `<section class="play-history" aria-label="${escapeAttr(t("Recent cards"))}">${trimmedNotice}${cards.join("")}</section>`;
   }
 
+  // Renders the limited Markdown the node editor's toolbar produces into safe HTML for
+  // the Play preview (the reader-facing view). HTML is escaped first, then a small,
+  // fixed set of block and inline markers is converted — no raw HTML passes through.
+  function renderNarrativeMarkdown(text) {
+    const source = String(text ?? "");
+    const inline = (line) => escapeHtml(line)
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+      .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    const lines = source.split("\n");
+    const out = [];
+    let listItems = null;
+    const flushList = () => {
+      if (listItems) { out.push(`<ul>${listItems.join("")}</ul>`); listItems = null; }
+    };
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, "");
+      const listMatch = line.match(/^\s*-\s+(.*)$/);
+      if (listMatch) { (listItems ||= []).push(`<li>${inline(listMatch[1])}</li>`); continue; }
+      flushList();
+      const h3 = line.match(/^###\s+(.*)$/);
+      const h2 = line.match(/^##\s+(.*)$/);
+      const quote = line.match(/^>\s+(.*)$/);
+      if (h3) out.push(`<h5>${inline(h3[1])}</h5>`);
+      else if (h2) out.push(`<h4>${inline(h2[1])}</h4>`);
+      else if (quote) out.push(`<blockquote>${inline(quote[1])}</blockquote>`);
+      else if (line.trim() === "") out.push("<br>");
+      else out.push(`<p>${inline(line)}</p>`);
+    }
+    flushList();
+    return out.join("");
+  }
+
   // Linked image previews (the ones enabled on the node card) also show on play cards.
   function renderPlayCardImages(node) {
     const host = window.NarrativeCanvasHost;
@@ -40315,7 +40386,7 @@ function installNarrativeCanvasApp() {
             <span>${index + 1}</span>
           </div>
           <h4>${escapeHtml(title)}</h4>
-          <p>${escapeHtml(body)}</p>
+          <div class="play-body-text">${turns.length ? `<p>${escapeHtml(body)}</p>` : renderNarrativeMarkdown(body)}</div>
           ${renderPlayCardImages(node)}
           ${canRestore ? `
             <button class="play-history-jump" type="button" data-action="play-history-jump" data-play-step-index="${index}" title="${escapeAttr(t("Rewind the story to this card. Later steps are discarded."))}">
@@ -40402,7 +40473,7 @@ function installNarrativeCanvasApp() {
           <span>${pageNumber} / ${pageTotal}</span>
         </div>
         <h3>${escapeHtml(runtimeTitle)}</h3>
-        <p>${escapeHtml(runtimeBody)}</p>
+        <div class="play-body-text">${dialogTurns.length ? `<p>${escapeHtml(runtimeBody)}</p>` : renderNarrativeMarkdown(runtimeBody)}</div>
         ${renderPlayCardImages(node)}
         ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
         ${customFields}
