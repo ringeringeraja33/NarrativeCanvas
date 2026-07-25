@@ -1825,15 +1825,18 @@
           const expandInput = doc.querySelector("#expandEditorInput");
           setControlValue(win, expandInput, "Large editor body edit");
           await waitFor(`${label}: large editor writes through to the node`, () => readSavedProject(win) && win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
+          // Toolbar formatting is checked on the input value only (synchronous), then the
+          // body is restored so the close/sync check below stays on a stable value.
           assert(`${label}: large editor offers a formatting toolbar`, Boolean(doc.querySelector("#expandEditorDialog .expand-editor-toolbar [data-action='expand-editor-format']")));
           setControlValue(win, expandInput, "Large body");
-          await waitFor(`${label}: node body reset before formatting`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large body"));
           expandInput.focus();
           expandInput.setSelectionRange(0, 5);
           click(doc.querySelector("#expandEditorDialog [data-action='expand-editor-format'][data-format='bold']"));
-          await waitFor(`${label}: toolbar wraps the selection in bold markdown`, () => expandInput.value === "**Large** body" && win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "**Large** body"));
+          assert(`${label}: toolbar wraps the selection in bold markdown`, expandInput.value === "**Large** body", expandInput.value);
+          setControlValue(win, expandInput, "Large editor body edit");
+          await waitFor(`${label}: node body restored after formatting check`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
           click(doc.querySelector("#expandEditorDialog [data-action='close-expand-editor']"));
-          await waitFor(`${label}: large editor closes and syncs the inspector`, () => !doc.querySelector("#expandEditorDialog")?.open && doc.querySelector("#nodePanel [data-node-field='body']")?.value === "**Large** body");
+          await waitFor(`${label}: large editor closes and syncs the inspector`, () => !doc.querySelector("#expandEditorDialog")?.open && doc.querySelector("#nodePanel [data-node-field='body']")?.value === "Large editor body edit");
         }
         for (let index = 0; index < 12; index += 1) {
           click(doc.querySelector("[data-action='zoom-in']"));
