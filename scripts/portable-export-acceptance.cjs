@@ -99,7 +99,7 @@ async function main() {
     console.log(`[info] output: ${outputDir}`);
     console.log(`[info] chrome: ${chromePath}`);
 
-    const exported = exportFixtureWithChrome({
+    const exported = await exportFixtureWithChrome({
       outputDir,
       scratchDir,
       fixturePath,
@@ -923,7 +923,7 @@ function formatLocalPath(filePath) {
   return path.relative(process.cwd(), filePath) || ".";
 }
 
-function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySourcePath, layoutSourcePath, stateSourcePath, sourceMode, timeoutMs }) {
+async function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySourcePath, layoutSourcePath, stateSourcePath, sourceMode, timeoutMs }) {
   const runnerPath = path.join(scratchDir, "portable-export-runner.html");
   const projectRootUrl = pathToFileURL(projectRoot + path.sep).href;
   const fixtureUrl = pathToFileURL(fixturePath).href;
@@ -940,6 +940,7 @@ function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySour
   }), "utf8");
 
   const chromeProfileDir = path.join(scratchDir, "chrome-profile");
+  const attemptTimeoutMs = Math.max(30000, Math.ceil(timeoutMs / 2));
   const chromeArgs = [
     "--headless=new",
     "--disable-gpu",
@@ -952,15 +953,15 @@ function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySour
     "--no-sandbox",
     "--allow-file-access-from-files",
     `--user-data-dir=${chromeProfileDir}`,
-    `--virtual-time-budget=${getChromeVirtualTimeBudget(timeoutMs)}`,
+    `--virtual-time-budget=${getChromeVirtualTimeBudget(attemptTimeoutMs)}`,
     "--dump-dom",
     pathToFileURL(runnerPath).href
   ];
-  let run = spawnWithTimeout(chromePath, chromeArgs, { timeoutMs });
-  if (run.timedOut && !run.stdout) {
+  let run = await spawnWithTimeout(chromePath, chromeArgs, { timeoutMs: attemptTimeoutMs, workDir: scratchDir });
+  if (run.timedOut && !run.stdout.includes('data-export-status="pass"') && !run.stdout.includes('data-export-status="fail"')) {
     console.warn("[retry] Chromium timed out before producing DOM output; retrying with a fresh profile.");
     fs.rmSync(chromeProfileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-    run = spawnWithTimeout(chromePath, chromeArgs, { timeoutMs });
+    run = await spawnWithTimeout(chromePath, chromeArgs, { timeoutMs: attemptTimeoutMs, workDir: scratchDir });
   }
   if (!run.stdout) {
     throw new Error(`Chrome produced no DOM output.${run.stderr ? `\n${run.stderr}` : ""}`);
@@ -989,19 +990,57 @@ function getChromeVirtualTimeBudget(timeoutMs) {
   return Math.max(25000, Math.min(Math.floor(normalized), 120000));
 }
 
-function spawnWithTimeout(command, commandArgs, { timeoutMs }) {
-  const result = childProcess.spawnSync(command, commandArgs, {
-    cwd: projectRoot,
-    encoding: "utf8",
-    maxBuffer: 50 * 1024 * 1024,
-    timeout: timeoutMs,
-    killSignal: "SIGTERM"
-  });
-  if (result.error && result.error.code !== "ETIMEDOUT") throw result.error;
-  if (result.error?.code === "ETIMEDOUT" && !result.stdout) {
-    throw new Error(`Process timed out after ${timeoutMs}ms: ${command}`);
+async function spawnWithTimeout(command, commandArgs, { timeoutMs, workDir }) {
+  const stdoutPath = path.join(workDir, "chrome-output.html");
+  const stderrPath = path.join(workDir, "chrome-output.log");
+  const stdoutFd = fs.openSync(stdoutPath, "w");
+  const stderrFd = fs.openSync(stderrPath, "w");
+  let child = null;
+  let spawnError = null;
+  let timedOut = false;
+  try {
+    child = childProcess.spawn(command, commandArgs, {
+      cwd: projectRoot,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", stdoutFd, stderrFd],
+      windowsHide: true
+    });
+    child.once("error", (error) => {
+      spawnError = error;
+    });
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, "utf8") : "";
+      if (stdout.includes('data-export-status="pass"') || stdout.includes('data-export-status="fail"') || child.exitCode != null || spawnError) break;
+    }
+    timedOut = child.exitCode == null && !spawnError;
+    stopProcessTree(child);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (spawnError) throw spawnError;
+    return {
+      stdout: fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, "utf8") : "",
+      stderr: fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, "utf8") : "",
+      timedOut
+    };
+  } finally {
+    stopProcessTree(child);
+    fs.closeSync(stdoutFd);
+    fs.closeSync(stderrFd);
   }
-  return { stdout: result.stdout || "", stderr: result.stderr || "", timedOut: result.error?.code === "ETIMEDOUT" };
+}
+
+function stopProcessTree(child) {
+  if (!child) return;
+  if (process.platform === "win32") {
+    childProcess.spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    if (child.exitCode == null) child.kill("SIGTERM");
+  }
 }
 
 function writeExportedFiles(outputDir, exported) {
