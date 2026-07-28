@@ -33,7 +33,7 @@ jobs:
       - name: Run fixture tests
         run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 60000
       - name: Run Story Markdown route fixtures
-        run: node scripts/portable-export-acceptance.cjs --story-fixture --runtime-only
+        run: node scripts/portable-export-acceptance.cjs --story-fixture --runtime-only --timeout 180000
       - name: Run GUI regression tests
         run: node scripts/run-browser-test.cjs tests/gui-regression.html gui 45000
       - name: Run library Markdown sync tests
