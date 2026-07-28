@@ -495,7 +495,16 @@ function findChrome() {
   ];
   const found = candidates.find((candidate) => fs.existsSync(candidate));
   if (found) return found;
-  const commandFound = findExecutableOnPath(["chrome.exe", "chrome", "chromium", "chromium-browser", "msedge.exe", "msedge"]);
+  const commandFound = findExecutableOnPath([
+    "chrome.exe",
+    "google-chrome",
+    "google-chrome-stable",
+    "chrome",
+    "chromium",
+    "chromium-browser",
+    "msedge.exe",
+    "msedge"
+  ]);
   if (!commandFound) {
     throw new Error("Chrome, Chromium, or Edge was not found. Set NARRATIVE_CANVAS_CHROME to a Chromium-based browser.");
   }
