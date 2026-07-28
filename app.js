@@ -11211,7 +11211,11 @@ function openExpandEditor(nodeId, field, title) {
 }
 
 function closeExpandEditor() {
-  if (dom.expandEditorDialog?.open) dom.expandEditorDialog.close();
+  if (!dom.expandEditorDialog?.open) return;
+  dom.expandEditorDialog.close();
+  // Do not rely on the browser's close-event scheduling to refresh the inspector.
+  // The close handler remains registered for Escape and other native dialog exits.
+  handleExpandEditorClose();
 }
 
 // "Render by default, click to edit" fields. A `[data-live-field]` holds a rendered
@@ -11313,6 +11317,7 @@ function applyExpandEditorFormat(action) {
 }
 
 function handleExpandEditorClose() {
+  if (!state.expandEditor && !dom.expandEditorInput?.dataset.nodeField) return;
   state.expandEditor = null;
   // Clear the routing attributes so the closed modal's textarea is not a stray
   // duplicate of the inspector field.

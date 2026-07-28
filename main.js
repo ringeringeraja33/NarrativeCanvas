@@ -12983,7 +12983,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003clink rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"./assets/icons/favicon-32x32.png\"\u003e",
   "    \u003clink rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"./assets/icons/apple-touch-icon.png\"\u003e",
   "    \u003clink rel=\"manifest\" href=\"./site.webmanifest\"\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.4.0-beta.1-f5b2b828\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.4.0-beta.1-40c717cd\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\" spellcheck=\"false\"\u003e",
@@ -13573,7 +13573,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=1.4.0-beta.1-f5b2b828\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=1.4.0-beta.1-40c717cd\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -24773,7 +24773,11 @@ function installNarrativeCanvasApp() {
   }
 
   function closeExpandEditor() {
-    if (dom.expandEditorDialog?.open) dom.expandEditorDialog.close();
+    if (!dom.expandEditorDialog?.open) return;
+    dom.expandEditorDialog.close();
+    // Do not rely on the browser's close-event scheduling to refresh the inspector.
+    // The close handler remains registered for Escape and other native dialog exits.
+    handleExpandEditorClose();
   }
 
   // "Render by default, click to edit" fields. A `[data-live-field]` holds a rendered
@@ -24875,6 +24879,7 @@ function installNarrativeCanvasApp() {
   }
 
   function handleExpandEditorClose() {
+    if (!state.expandEditor && !dom.expandEditorInput?.dataset.nodeField) return;
     state.expandEditor = null;
     // Clear the routing attributes so the closed modal's textarea is not a stray
     // duplicate of the inspector field.
