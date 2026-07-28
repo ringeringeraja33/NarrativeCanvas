@@ -588,6 +588,11 @@
         assert(`${label}: pinned inspector stays open on outside click`, !overlay.hidden && overlay.querySelector("#nodePanel"));
         click(doc.querySelector(".inspector-tab[data-panel='project']"));
         assert(`${label}: pinned inspector allows editing another sidebar panel`, !overlay.hidden && overlay.querySelector("#nodePanel.active") && doc.querySelector(".sidebar-right #projectPanel.active"));
+        const playHistoryLimit = doc.querySelector(".sidebar-right #projectPanel [data-project-field='playHistoryLimit']");
+        assert(`${label}: Play history defaults to 30 cards`, playHistoryLimit?.value === "30");
+        setControlValue(win, playHistoryLimit, "10");
+        assert(`${label}: Play history limit persists`, win.NarrativeCanvasApp.getSavedState()?.project?.playHistoryLimit === 10);
+        setControlValue(win, doc.querySelector(".sidebar-right #projectPanel [data-project-field='playHistoryLimit']"), "30");
         click(inspectorPin);
         assert(`${label}: inspector pin can be released`, inspectorPin.getAttribute("aria-pressed") === "false");
         click(inspectorClose);
@@ -634,11 +639,29 @@
           bodyInput.value = marker;
           bodyInput.dispatchEvent(new win.Event("input", { bubbles: true }));
           await waitFor(`${label}: editing focused node refreshes open play`, () => doc.querySelector("#playBody")?.textContent.includes(marker));
-          bodyInput.value = original;
-          bodyInput.dispatchEvent(new win.Event("input", { bubbles: true }));
+          // Body Markdown renders on the card immediately, and in the inspector's own
+          // "render by default" view once the source editor loses focus.
+          const boldMarker = `boldword`;
+          const nodeId = saved?.ui?.selectedNodeId;
+          const liveBody = doc.querySelector("#nodePanel [data-node-field='body']");
+          liveBody.value = `**${boldMarker}** \`codeword\` ==markword== [linkword](https://x.com)`;
+          liveBody.dispatchEvent(new win.Event("input", { bubbles: true }));
+          await waitFor(`${label}: canvas card renders markdown in display mode`, () => /<strong>boldword<\/strong>/.test(doc.querySelector(`.node[data-node-id='${nodeId}'] .node-text-rendered`)?.innerHTML || ""));
+          const cardHtml = doc.querySelector(`.node[data-node-id='${nodeId}'] .node-text-rendered`)?.innerHTML || "";
+          assert(`${label}: card renders inline code, highlight, and links`, /<code>codeword<\/code>/.test(cardHtml) && /<mark>markword<\/mark>/.test(cardHtml) && /<a href="https:\/\/x\.com"/.test(cardHtml), cardHtml);
+          liveBody.dispatchEvent(new win.FocusEvent("focusout", { bubbles: true }));
+          await waitFor(`${label}: inspector body renders markdown when not editing`, () => doc.querySelector("#nodePanel [data-live-source]")?.hidden === true && /<strong>boldword<\/strong>/.test(doc.querySelector("#nodePanel [data-live-rendered]")?.innerHTML || ""));
+          // Clicking the rendered view switches back to the source editor.
+          click(doc.querySelector("#nodePanel [data-live-rendered]"));
+          await waitFor(`${label}: clicking inspector body reveals the source editor`, () => doc.querySelector("#nodePanel [data-live-source]")?.hidden === false);
+          const restore = doc.querySelector("#nodePanel [data-node-field='body']");
+          restore.value = original;
+          restore.dispatchEvent(new win.Event("input", { bubbles: true }));
         }
         click(playDialog.querySelector("[value='close']"));
         await waitFor(`${label}: play panel closes`, () => !playDialog.open);
+        click(doc.querySelector(".inspector-tab[data-panel='project']"));
+        assert(`${label}: completed Play session enables Markdown export`, !doc.querySelector("#projectPanel [data-action='export-play-session']")?.disabled);
       }
 
       function readSavedProject(win) {
@@ -662,7 +685,11 @@
         click(doc.querySelector("[data-action='add-codex-entry']"));
         await waitFor(`${label}: character can be added before delete-all check`, () => Boolean(doc.querySelector("#charactersPanel [data-action='delete-character']")));
         const deleteCharacterButton = doc.querySelector("#charactersPanel [data-action='delete-character']");
-        if (deleteCharacterButton) click(deleteCharacterButton);
+        if (deleteCharacterButton) {
+          click(deleteCharacterButton);
+          await waitFor(`${label}: deleting a library entry asks for confirmation`, () => doc.querySelector("#genericConfirmDialog")?.open);
+          click(doc.querySelector("#genericConfirmDialog [value='confirm']"));
+        }
         const noCharactersText = localizedEmptyText(win, "No library entries yet.", "还没有资料条目。");
         await waitFor(`${label}: last character can be deleted`, () => doc.querySelector("#charactersPanel")?.textContent.includes(noCharactersText));
         await win.NarrativeCanvasApp.save({ silent: true });
@@ -882,7 +909,17 @@
         assert(`${label}: Markdown Vault preview preserves links`, preview?.querySelector("a")?.getAttribute("href") === "https://example.com");
         assert(`${label}: Markdown Vault preview uses resolved source path`, win.__markdownRenderCalls.at(-1)?.sourcePath === "Notes/preview.md");
         focusVaultInput(doc.querySelector("#nodePanel .node-vault-file-item.is-add [data-node-vault-file-index]"));
-        await waitFor(`${label}: second Vault file suggestion appears`, () => Boolean(doc.querySelector("#nodePanel [data-vault-file-path='Notes/second.md']")));
+        const secondSuggestionAppeared = await waitFor(
+          `${label}: second Vault file suggestion appears`,
+          () => Boolean(doc.querySelector("#nodePanel [data-vault-file-path='Notes/second.md']")),
+          4000,
+          () => {
+            const input = doc.querySelector("#nodePanel .node-vault-file-item.is-add [data-node-vault-file-index]");
+            const menu = input?.closest(".node-vault-file-input-wrap")?.querySelector("[data-vault-file-suggestions]");
+            return `input=${Boolean(input)} connected=${Boolean(input?.isConnected)} expanded=${input?.getAttribute("aria-expanded") || ""} menuHidden=${String(menu?.hidden)} options=${menu?.querySelectorAll("[data-vault-file-path]").length || 0}`;
+          }
+        );
+        if (!secondSuggestionAppeared) return;
         click(doc.querySelector("#nodePanel [data-vault-file-path='Notes/second.md']"));
         await waitFor(`${label}: two Vault files stay linked`, () => doc.querySelectorAll("#nodePanel .node-vault-file-item:not(.is-add)").length === 2);
         const linkedInputs = Array.from(doc.querySelectorAll("#nodePanel .node-vault-file-item:not(.is-add) [data-node-vault-file-index]"));
@@ -899,12 +936,26 @@
         const vaultDropRow = doc.querySelector("#nodePanel [data-node-vault-row-index='0']");
         assert(`${label}: linked Vault files expose drag handles`, Boolean(vaultDragHandle && vaultDropRow));
         if (vaultDragHandle && vaultDropRow) {
+          vaultDropRow.scrollIntoView({ block: "center" });
+          await new Promise((resolve) => win.requestAnimationFrame(() => win.requestAnimationFrame(resolve)));
           const handleRect = vaultDragHandle.getBoundingClientRect();
-          const dropRect = vaultDropRow.getBoundingClientRect();
           vaultDragHandle.dispatchEvent(new win.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 41, button: 0, clientX: handleRect.x + 4, clientY: handleRect.y + 4 }));
-          win.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 41, clientX: dropRect.x + 20, clientY: dropRect.y + 2 }));
-          win.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 41, clientX: dropRect.x + 20, clientY: dropRect.y + 2 }));
-          await waitFor(`${label}: dragging reorders linked Vault files`, () => doc.querySelector("#nodePanel .node-vault-file-item:not(.is-add) input")?.value === "Notes/preview.md");
+          const dropRect = vaultDropRow.getBoundingClientRect();
+          const dropX = dropRect.x + Math.min(20, Math.max(1, dropRect.width / 4));
+          const dropY = dropRect.top - 1;
+          vaultDropRow.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 41, clientX: dropX, clientY: dropY }));
+          assert(
+            `${label}: dragging marks the linked Vault file drop target`,
+            vaultDropRow.classList.contains("cast-row-drop-before"),
+            `target=${vaultDropRow.className}`
+          );
+          vaultDropRow.dispatchEvent(new win.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 41, clientX: dropX, clientY: dropY }));
+          await waitFor(
+            `${label}: dragging reorders linked Vault files`,
+            () => doc.querySelector("#nodePanel .node-vault-file-item:not(.is-add) input")?.value === "Notes/preview.md",
+            4000,
+            () => `first=${doc.querySelector("#nodePanel .node-vault-file-item:not(.is-add) input")?.value || "missing"}`
+          );
         }
         click(doc.querySelector("#nodePanel [data-action='clear-node-vault-file'][data-node-vault-file-index='0']"));
         await waitFor(`${label}: removing one Vault file preserves the other`, () => doc.querySelectorAll("#nodePanel .node-vault-file-item:not(.is-add)").length === 1 && Boolean(doc.querySelector(".node-vault-preview")));
@@ -994,6 +1045,13 @@
         click(doc.querySelector("[data-file-id='adventure']"));
         await waitFor(`${label}: canvas returns after command bridge check`, () => root.getAttribute("data-active-file") === "adventure");
         assert(`${label}: export scale select exists`, Boolean(doc.querySelector("#exportImageScale")));
+        const snapGridButton = doc.querySelector("#snapGridButton");
+        assert(`${label}: snap-to-grid toggle exists`, Boolean(snapGridButton));
+        click(snapGridButton);
+        await waitFor(`${label}: snap-to-grid can be enabled`, () => snapGridButton?.getAttribute("aria-pressed") === "true");
+        assert(`${label}: snap-to-grid preference persists`, win.NarrativeCanvasApp.getSavedState()?.ui?.snapToGrid === true);
+        click(snapGridButton);
+        await waitFor(`${label}: snap-to-grid can be disabled`, () => snapGridButton?.getAttribute("aria-pressed") === "false");
         assert(`${label}: theme toggle exists`, Boolean(doc.querySelector("#themeToggle")));
         assert(`${label}: project file status exists`, Boolean(doc.querySelector("#projectFileName")));
         const frameTypeSettings = doc.querySelector("[data-action='edit-node-type-badge'][data-node-type='Event']");
@@ -1047,6 +1105,15 @@
         await waitFor(`${label}: Choice successor cue adapts to Chinese`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button")?.textContent.trim() === "选择：See a variable change");
         win.NarrativeCanvasApp.setLanguage(originalUiLanguage, { persist: false });
         await waitFor(`${label}: Choice successor cue restores English`, () => doc.querySelector(".node[data-node-id='n5'] .node-choice-followup-button")?.textContent.trim() === "Choice: See a variable change");
+        const choiceCard = doc.querySelector(".node.choice-node .node-choice-preview");
+        const choiceSummary = doc.querySelector(".node.choice-node .node-text-summary");
+        assert(`${label}: Choice cards expose a resize-aware layout class`, Boolean(choiceCard));
+        if (choiceCard && choiceSummary) {
+          assert(
+            `${label}: Choice body and options share vertical shrink space`,
+            win.getComputedStyle(choiceCard).flexGrow === "1" && win.getComputedStyle(choiceSummary).flexGrow === "1"
+          );
+        }
         const characterChip = doc.querySelector(".node[data-node-id='n6'] .node-cast-chip-button[data-character-id='c1']");
         assert(`${label}: node character chip is clickable`, characterChip?.tagName === "BUTTON");
         if (characterChip) click(characterChip);
@@ -1126,6 +1193,14 @@
         assert(`${label}: AI floating controls exist`, Boolean(aiButton && aiWindow && aiCloseButton));
         assert(`${label}: AI pin sits beside close`, aiPin && aiCloseButton.previousElementSibling === aiPin);
         click(aiButton);
+        if (!win.NarrativeCanvasHost) {
+          assert(`${label}: AI settings use generic OpenAI-compatible fields`, Boolean(
+            doc.querySelector("[data-ai-config='endpoint']")
+              && doc.querySelector("[data-ai-config='apiKey']")
+              && doc.querySelector("[data-ai-config='model']")
+          ));
+          assert(`${label}: AI settings do not expose provider-specific presets`, !doc.querySelector("[data-ai-config='provider']"));
+        }
         const aiDefaultRect = aiWindow.getBoundingClientRect();
         const highestDividerZ = Math.max(...[...doc.querySelectorAll(".sidebar-resizer")].map((element) => Number.parseInt(win.getComputedStyle(element).zIndex, 10) || 0));
         const aiWindowZ = Number.parseInt(win.getComputedStyle(aiWindow).zIndex, 10) || 0;
@@ -1821,13 +1896,17 @@
         assert(`${label}: node body field offers a large-editor button`, Boolean(expandButton));
         if (expandButton) {
           click(expandButton);
-          await waitFor(`${label}: large editor opens with the node body`, () => doc.querySelector("#expandEditorDialog")?.open && (doc.querySelector("#expandEditorInput")?.value ?? "").length >= 0);
+          await waitFor(`${label}: large editor opens with the node body`, () => doc.querySelector("#expandEditorDialog")?.open && Boolean(doc.querySelector("#expandEditorInput")));
+          // Opens rendered ("render by default"); clicking the rendered area edits the source.
+          assert(`${label}: large editor opens in rendered mode`, doc.querySelector("#expandEditorInput")?.hidden === true);
+          click(doc.querySelector("#expandEditorDialog [data-live-rendered]"));
           const expandInput = doc.querySelector("#expandEditorInput");
+          await waitFor(`${label}: clicking the rendered area reveals the source editor`, () => expandInput.hidden === false);
           setControlValue(win, expandInput, "Large editor body edit");
           await waitFor(`${label}: large editor writes through to the node`, () => readSavedProject(win) && win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
-          // Toolbar formatting is checked on the input value only (synchronous), then the
-          // body is restored so the close/sync check below stays on a stable value.
           assert(`${label}: large editor offers a formatting toolbar`, Boolean(doc.querySelector("#expandEditorDialog .expand-editor-toolbar [data-action='expand-editor-format']")));
+          const toolbarFormats = [...doc.querySelectorAll("#expandEditorDialog .expand-editor-toolbar [data-action='expand-editor-format']")].map((b) => b.dataset.format);
+          assert(`${label}: toolbar covers the extended markdown set`, ["bold","italic","strike","code","highlight","link","h1","h2","h3","quote","list","ordered","task","codeblock","divider"].every((f) => toolbarFormats.includes(f)), toolbarFormats.join(","));
           setControlValue(win, expandInput, "Large body");
           expandInput.focus();
           expandInput.setSelectionRange(0, 5);

@@ -10,6 +10,7 @@ const defaultFixture = path.join(projectRoot, "tests", "fixtures", "state-runtim
 const defaultStoryFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.story.md");
 const defaultStoryLayoutFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.layout.json");
 const defaultStoryStateFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.state.schema.json");
+const defaultStoryRouteCasesFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.routes.json");
 const defaultToolCache = path.join(os.homedir(), ".cache", "narrative-canvas-export-tools");
 
 const args = parseArgs(process.argv.slice(2));
@@ -18,6 +19,7 @@ if (args.help) {
   process.exit(0);
 }
 const useStoryFixture = Boolean(args["story-fixture"]);
+const runtimeOnly = Boolean(args["runtime-only"]);
 const autoSidecars = Boolean(args["auto-sidecars"]);
 const decisionGate = Boolean(args["decision-gate"]);
 const requireLayout = Boolean(args["require-layout"]);
@@ -26,7 +28,7 @@ const fixturePath = path.resolve(args.fixture || defaultFixture);
 const storySourcePath = args.story ? path.resolve(args.story) : useStoryFixture ? defaultStoryFixture : "";
 let layoutSourcePath = args.layout ? path.resolve(args.layout) : useStoryFixture ? defaultStoryLayoutFixture : "";
 let stateSourcePath = args.state ? path.resolve(args.state) : useStoryFixture ? defaultStoryStateFixture : "";
-let routeCasesPath = args["route-cases"] ? path.resolve(args["route-cases"]) : "";
+let routeCasesPath = args["route-cases"] ? path.resolve(args["route-cases"]) : useStoryFixture ? defaultStoryRouteCasesFixture : "";
 if (autoSidecars && storySourcePath) {
   const detectedSidecars = detectStorySidecars(storySourcePath);
   if (!layoutSourcePath && detectedSidecars.layout) layoutSourcePath = detectedSidecars.layout;
@@ -82,7 +84,7 @@ async function main() {
   } else {
     assertFileExists(fixturePath, "fixture");
   }
-  Object.entries(tools).forEach(([name, toolPath]) => assertFileExists(toolPath, name));
+  if (!runtimeOnly) Object.entries(tools).forEach(([name, toolPath]) => assertFileExists(toolPath, name));
 
   const outputContext = prepareOutputDirectory();
   const outputDir = outputContext.path;
@@ -134,11 +136,13 @@ async function main() {
       exportWarnings = validateExportWarningLimit(profile);
       validateRuntimeJson(runtimePath);
       if (routeTemplatePath) writeRouteCaseTemplate(routeTemplatePath, runtimePath);
-      validateYarn(yarnPath, scratchDir);
-      validateYarnPlaythrough(yarnPath);
-      validateInk(inkPath, scratchDir);
-      validateInkPlaythrough(inkPath);
-      validateTwee(tweePath, scratchDir);
+      if (!runtimeOnly) {
+        validateYarn(yarnPath, scratchDir);
+        validateYarnPlaythrough(yarnPath);
+        validateInk(inkPath, scratchDir);
+        validateInkPlaythrough(inkPath);
+        validateTwee(tweePath, scratchDir);
+      }
     }
 
     if (summaryPath || reportPath) {
@@ -161,7 +165,7 @@ async function main() {
 function parseArgs(items) {
   const result = {};
   const repeatable = new Set(["allow-warning-code", "choice-label", "expect-text", "expect-node", "expect-state"]);
-  const booleanFlags = new Set(["auto-sidecars", "clean-output", "decision-gate", "help", "keep-output", "require-layout", "require-state", "story-fixture"]);
+  const booleanFlags = new Set(["auto-sidecars", "clean-output", "decision-gate", "help", "keep-output", "require-layout", "require-state", "runtime-only", "story-fixture"]);
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     if (!item.startsWith("--")) continue;
@@ -197,6 +201,7 @@ Story source checks:
   --require-layout                        Require a Layout JSON sidecar and verify it re-exports
   --require-state                         Require a State Schema sidecar
   --story-fixture                         Run the built-in Story Markdown regression fixture
+  --runtime-only                          Validate Runtime JSON routes without external Yarn, Ink, or Twee compilers
 
 Route assertions:
   --choice-label label                    Select a route choice; repeat for multiple choice nodes
@@ -282,6 +287,7 @@ function unique(items) {
 
 function validateDecisionGateInputs() {
   if (!decisionGate) return;
+  assert(!runtimeOnly, "--decision-gate cannot use --runtime-only because release decisions require at least two independent route consumers.");
   assert(sourceMode === "story" && storySourcePath && !useStoryFixture, "--decision-gate requires --story path/to/story.md and cannot use --story-fixture.");
   assertFileExists(storySourcePath, "story");
   assert(path.resolve(storySourcePath) !== path.resolve(defaultStoryFixture), "--decision-gate cannot use the built-in story fixture; pass a real story source.");
@@ -665,6 +671,7 @@ function buildAcceptanceSummary({ exported, outputDir, routeSummary, routeCasesS
       minRouteCases,
       requireLayout: isLayoutRequired(),
       requireState,
+      runtimeOnly,
       timeoutMs,
       route: {
         choiceLabels: [...storyRouteOptions.choiceLabels],
@@ -680,9 +687,9 @@ function buildAcceptanceSummary({ exported, outputDir, routeSummary, routeCasesS
       .sort(),
     consumers: {
       runtimeJson: "pass",
-      yarn: "pass",
-      ink: "pass",
-      twee: "pass"
+      yarn: runtimeOnly ? "skipped" : "pass",
+      ink: runtimeOnly ? "skipped" : "pass",
+      twee: runtimeOnly ? "skipped" : "pass"
     },
     warnings: {
       count: exportWarnings.length,
@@ -860,9 +867,9 @@ function renderAcceptanceReport(summary) {
       lines.push(`### ${routeCase.name}`, "");
       lines.push(`Choices: ${routeCase.options.choiceLabels.join(" -> ") || "(default path)"}`);
       lines.push(`Runtime JSON: ${formatVisited(routeCase.runtimeJson.visited)}`);
-      lines.push(`Yarn: ${formatVisited(routeCase.yarn.visited)}`);
-      lines.push(`Ink choices: ${formatInkChoices(routeCase.ink.selectedChoices)}`);
-      lines.push(`Twee: ${formatVisited(routeCase.twee.visited)}`);
+      lines.push(`Yarn: ${routeCase.yarn ? formatVisited(routeCase.yarn.visited) : "skipped"}`);
+      lines.push(`Ink choices: ${routeCase.ink ? formatInkChoices(routeCase.ink.selectedChoices) : "skipped"}`);
+      lines.push(`Twee: ${routeCase.twee ? formatVisited(routeCase.twee.visited) : "skipped"}`);
       lines.push(`Final state: ${JSON.stringify(routeCase.runtimeJson.finalState)}`);
       lines.push("");
     });
@@ -1157,6 +1164,11 @@ function validateJsonSchemaSubset(value, schema, location = "$", root = schema) 
     const target = resolveLocalSchemaRef(schema.$ref, root);
     return target ? validateJsonSchemaSubset(value, target, location, root) : [`${location}: unresolved schema ref ${schema.$ref}`];
   }
+  if (Array.isArray(schema.anyOf)) {
+    const candidates = schema.anyOf.map((candidate) => validateJsonSchemaSubset(value, candidate, location, root));
+    if (candidates.some((errors) => errors.length === 0)) return [];
+    return [`${location}: did not match any allowed schema (${candidates.map((errors) => errors.join(", ")).join(" | ")})`];
+  }
   const errors = [];
   if (Object.prototype.hasOwnProperty.call(schema, "const") && value !== schema.const) {
     errors.push(`${location}: expected const ${JSON.stringify(schema.const)}`);
@@ -1244,15 +1256,31 @@ function validateStorySourceExport(outputDir, scratchDir) {
   validateStoryLayoutSourceApplied(layoutDocument);
   validateDocumentSchema(stateSchemaPath, "docs/state-schema.schema.json", "State schema");
   if (routeTemplatePath) writeRouteCaseTemplate(routeTemplatePath, runtimePath);
-  validateYarn(yarnPath, scratchDir);
-  const routeCases = storyRouteCases.map((routeCase) => validateStoryRouteCase(routeCase, runtimePath, yarnPath, inkPath, tweePath));
-  validateInk(inkPath, scratchDir);
-  validateTwee(tweePath, scratchDir);
-  console.log(`[ok] Story source acceptance exported and ran ${routeCases.length} Runtime JSON + Yarn + ink + Twee route case(s)`);
+  if (!runtimeOnly) validateYarn(yarnPath, scratchDir);
+  const routeCases = storyRouteCases.map((routeCase) => runtimeOnly
+    ? validateStoryRuntimeRouteCase(routeCase, runtimePath)
+    : validateStoryRouteCase(routeCase, runtimePath, yarnPath, inkPath, tweePath));
+  if (!runtimeOnly) {
+    validateInk(inkPath, scratchDir);
+    validateTwee(tweePath, scratchDir);
+  }
+  console.log(`[ok] Story source acceptance exported and ran ${routeCases.length} Runtime JSON${runtimeOnly ? "" : " + Yarn + ink + Twee"} route case(s)`);
   return {
     warnings,
     route: routeCases[0] ? { runtimeJson: routeCases[0].runtimeJson, yarn: routeCases[0].yarn, ink: routeCases[0].ink, twee: routeCases[0].twee } : null,
     routeCases
+  };
+}
+
+function validateStoryRuntimeRouteCase(routeCase, runtimePath) {
+  const runtimeResult = validateRuntimeJsonGeneric(runtimePath, routeCase);
+  return {
+    name: routeCase.name,
+    options: summarizeRouteOptions(routeCase),
+    runtimeJson: summarizeRouteResult(runtimeResult),
+    yarn: null,
+    ink: null,
+    twee: null
   };
 }
 
@@ -2001,7 +2029,10 @@ function runYarnNode(lines, state, output, choiceLabels, visitedCounts) {
     if (ifMatch) {
       const block = collectYarnIfBlock(lines, index);
       const selected = evaluateYarnCondition(ifMatch[1], state, visitedCounts) ? block.thenLines : block.elseLines;
-      return runYarnNode(selected, state, output, choiceLabels, visitedCounts);
+      const branchRoute = runYarnNode(selected, state, output, choiceLabels, visitedCounts);
+      if (branchRoute.next) return branchRoute;
+      index = block.endIndex;
+      continue;
     }
     if (line.startsWith("<<")) {
       applyYarnCommand(line, state);

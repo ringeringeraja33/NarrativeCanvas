@@ -332,6 +332,49 @@
         });
       }
 
+      async function assertLightThemeCoordination(label, win, doc) {
+        const root = doc.querySelector(".app-shell");
+        const themeButton = doc.querySelector("[data-action='toggle-theme']");
+        const snapButton = doc.querySelector("[data-action='toggle-snap-grid']");
+        const playButton = doc.querySelector("[data-action='play']");
+        const startedDark = root?.getAttribute("data-theme") === "dark";
+        const startedSnapping = snapButton?.getAttribute("aria-pressed") === "true";
+        if (startedDark) click(themeButton);
+        await waitFor(`${label}: light theme activates`, () => root?.getAttribute("data-theme") === "light");
+        if (!startedSnapping) click(snapButton);
+        await waitFor(`${label}: snap active state renders`, () => snapButton?.getAttribute("aria-pressed") === "true");
+        await waitFor(`${label}: snap active color transition settles`, () => {
+          const snapStyle = win.getComputedStyle(snapButton);
+          const playStyle = win.getComputedStyle(playButton);
+          return snapStyle.backgroundColor === playStyle.backgroundColor
+            && snapStyle.color === playStyle.color
+            && snapStyle.color === "rgb(255, 255, 255)";
+        });
+        const snapBackground = win.getComputedStyle(snapButton).backgroundColor;
+        const snapColor = win.getComputedStyle(snapButton).color;
+        const playBackground = win.getComputedStyle(playButton).backgroundColor;
+        const playColor = win.getComputedStyle(playButton).color;
+        const rootStyle = win.getComputedStyle(root);
+        const activeFileStyle = win.getComputedStyle(doc.querySelector(".nc-file-item.active"));
+        const inactiveFileStyle = win.getComputedStyle(doc.querySelector(".nc-file-item:not(.active)"));
+        assert(
+          `${label}: light snap button uses the primary accent treatment`,
+          snapBackground === playBackground
+            && snapColor === playColor
+            && snapColor === "rgb(255, 255, 255)",
+          `snap=${snapBackground}/${snapColor} play=${playBackground}/${playColor}`
+        );
+        assert(`${label}: light secondary text token remains readable`, rootStyle.getPropertyValue("--text-faint").trim() === "#686b72");
+        assert(
+          `${label}: light selected navigation uses a distinct accent tint`,
+          activeFileStyle.backgroundColor !== inactiveFileStyle.backgroundColor,
+          `active=${activeFileStyle.backgroundColor} inactive=${inactiveFileStyle.backgroundColor}`
+        );
+        if (!startedSnapping) click(snapButton);
+        if (startedDark) click(themeButton);
+        await waitFor(`${label}: theme state restores after light palette check`, () => root?.getAttribute("data-theme") === (startedDark ? "dark" : "light"));
+      }
+
       function assertActivePanelFits(label, doc) {
         const active = doc.querySelector(".canvas-workspace-view.active");
         const workspace = doc.querySelector(".canvas-workspace");
@@ -983,6 +1026,7 @@
 
       async function runGuiChecks(label, target) {
         const { win, doc, frame } = target;
+        await assertLightThemeCoordination(label, win, doc);
         assertMainShellNoPageOverflow(label, doc);
         assertActivePanelFits(label, doc);
         assertToolbarDoesNotOverlap(label, doc);

@@ -24,8 +24,14 @@ jobs:
         run: node scripts/run-browser-test.cjs tests/smoke.html smoke 30000
       - name: Run fixture tests
         run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 60000
+      - name: Run Story Markdown route fixtures
+        run: node scripts/portable-export-acceptance.cjs --story-fixture --runtime-only
       - name: Run GUI regression tests
         run: node scripts/run-browser-test.cjs tests/gui-regression.html gui 45000
+      - name: Run library Markdown sync tests
+        run: node scripts/run-browser-test.cjs tests/codex-plugin-smoke.html codex-smoke 45000
+      - name: Run large-project acceptance tests
+        run: node scripts/run-browser-test.cjs tests/large-project-acceptance.html acceptance 180000
       - name: Download release assets
         env:
           GH_TOKEN: ${{ github.token }}

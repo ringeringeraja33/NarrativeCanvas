@@ -169,6 +169,10 @@
             assert("state key: runtime json omits transient visit condition", bribeChoiceRuntime?.condition && !bribeChoiceRuntime.condition.includes("visited_start"));
             const keepChoiceRuntime = runtimeJson.nodes.find((node) => node.id === "n1")?.choices?.find((choice) => choice.id === "opt_keep");
             assert("state key: runtime json bakes playbook choice lock", keepChoiceRuntime?.condition.includes("!(guard_suspicion >= 1)"));
+            const conditionalRuntimeEffect = runtimeJson.nodes.find((node) => node.id === "n0")?.effects?.find((effect) => effect.op === "ifElse");
+            assert("state key: runtime json exports conditional assignment", conditionalRuntimeEffect?.condition === "variable1 > variable2" && conditionalRuntimeEffect?.thenEffect?.key === "variable3" && conditionalRuntimeEffect?.thenEffect?.valueMode === "variable" && conditionalRuntimeEffect?.thenEffect?.valueSource === "variable1");
+            const runtimeTimer = runtimeJson.nodes.find((node) => node.id === "n1")?.timer;
+            assert("state key: runtime json exports timed choice fallback", runtimeTimer?.seconds === 3600 && runtimeTimer?.fallbackLinkId === "l1" && runtimeTimer?.targetId === "n2");
             const schemaErrors = validateJsonSchemaSubset(runtimeJson, assets.runtimeSchema);
             assert("state key: runtime json matches schema", schemaErrors.length === 0, schemaErrors.slice(0, 5).join("; "));
             assert("state key: export report dialog opens", doc.querySelector("#exportReportDialog")?.open);
@@ -180,6 +184,7 @@
             assert("state key: yarn exports grouped condition and jump", yarn.includes("$inventory_coins >= 2") && yarn.includes("$ticket_phrase == \"red && blue\"") && yarn.includes("contains($flag_tokens, \"boarding\")") && yarn.includes("$nested_inventory_coins >= 3") && yarn.includes("not $flag_boarding_denied") && yarn.includes("<<jump Bribe_accepted>>"));
             assert("state key: yarn omits transient visit condition", !yarn.includes("visited(\"Start\")"));
             assert("state key: yarn bakes playbook choice lock", yarn.includes("-> Keep moving <<if not ($guard_suspicion >= 1)>>"));
+            assert("state key: yarn exports if else variable assignment", yarn.includes("<<if $variable1 > $variable2>>") && yarn.includes("<<set $variable3 to $variable1>>") && yarn.includes("<<set $variable3 to $variable2>>") && yarn.includes("<<else>>"));
             const yarnErrors = validateYarnScript(yarn);
             assert("state key: yarn reference parser accepts export", yarnErrors.length === 0, yarnErrors.slice(0, 5).join("; "));
             const ink = await readDownloadText(downloads, "state-runtime-key-play.ink");
@@ -187,14 +192,17 @@
             assert("state key: ink exports grouped sticky choice", ink.includes("inventory_coins >= 2") && ink.includes("ticket_phrase == \"red && blue\"") && ink.includes("(flag_tokens ? flag_tokens_boarding)") && ink.includes("nested_inventory_coins >= 3") && ink.includes("not flag_boarding_denied") && ink.includes("[Slip two coins to the Brakeman]"));
             assert("state key: ink omits transient visit condition", !ink.includes("(Start > 0)"));
             assert("state key: ink bakes playbook choice lock", ink.includes("{not (guard_suspicion >= 1)} [Keep moving]"));
+            assert("state key: ink exports if else variable assignment", ink.includes("{ variable1 > variable2:") && ink.includes("~ variable3 = variable1") && ink.includes("~ variable3 = variable2") && ink.includes("- else:"));
             const inkErrors = validateInkScript(ink);
             assert("state key: ink reference parser accepts export", inkErrors.length === 0, inkErrors.slice(0, 5).join("; "));
             const twee = await readDownloadText(downloads, "state-runtime-key-play.twee");
             assert("state key: twee has story data", twee.includes(":: StoryData") && twee.includes("\"format\": \"SugarCube\"") && twee.includes("\"format-version\": \"2.30.0\""));
             assert("state key: twee initializes variable", twee.includes("<<set $inventory_coins = 3>>") && twee.includes("<<set $flag_tokens = [\"boarding\",\"watch\"]>>") && twee.includes("<<set $nested_inventory_coins = 3>>"));
+            assert("state key: twee exports plain connections as standard links", twee.includes("[[Continue->Bribe_check]]"));
             assert("state key: twee exports gated link and effects", twee.includes("$inventory_coins >= 2") && twee.includes("$ticket_phrase == \"red && blue\"") && twee.includes("$flag_tokens.includes(\"boarding\")") && twee.includes("$nested_inventory_coins >= 3") && twee.includes("!$flag_boarding_denied") && twee.includes("<<link \"Slip two coins to the Brakeman\" \"Bribe_accepted\">>") && twee.includes("<<set $inventory_coins -= 2>>"));
             assert("state key: twee omits transient visit condition", !twee.includes("visited(\"Start\") > 0"));
             assert("state key: twee bakes playbook choice lock", twee.includes("<<if !($guard_suspicion >= 1)>>"));
+            assert("state key: twee exports if else variable assignment", twee.includes("<<if $variable1 > $variable2>>") && twee.includes("<<set $variable3 = $variable1>>") && twee.includes("<<set $variable3 = $variable2>>") && twee.includes("<<else>>"));
             const tweeErrors = validateTweeScript(twee);
             assert("state key: twee reference parser accepts export", tweeErrors.length === 0, tweeErrors.slice(0, 5).join("; "));
             const exportAllStart = assets.appJs.indexOf("async function exportAll()");
@@ -326,6 +334,7 @@
             await waitFor("state key: play opens", () => doc.querySelector("#playDialog")?.open);
             assert("state key: start body interpolates key", doc.querySelector("#playBody")?.textContent.includes("Coins before: 3.") && doc.querySelector("#playBody")?.textContent.includes("Nested coins: 3."));
             const startDebugText = doc.querySelector("#playBody .play-debug")?.textContent || "";
+            assert("state key: play executes the matching if branch", startDebugText.includes("variable3: 5"), startDebugText);
             assert("state key: debug shows visit tracking when enabled", startDebugText.includes("Visited:") && startDebugText.includes("Start ("), startDebugText);
             assert("state key: manual action does not run before click", startDebugText.includes('traveler: "Mara"') && doc.defaultView.NarrativeCanvasApp.getSavedState().project.variables.traveler === "Mara", startDebugText);
             const manualTravelerButton = [...doc.querySelectorAll("#playActions [data-action='play-manual']")].find((button) => button.textContent.includes("traveler"));
@@ -351,6 +360,7 @@
             assert("state key: custom field interpolates key", choicePage.includes("Custom field coins: 3"));
             assert("state key: gated option is visible", Boolean([...doc.querySelectorAll("#playActions [data-action='play-next']")].find((button) => button.textContent.includes("Slip two coins"))));
             assert("state key: playbook choice lock hides keep moving", ![...doc.querySelectorAll("#playActions [data-action='play-next']")].some((button) => button.textContent.includes("Keep moving")));
+            assert("state key: timed choice renders its countdown", Boolean(doc.querySelector("#playActions [data-play-choice-countdown]")));
 
             clickElement([...doc.querySelectorAll("#playActions [data-action='play-next']")].find((button) => button.dataset.choiceOptionId === "opt_bribe"));
             await waitFor("state key: bribe result opens", () => doc.querySelector("#playTitle")?.textContent.includes("Bribe accepted"));
@@ -371,6 +381,23 @@
             assert("state key: play preview does not mutate variable definitions", liveState.project.variables.inventory_coins === 3 && liveState.project.variables.traveler === "Mara");
             doc.querySelector("#playDialog")?.close();
             const entryRequirementState = doc.defaultView.NarrativeCanvasApp.getSavedState();
+            const multipleOutgoingState = JSON.parse(JSON.stringify(entryRequirementState));
+            multipleOutgoingState.project.links.push({
+              id: "l_multi_outgoing",
+              from: "n0",
+              to: "n2",
+              label: "Take the direct route"
+            });
+            doc.defaultView.NarrativeCanvasHost.loadProject = async () => JSON.stringify(multipleOutgoingState);
+            await doc.defaultView.NarrativeCanvasApp.loadVaultProject();
+            clickElement(doc.querySelector("[data-action='play']"));
+            await waitFor("state key: play opens with multiple ordinary exits", () => doc.querySelector("#playDialog")?.open);
+            assert(
+              "state key: multiple outgoing links render as playable branches",
+              [...doc.querySelectorAll("#playActions [data-action='play-next']")].some((button) => button.dataset.nodeId === "n1")
+                && [...doc.querySelectorAll("#playActions [data-action='play-next']")].some((button) => button.dataset.nodeId === "n2")
+            );
+            doc.querySelector("#playDialog")?.close();
             const entryNode = entryRequirementState.project.nodes.find((node) => node.id === "n0");
             entryNode.stateLogic = { ...(entryNode.stateLogic || {}), requirements: "flag_watch_missing === false" };
             doc.defaultView.NarrativeCanvasHost.loadProject = async () => JSON.stringify(entryRequirementState);
@@ -820,6 +847,10 @@
         });
         String(body || "").replace(/<<link\s+"(?:[^"\\]|\\.)*"\s+"([^"]+)"\s*>>/g, (_match, target) => {
           targets.push(target);
+          return _match;
+        });
+        String(body || "").replace(/\[\[(?:[\s\S]*?)(?:->|\|)([^\]]+)\]\]/g, (_match, target) => {
+          targets.push(target.replace(/&#93;/gi, "]").trim());
           return _match;
         });
         return targets;

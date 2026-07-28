@@ -63,7 +63,7 @@
     },
     "options": {
       "type": "object",
-      "required": ["autoSidecars", "allowedWarningCodes", "cleanOutput", "keepOutput", "maxWarnings", "minRouteCases", "requireLayout", "requireState", "timeoutMs", "route"],
+      "required": ["autoSidecars", "allowedWarningCodes", "cleanOutput", "keepOutput", "maxWarnings", "minRouteCases", "requireLayout", "requireState", "runtimeOnly", "timeoutMs", "route"],
       "additionalProperties": false,
       "properties": {
         "autoSidecars": {
@@ -93,6 +93,9 @@
         "requireState": {
           "type": "boolean"
         },
+        "runtimeOnly": {
+          "type": "boolean"
+        },
         "timeoutMs": {
           "type": "number"
         },
@@ -116,13 +119,13 @@
           "const": "pass"
         },
         "yarn": {
-          "const": "pass"
+          "enum": ["pass", "skipped"]
         },
         "ink": {
-          "const": "pass"
+          "enum": ["pass", "skipped"]
         },
         "twee": {
-          "const": "pass"
+          "enum": ["pass", "skipped"]
         }
       }
     },
@@ -144,13 +147,22 @@
           "$ref": "#/$defs/routeResult"
         },
         "yarn": {
-          "$ref": "#/$defs/routeResult"
+          "anyOf": [
+            { "$ref": "#/$defs/routeResult" },
+            { "type": "null" }
+          ]
         },
         "ink": {
-          "$ref": "#/$defs/inkRouteResult"
+          "anyOf": [
+            { "$ref": "#/$defs/inkRouteResult" },
+            { "type": "null" }
+          ]
         },
         "twee": {
-          "$ref": "#/$defs/routeResult"
+          "anyOf": [
+            { "$ref": "#/$defs/routeResult" },
+            { "type": "null" }
+          ]
         }
       }
     },
@@ -392,13 +404,22 @@
           "$ref": "#/$defs/routeResult"
         },
         "yarn": {
-          "$ref": "#/$defs/routeResult"
+          "anyOf": [
+            { "$ref": "#/$defs/routeResult" },
+            { "type": "null" }
+          ]
         },
         "ink": {
-          "$ref": "#/$defs/inkRouteResult"
+          "anyOf": [
+            { "$ref": "#/$defs/inkRouteResult" },
+            { "type": "null" }
+          ]
         },
         "twee": {
-          "$ref": "#/$defs/routeResult"
+          "anyOf": [
+            { "$ref": "#/$defs/routeResult" },
+            { "type": "null" }
+          ]
         }
       }
     },

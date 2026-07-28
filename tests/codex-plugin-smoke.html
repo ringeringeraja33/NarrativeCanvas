@@ -48,11 +48,13 @@
           doc.body.append(host);
 
           let externalName = "External Codex Name";
+          let projectText = fixtureText;
           const openedVaultFiles = [];
+          const notices = [];
           win.NarrativeCanvasHost = {
             root: host,
-            loadProject: async () => fixtureText,
-            saveProject: async () => "Project/Story.ncanvas",
+            loadProject: async () => projectText,
+            saveProject: async (text) => { projectText = text; return "Project/Story.ncanvas"; },
             getProjectFile: () => "Project/Story.ncanvas",
             getLanguage: () => "en",
             getAutoSaveIntervalMs: () => 60000,
@@ -64,6 +66,10 @@
               voice: "Quiet",
               tags: "hero",
               notes: "Managed Markdown body",
+              extraFields: [
+                { key: "priority", value: 3 },
+                { key: "flags", value: ["lead", "investigator"] }
+              ],
               codexFile: "Project/Codex/External Codex Name.md",
               images: [],
               imageFile: "",
@@ -73,6 +79,7 @@
             searchVaultFiles: async () => ["Notes/not-an-image.md", "Assets/portrait.svg", "Assets/location.svg"],
             openVaultFile: async (path) => { openedVaultFiles.push(path); return path; },
             importCodexImage: async (file) => `Project/Library/attachments/${file.name}`,
+            showNotice: (message) => notices.push(String(message || "")),
             getVaultResourceUrl: () => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' fill='%237c5cff'/%3E%3C/svg%3E"
           };
           const script = doc.createElement("script");
@@ -89,6 +96,9 @@
           assert("managed Markdown overrides embedded Codex data", Boolean(card));
           assert("managed Markdown path is visible", card?.textContent.includes("Project/Codex/External Codex Name.md"));
           assert("stored tags render as removable tokens", card?.querySelector(".codex-tag-chip")?.textContent.includes("hero"));
+          assert("numeric frontmatter keeps its field type", card?.querySelector('[data-character-extra-index="0"][data-character-extra-part="type"]')?.value === "number");
+          assert("list frontmatter keeps its field type", card?.querySelector('[data-character-extra-index="1"][data-character-extra-part="type"]')?.value === "array");
+          assert("list frontmatter uses editable JSON", card?.querySelector('[data-character-extra-index="1"][data-character-extra-part="value"]')?.value === '["lead","investigator"]');
           click(card?.querySelector('[data-action="choose-codex-image-file"]'));
           await waitFor("image suggestion did not open", () => Boolean(doc.querySelector('[data-vault-file-path="Assets/portrait.svg"]')));
           assert("non-image suggestions are excluded", !doc.querySelector('[data-vault-file-path="Notes/not-an-image.md"]'));
@@ -126,6 +136,22 @@
           assert("live Codex reload detects external edits", await win.NarrativeCanvasApp.reloadCodexFiles());
           card = doc.querySelector('[data-character-card-id="c0"]');
           assert("live Codex reload refreshes the card", card?.querySelector('[data-character-field="name"]')?.value === externalName);
+          assert("plugin project saves before external-change checks", await win.NarrativeCanvasApp.save({ silent: true }));
+          const externalProject = JSON.parse(projectText);
+          externalProject.project.title = "Externally reloaded project";
+          projectText = JSON.stringify(externalProject, null, 2);
+          const cleanReload = await win.NarrativeCanvasApp.handleExternalProjectChange({ path: "Project/Story.ncanvas" });
+          assert("clean external project changes reload automatically", cleanReload.reloaded === true && win.NarrativeCanvasApp.getSavedState().project.title === "Externally reloaded project");
+          click(doc.querySelector('[data-panel="project"]'));
+          const projectTitleInput = doc.querySelector('[data-project-field="title"]');
+          projectTitleInput.value = "Local unsaved title";
+          projectTitleInput.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: "Local unsaved title" }));
+          const secondExternalProject = JSON.parse(projectText);
+          secondExternalProject.project.title = "Second external title";
+          projectText = JSON.stringify(secondExternalProject, null, 2);
+          const guardedReload = await win.NarrativeCanvasApp.handleExternalProjectChange({ path: "Project/Story.ncanvas" });
+          assert("dirty external project changes do not overwrite local edits", guardedReload.dirty === true && win.NarrativeCanvasApp.getSavedState().project.title === "Local unsaved title");
+          assert("dirty external project changes show a recovery notice", notices.some((message) => message.includes("conflict copy")));
           win.NarrativeCanvasApp.destroy();
           document.body.dataset.codexSmokeStatus = "pass";
         } catch (error) {
