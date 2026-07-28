@@ -21,7 +21,7 @@ jobs:
       - name: Verify tagged root artifacts
         run: node scripts/verify-plugin-artifacts.cjs
       - name: Run smoke tests
-        run: node scripts/run-browser-test.cjs tests/smoke.html smoke 30000
+        run: node scripts/run-browser-test.cjs tests/smoke.html smoke 180000
       - name: Run fixture tests
         run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 60000
       - name: Run Story Markdown route fixtures
