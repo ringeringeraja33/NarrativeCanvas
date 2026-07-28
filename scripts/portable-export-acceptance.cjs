@@ -153,9 +153,11 @@ async function main() {
     }
     console.log("[ok] portable export acceptance passed");
   } finally {
-    if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
+    if (fs.existsSync(scratchDir)) {
+      fs.rmSync(scratchDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
     if (outputContext.temporary && !keepOutput && fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true, force: true });
+      fs.rmSync(outputDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } else {
       console.log(`[info] kept output: ${outputDir}`);
     }
