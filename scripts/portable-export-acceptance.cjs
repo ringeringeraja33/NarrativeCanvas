@@ -925,17 +925,14 @@ function formatLocalPath(filePath) {
 
 async function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySourcePath, layoutSourcePath, stateSourcePath, sourceMode, timeoutMs }) {
   const runnerPath = path.join(scratchDir, "portable-export-runner.html");
-  const projectRootUrl = pathToFileURL(projectRoot + path.sep).href;
-  const fixtureUrl = pathToFileURL(fixturePath).href;
-  const storyUrl = storySourcePath ? pathToFileURL(storySourcePath).href : "";
-  const layoutUrl = layoutSourcePath ? pathToFileURL(layoutSourcePath).href : "";
-  const stateUrl = stateSourcePath ? pathToFileURL(stateSourcePath).href : "";
   fs.writeFileSync(runnerPath, buildRunnerHtml({
-    projectRootUrl,
-    fixtureUrl,
-    storyUrl,
-    layoutUrl,
-    stateUrl,
+    html: fs.readFileSync(path.join(projectRoot, "index.html"), "utf8"),
+    css: fs.readFileSync(path.join(projectRoot, "canvas.css"), "utf8"),
+    appJs: fs.readFileSync(path.join(projectRoot, "app.js"), "utf8"),
+    fixtureText: fs.readFileSync(fixturePath, "utf8"),
+    storyText: storySourcePath ? fs.readFileSync(storySourcePath, "utf8") : "",
+    layoutText: layoutSourcePath ? fs.readFileSync(layoutSourcePath, "utf8") : "",
+    stateText: stateSourcePath ? fs.readFileSync(stateSourcePath, "utf8") : "",
     sourceMode
   }), "utf8");
 
@@ -1052,21 +1049,22 @@ function writeExportedFiles(outputDir, exported) {
   }
 }
 
-function buildRunnerHtml({ projectRootUrl, fixtureUrl, storyUrl, layoutUrl, stateUrl, sourceMode }) {
+function buildRunnerHtml({ html, css, appJs, fixtureText, storyText, layoutText, stateText, sourceMode }) {
   return `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><title>Narrative Canvas Portable Export Runner</title></head>
   <body data-export-status="running"><pre id="export-output">running</pre>
     <script>
-      const projectRootUrl = ${JSON.stringify(projectRootUrl)};
-      const fixtureUrl = ${JSON.stringify(fixtureUrl)};
-      const storyUrl = ${JSON.stringify(storyUrl)};
-      const layoutUrl = ${JSON.stringify(layoutUrl)};
-      const stateUrl = ${JSON.stringify(stateUrl)};
-      const sourceMode = ${JSON.stringify(sourceMode)};
+      const html = ${toInlineScriptLiteral(html)};
+      const css = ${toInlineScriptLiteral(css)};
+      const appJs = ${toInlineScriptLiteral(appJs)};
+      const fixtureText = ${toInlineScriptLiteral(fixtureText)};
+      const storyText = ${toInlineScriptLiteral(storyText)};
+      const layoutText = ${toInlineScriptLiteral(layoutText)};
+      const stateText = ${toInlineScriptLiteral(stateText)};
+      const sourceMode = ${toInlineScriptLiteral(sourceMode)};
       const actions = ["export-story-md", "export-story-layout", "export-state-schema", "export-profile", "export-runtime-json", "export-yarn", "export-ink", "export-twee"];
       const output = document.querySelector("#export-output");
-      function assetUrl(path) { return new URL(path, projectRootUrl).href; }
       function extractBodyHtml(html) {
         const match = html.match(/<body[^>]*>([\\s\\S]*?)<\\/body>/i);
         return match ? match[1].replace(/<script[\\s\\S]*?<\\/script>/gi, "") : html;
@@ -1104,15 +1102,6 @@ function buildRunnerHtml({ projectRootUrl, fixtureUrl, storyUrl, layoutUrl, stat
       }
       async function run() {
         try {
-          const [html, css, appJs, fixtureText, storyText, layoutText, stateText] = await Promise.all([
-            fetch(assetUrl("index.html")).then((response) => response.text()),
-            fetch(assetUrl("canvas.css")).then((response) => response.text()),
-            fetch(assetUrl("app.js")).then((response) => response.text()),
-            fetch(fixtureUrl).then((response) => response.text()),
-            storyUrl ? fetch(storyUrl).then((response) => response.text()) : Promise.resolve(""),
-            layoutUrl ? fetch(layoutUrl).then((response) => response.text()) : Promise.resolve(""),
-            stateUrl ? fetch(stateUrl).then((response) => response.text()) : Promise.resolve("")
-          ]);
           const frame = document.createElement("iframe");
           document.body.append(frame);
           const win = frame.contentWindow;
@@ -1195,6 +1184,10 @@ function buildRunnerHtml({ projectRootUrl, fixtureUrl, storyUrl, layoutUrl, stat
     </script>
   </body>
 </html>`;
+}
+
+function toInlineScriptLiteral(value) {
+  return JSON.stringify(String(value || "")).replace(/</g, "\\u003c");
 }
 
 function decodeHtml(value) {
