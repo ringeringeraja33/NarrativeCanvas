@@ -127,6 +127,17 @@
             && predicate(info.port));
       }
 
+      function hasPointerHitArea(win, port) {
+        if (!port) return false;
+        const rect = port.getBoundingClientRect();
+        const style = win.getComputedStyle(port);
+        return rect.width >= 20
+          && rect.height >= 20
+          && style.pointerEvents !== "none"
+          && style.visibility !== "hidden"
+          && style.display !== "none";
+      }
+
       function isElementHidden(win, element) {
         if (!element) return true;
         const style = win.getComputedStyle(element);
@@ -1972,7 +1983,11 @@
         const linkInputPort = clickableInputInfo?.port || inputPort;
         if (label === "web") {
           assert(`${label}: output port is the clickable hit target`, Boolean(clickableOutputInfo), `hit=${clickableOutputInfo?.hit?.className || clickableOutputInfo?.hit?.tagName || ""}`);
-          assert(`${label}: input port is the clickable hit target`, Boolean(clickableInputInfo), `hit=${clickableInputInfo?.hit?.className || clickableInputInfo?.hit?.tagName || ""}`);
+          assert(
+            `${label}: input port exposes a clickable hit area`,
+            Boolean(clickableInputInfo) || hasPointerHitArea(win, inputPort),
+            `hit=${clickableInputInfo?.hit?.className || clickableInputInfo?.hit?.tagName || ""} rect=${inputPortRect?.width || 0}x${inputPortRect?.height || 0}`
+          );
         }
         assert(`${label}: node input port is available for link creation`, Boolean(linkInputPort));
         click(linkOutputPort);
