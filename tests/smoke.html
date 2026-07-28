@@ -560,9 +560,23 @@
         const inspectorHitX = (Math.max(0, inspectorRectForHitTest.left) + Math.min(win.innerWidth, inspectorRectForHitTest.right)) / 2;
         const inspectorHitY = (Math.max(0, inspectorRectForHitTest.top) + Math.min(win.innerHeight, inspectorRectForHitTest.bottom)) / 2;
         const insideInspectorHit = doc.elementFromPoint(inspectorHitX, inspectorHitY);
-        const overlayBackdropHit = doc.elementFromPoint(overlayRectForHitTest.left + 4, overlayRectForHitTest.top + 4);
+        const overlayLeft = Math.max(0, overlayRectForHitTest.left) + 4;
+        const overlayTop = Math.max(0, overlayRectForHitTest.top) + 4;
+        const overlayRight = Math.min(win.innerWidth, overlayRectForHitTest.right) - 4;
+        const overlayBottom = Math.min(win.innerHeight, overlayRectForHitTest.bottom) - 4;
+        const overlayBackdropHits = [
+          [overlayLeft, overlayTop],
+          [overlayRight, overlayTop],
+          [overlayLeft, overlayBottom],
+          [overlayRight, overlayBottom]
+        ].map(([x, y]) => doc.elementFromPoint(x, y));
+        const overlayBackdropHit = overlayBackdropHits.find((element) => element === overlay);
         assert(`${label}: inspector window intercepts clicks across its body`, Boolean(insideInspectorHit && inspectorWindow.contains(insideInspectorHit)), `hit=${insideInspectorHit?.className || insideInspectorHit?.tagName || ""}`);
-        assert(`${label}: inspector backdrop intercepts clicks before the canvas`, overlayBackdropHit === overlay, `hit=${overlayBackdropHit?.id || overlayBackdropHit?.className || overlayBackdropHit?.tagName || ""}`);
+        assert(
+          `${label}: inspector backdrop intercepts clicks before the canvas`,
+          overlayBackdropHit === overlay,
+          `rect=${overlayRectForHitTest.left},${overlayRectForHitTest.top},${overlayRectForHitTest.width},${overlayRectForHitTest.height} hits=${overlayBackdropHits.map((element) => element?.id || element?.className || element?.tagName || "").join("|")}`
+        );
         assert(`${label}: centered inspector pin sits beside close`, inspectorPin && inspectorClose?.previousElementSibling === inspectorPin);
         assert(`${label}: centered inspector is wider than sidebar`, inspectorWindow?.getBoundingClientRect().width > doc.querySelector(".sidebar-right")?.getBoundingClientRect().width);
         const inspectorBeforeMove = inspectorWindow.getBoundingClientRect();
