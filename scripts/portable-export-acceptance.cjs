@@ -939,9 +939,11 @@ function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySour
     sourceMode
   }), "utf8");
 
+  const chromeProfileDir = path.join(scratchDir, "chrome-profile");
   const chromeArgs = [
     "--headless=new",
     "--disable-gpu",
+    "--disable-dev-shm-usage",
     "--disable-background-networking",
     "--disable-component-update",
     "--no-first-run",
@@ -949,12 +951,17 @@ function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySour
     "--disable-extensions",
     "--no-sandbox",
     "--allow-file-access-from-files",
-    `--user-data-dir=${path.join(scratchDir, "chrome-profile")}`,
+    `--user-data-dir=${chromeProfileDir}`,
     `--virtual-time-budget=${getChromeVirtualTimeBudget(timeoutMs)}`,
     "--dump-dom",
     pathToFileURL(runnerPath).href
   ];
-  const run = spawnWithTimeout(chromePath, chromeArgs, { timeoutMs });
+  let run = spawnWithTimeout(chromePath, chromeArgs, { timeoutMs });
+  if (run.timedOut && !run.stdout) {
+    console.warn("[retry] Chromium timed out before producing DOM output; retrying with a fresh profile.");
+    fs.rmSync(chromeProfileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    run = spawnWithTimeout(chromePath, chromeArgs, { timeoutMs });
+  }
   if (!run.stdout) {
     throw new Error(`Chrome produced no DOM output.${run.stderr ? `\n${run.stderr}` : ""}`);
   }

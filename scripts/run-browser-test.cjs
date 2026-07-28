@@ -74,6 +74,7 @@ async function main() {
     child = spawn(browserPath, [
       "--headless=new",
       "--disable-gpu",
+      "--disable-dev-shm-usage",
       "--disable-background-networking",
       "--disable-component-update",
       "--no-first-run",
