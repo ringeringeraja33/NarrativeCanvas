@@ -2045,7 +2045,10 @@
         inlineEditorAfterSameNodeClick?.dispatchEvent(new win.FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
         await wait(80);
         assert(`${label}: inline editor closes when clicking outside node`, !doc.querySelector("[data-inline-node-field]"));
-        click(doc.querySelector(".node[data-node-id='n1']"));
+        const mentionTargetNode = doc.querySelector(".node[data-node-id='n1']")
+          || doc.querySelector(".node:not(.frame)[data-node-id]");
+        assert(`${label}: canvas has a node available for mention editing`, Boolean(mentionTargetNode));
+        click(mentionTargetNode);
         await waitFor(`${label}: node body field is ready for mentions`, () => Boolean(doc.querySelector("[data-node-field='body']")));
         const mentionBodyField = doc.querySelector("[data-node-field='body']");
         setControlValue(win, mentionBodyField, "@");
