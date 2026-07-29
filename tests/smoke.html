@@ -37,6 +37,8 @@
 
       function record(name, status, detail = "") {
         report.tests.push({ name, status, detail });
+        document.body.setAttribute("data-smoke-progress", String(report.tests.length));
+        document.body.setAttribute("data-smoke-last-test", name);
       }
 
       function pass(name, detail = "") {
@@ -450,7 +452,11 @@
         click(doc.querySelector("#documentPanel [data-document-format='plain']"));
         click(doc.querySelector("[data-file-id='adventure']"));
         await waitFor(`${label}: canvas opens before inspector focus check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
-        click(doc.querySelector(".node[data-node-id='n19']"));
+        const documentFocusCanvasNode = doc.querySelector(".node[data-node-id]:not(.frame)");
+        assert(`${label}: rendered node is available for Document focus`, Boolean(documentFocusCanvasNode));
+        if (!documentFocusCanvasNode) return;
+        const documentFocusNodeId = documentFocusCanvasNode.dataset.nodeId;
+        click(documentFocusCanvasNode);
         await waitFor(`${label}: node inspector opens before Document focus`, () => Boolean(doc.querySelector("#nodePanel [data-action='focus-node-document']")));
         const inspectorActions = [...doc.querySelectorAll("#nodePanel .button-row > [data-action]")]
           .map((button) => button.dataset.action);
@@ -459,7 +465,7 @@
           inspectorActions.slice(-4).join("|") === "duplicate-node|focus-node|focus-node-document|delete-node",
           inspectorActions.join("|")
         );
-        const focusedNodeTitle = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n19")?.title || "";
+        const focusedNodeTitle = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === documentFocusNodeId)?.title || "";
         click(doc.querySelector("#nodePanel [data-action='focus-node-document']"));
         await waitFor(`${label}: inspector Document focus opens Document`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "document");
         const focusedEditor = doc.querySelector("#documentPanel [data-document-source]");

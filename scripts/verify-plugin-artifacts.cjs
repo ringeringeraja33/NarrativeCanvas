@@ -458,6 +458,16 @@ if (runtimeMarkers.some((name) => !appSource.includes(`// BEGIN WEB_RUNTIME:${na
   pass("plugin bundle rewrites use explicit, uniquely validated source markers");
 }
 
+const browserTestRunner = readUtf8("scripts/run-browser-test.cjs");
+if (browserTestRunner.includes("--dump-dom")
+  || !browserTestRunner.includes("--remote-debugging-port=")
+  || !browserTestRunner.includes('cdp.call("Runtime.evaluate"')
+  || !browserTestRunner.includes("data-${statusName}-status")) {
+  fail("browser tests do not read their live status through the Chrome debugging protocol");
+} else {
+  pass("browser tests stop on live page status without waiting for Chrome dump-dom");
+}
+
 const workflowSources = supportFiles
   .filter((file) => file.startsWith(".github/workflows/"))
   .map(readUtf8);
