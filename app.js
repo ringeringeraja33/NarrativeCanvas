@@ -1425,6 +1425,10 @@ const uiTranslations = {
     "Find nodes": "查找节点",
     "Find in Playbook": "在演示设置中查找",
     "Focus": "聚焦",
+    "Canvas focus": "画布聚焦",
+    "Document focus": "文档聚焦",
+    "Focused {title} in Document.": "已在文档中定位并高亮“{title}”。",
+    "Could not find this node in Document.": "未在文档中找到该节点。",
     "Frame": "框架",
     "Frame canvas": "框架画布",
     "Frame canvas closed.": "已退出框架画布。",
@@ -11782,8 +11786,9 @@ function renderNodePanel(node) {
       <div class="button-row">
         ${isFrameNode(node) ? `<button class="small-button" data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}">${t("Open frame canvas")}</button>` : ""}
         <button class="small-button" data-action="duplicate-node">${t("Duplicate")}</button>
+        <button class="small-button" data-action="focus-node">${t("Canvas focus")}</button>
+        ${!isFrameNode(node) ? `<button class="small-button" data-action="focus-node-document">${t("Document focus")}</button>` : ""}
         <button class="small-button danger-button" data-action="delete-node">${t("Delete node")}</button>
-        <button class="small-button" data-action="focus-node">${t("Focus")}</button>
       </div>
     </div>
   `;
@@ -13842,6 +13847,7 @@ function handleAction(target) {
   if (action === "reconnect-link-to") startLinkReconnect("to");
   if (action === "assign-choice-link") assignChoiceLink(target.dataset.linkId, target.dataset.choiceIndex);
   if (action === "focus-node") focusSelectedNode();
+  if (action === "focus-node-document") focusSelectedNodeInDocument();
   if (action === "focus-canvas-node") focusCanvasNode(target.dataset.nodeId);
   if (action === "focus-choice-source") focusCanvasNode(target.dataset.choiceSourceNodeId);
   if (action === "select-node") selectNode(target.dataset.nodeId);
@@ -21337,6 +21343,107 @@ function focusSelectedNode() {
   renderAll();
   centerCanvasOnNode(node, NODE_FOCUS_ZOOM, { immediate: true });
   setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
+}
+
+function focusSelectedNodeInDocument() {
+  const node = getNode(state.selectedNodeId);
+  if (!node || isFrameNode(node)) return;
+  selectFile("document");
+  const editor = dom.documentPanel?.querySelector("[data-document-source]");
+  const range = editor
+    ? findDocumentNodeTitleRange(editor.value, state.documentFormat, node.id)
+    : null;
+  if (!editor || !range) {
+    setStatus(t("Could not find this node in Document."));
+    return;
+  }
+  focusDocumentSourceRange(editor, range);
+  setStatus(t("Focused {title} in Document.", { title: node.title || getNodeDisplayId(node) }));
+}
+
+function findDocumentNodeTitleRange(source, format, nodeId) {
+  const lines = getDocumentSourceLines(source);
+  const id = String(nodeId || "").trim();
+  if (!id) return null;
+  const normalizedFormat = normalizeDocumentFormat(format);
+  if (normalizedFormat === "plain") {
+    const idIndex = lines.findIndex((line) => line.text.match(/^<!--\s*id:\s*(.*?)\s*-->$/)?.[1]?.trim() === id);
+    if (idIndex < 1) return null;
+    return getDocumentCapturedRange(lines[idIndex - 1], /^(##\s+)(.*?)(\s*)$/, 2);
+  }
+  if (normalizedFormat === "yarn") {
+    const idIndex = lines.findIndex((line) => line.text.match(/^narrativeCanvasId:\s*(.*?)\s*$/)?.[1]?.trim() === id);
+    if (idIndex < 0) return null;
+    for (let index = idIndex + 1; index < lines.length && !/^---\s*$/.test(lines[index].text); index += 1) {
+      const range = getDocumentCapturedRange(lines[index], /^(nodeTitle:\s*)(.*?)(\s*)$/, 2);
+      if (range) return trimDocumentLiteralQuotes(source, range);
+    }
+    return null;
+  }
+  if (normalizedFormat === "ink") {
+    const idIndex = lines.findIndex((line) => line.text.match(/^\/\/\s*narrativeCanvasId:\s*(.*?)\s*$/)?.[1]?.trim() === id);
+    if (idIndex < 0) return null;
+    for (let index = idIndex + 1; index < lines.length && !/^===\s+/.test(lines[index].text); index += 1) {
+      const range = getDocumentCapturedRange(lines[index], /^(\/\/\s*nodeTitle:\s*)(.*?)(\s*)$/, 2);
+      if (range) return trimDocumentLiteralQuotes(source, range);
+    }
+    return null;
+  }
+  const idIndex = lines.findIndex((line) => line.text.match(/^<!--\s*narrativeCanvasId:\s*(.*?)\s*-->$/)?.[1]?.trim() === id);
+  if (idIndex < 0) return null;
+  for (let index = idIndex + 1; index < lines.length && !/^::\s+/.test(lines[index].text); index += 1) {
+    const range = getDocumentCapturedRange(lines[index], /^(<!--\s*narrativeCanvasTitle:\s*)(.*?)(\s*-->)$/, 2);
+    if (range) return range;
+  }
+  return null;
+}
+
+function getDocumentSourceLines(source) {
+  const text = String(source || "");
+  const lines = [];
+  let start = 0;
+  text.split("\n").forEach((line) => {
+    lines.push({ text: line, start, end: start + line.length });
+    start += line.length + 1;
+  });
+  return lines;
+}
+
+function getDocumentCapturedRange(line, pattern, groupIndex) {
+  const match = line?.text?.match(pattern);
+  const value = match?.[groupIndex];
+  if (value == null) return null;
+  const relativeStart = match[0].indexOf(value, (match[1] || "").length);
+  if (relativeStart < 0) return null;
+  return {
+    start: line.start + relativeStart,
+    end: line.start + relativeStart + value.length
+  };
+}
+
+function trimDocumentLiteralQuotes(source, range) {
+  if (!range || range.end - range.start < 2) return range;
+  const text = String(source || "");
+  return text[range.start] === '"' && text[range.end - 1] === '"'
+    ? { start: range.start + 1, end: range.end - 1 }
+    : range;
+}
+
+function focusDocumentSourceRange(editor, range) {
+  const start = Math.max(0, Math.min(editor.value.length, Number(range?.start) || 0));
+  const end = Math.max(start, Math.min(editor.value.length, Number(range?.end) || start));
+  const lineHeight = getDocumentEditorLineHeight(editor);
+  const lineIndex = editor.value.slice(0, start).split("\n").length - 1;
+  editor.scrollTop = Math.max(0, lineIndex * lineHeight - editor.clientHeight / 2);
+  editor.scrollLeft = 0;
+  try {
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(start, end);
+  } catch (_error) {
+    // no-op for embedded WebViews without selection support
+  }
+  syncDocumentEditorGutter(editor);
+  syncDocumentOverlayScroll(editor);
 }
 
 function centerCanvasOnNode(node, scale = state.view.scale, options = {}) {

@@ -445,6 +445,30 @@
           assert(`${label}: ${formatLabel} no-op round-trip preserves project JSON`, after === before);
         }
 
+        click(doc.querySelector("[data-file-id='document']"));
+        await waitFor(`${label}: Document opens before inspector focus check`, () => Boolean(doc.querySelector("#documentPanel [data-document-format='plain']")));
+        click(doc.querySelector("#documentPanel [data-document-format='plain']"));
+        click(doc.querySelector("[data-file-id='adventure']"));
+        await waitFor(`${label}: canvas opens before inspector focus check`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "adventure");
+        click(doc.querySelector(".node[data-node-id='n19']"));
+        await waitFor(`${label}: node inspector opens before Document focus`, () => Boolean(doc.querySelector("#nodePanel [data-action='focus-node-document']")));
+        const inspectorActions = [...doc.querySelectorAll("#nodePanel .button-row > [data-action]")]
+          .map((button) => button.dataset.action);
+        assert(
+          `${label}: node inspector actions use copy, canvas focus, Document focus, delete order`,
+          inspectorActions.slice(-4).join("|") === "duplicate-node|focus-node|focus-node-document|delete-node",
+          inspectorActions.join("|")
+        );
+        const focusedNodeTitle = win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((node) => node.id === "n19")?.title || "";
+        click(doc.querySelector("#nodePanel [data-action='focus-node-document']"));
+        await waitFor(`${label}: inspector Document focus opens Document`, () => doc.querySelector(".app-shell")?.getAttribute("data-active-file") === "document");
+        const focusedEditor = doc.querySelector("#documentPanel [data-document-source]");
+        assert(
+          `${label}: inspector Document focus highlights the node title field`,
+          focusedEditor?.value.slice(focusedEditor.selectionStart, focusedEditor.selectionEnd) === focusedNodeTitle,
+          `selected=${focusedEditor?.value.slice(focusedEditor.selectionStart, focusedEditor.selectionEnd)} expected=${focusedNodeTitle}`
+        );
+
         const documentFile = doc.querySelector("[data-file-id='document']");
         assert(`${label}: Document file tab exists`, Boolean(documentFile));
         click(documentFile);
