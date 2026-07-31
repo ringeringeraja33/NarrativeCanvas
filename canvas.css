@@ -35,6 +35,8 @@
   --text-normal: #dcddde;
   --text-muted: #a8a8a8;
   --text-faint: #7a7a7a;
+  --nc-mark-bg: #ffd54f;
+  --nc-mark-text: #241c00;
   --text-on-accent: #ffffff;
   --interactive-accent: #7f6df2;
   --interactive-accent-hover: #9586ff;
@@ -87,6 +89,8 @@
   --text-normal: #202124;
   --text-muted: #55585e;
   --text-faint: #686b72;
+  --nc-mark-bg: #f2c94c;
+  --nc-mark-text: #241c00;
   --text-on-accent: #ffffff;
   --interactive-accent: #6f55d9;
   --interactive-accent-hover: #5d43c2;
@@ -1592,8 +1596,8 @@ button {
 .expand-format-button mark {
   padding: 0 3px;
   border-radius: 2px;
-  background: var(--text-highlight-bg, #ffd54f);
-  color: #000;
+  background: var(--nc-mark-bg);
+  color: var(--nc-mark-text);
 }
 
 .expand-format-button u {
@@ -9417,8 +9421,8 @@ select:focus {
 .play-body-text mark {
   padding: 0 0.15em;
   border-radius: 3px;
-  background: var(--text-highlight-bg, #ffd54f);
-  color: inherit;
+  background: var(--nc-mark-bg);
+  color: var(--nc-mark-text);
 }
 
 .play-body-text a {
