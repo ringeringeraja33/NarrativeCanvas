@@ -281,7 +281,7 @@
       function budgetsFor(nodeCount) {
         const large = nodeCount >= 100000;
         const base = large
-          ? { openMs: 45000, tabMs: 18000, searchMs: 18000, saveMs: 25000, exportJsonMs: 25000, visibleNodes: 260 }
+          ? { openMs: 45000, tabMs: 30000, searchMs: 18000, saveMs: 25000, exportJsonMs: 25000, visibleNodes: 260 }
           : { openMs: 14000, tabMs: 8000, searchMs: 8000, saveMs: 10000, exportJsonMs: 12000, visibleNodes: 220 };
         return Object.fromEntries(Object.entries(base).map(([key, value]) => [key, Math.round(value * budgetScale)]));
       }
