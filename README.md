@@ -2,7 +2,7 @@
 
 [![Verify plugin artifacts](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg?branch=main)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml?query=branch%3Amain)
 
-Current prerelease: [1.4.0-beta.1](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0-beta.1) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+Latest release: [1.4.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0) · [Release notes](RELEASE_NOTES.md) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 Obsidian Community Plugins: [Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
@@ -78,7 +78,7 @@ Canvas editing, navigation, zoom, search, preview, and node-creation commands ar
 4. Use frames to group nodes. Frames are shown in Events Sheet by default; frame-only types can be hidden there via node type settings.
 5. Select a node and edit it in the Inspector.
 6. Use `Story` to inspect the reachable graph from `Entry`.
-7. Click `Play` to preview the current narrative path. The preview keeps a scrollable log of the cards you just passed — scroll up to reread recent story, limited to the last 30 cards, and use `Return to this card` on a past card to rewind the story to that step.
+7. Click `Play` to preview the current narrative path. The preview keeps a scrollable log of the cards you just passed — scroll up to reread recent story, limited to the last 30 cards, use `Return to this card` on a past card to rewind the story to that step, or export the playthrough as UTF-8 Markdown.
 8. Save or export when structure is ready. PNG export presets are `4096 x 4096`, `6144 x 6144`, `8192 x 8192`, and `12000 x 12000`, and filenames include the final rendered size. Very large canvases are auto-scaled to stay within browser raster limits.
 
 ### Default Node Types
@@ -165,7 +165,7 @@ In the plugin, a node's `Vault file` section can link multiple notes or other va
 
 `Edit document` sits directly below the canvas in the file list. It is a full-page, VSCode-style editor for the project's runtime narrative. A slim tab strip shows the file name, a `Plain text` / `Ink` / `Yarn` / `Twee` format switch, and the live sync status; below it an edge-to-edge monospace editor with a synced line-number gutter fills the whole pane. `Tab` and `Shift+Tab` indent and outdent, and lines do not soft-wrap, so scripts read the same as in a code editor.
 
-Edit existing narrative content directly and changes sync back to the project: project title and notes, node titles and bodies, variables, existing choices, conditions, effects, and routes are compared field by field before they are merged. Canvas layout and metadata the format cannot express stay unchanged. Add or delete nodes, choices, and routes on the canvas or in the inspector; stable node IDs and body-boundary markers keep incomplete source edits from changing structure. Switching formats re-renders the same project as Plain text (Story Markdown), Ink, Yarn, or Twee 3 / SugarCube.
+Edit existing narrative content directly and changes sync back to the project: project title and notes, node titles and bodies, variables, existing choices, conditions, effects, and routes are compared field by field before they are merged. Canvas layout and metadata the format cannot express stay unchanged. Add or delete nodes, choices, and routes on the canvas or in the inspector; stable node IDs and body-boundary markers keep incomplete source edits from changing structure. Switching formats re-renders the same project as Plain text (Story Markdown), Ink, Yarn, or Twee 3 / SugarCube. From the Node Inspector, use `Open in document` to jump to the matching node title in the active document format.
 
 ### Playbook
 

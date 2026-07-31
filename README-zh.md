@@ -4,7 +4,7 @@
 
 English version: [README.md](https://github.com/ringeringeraja33/NarrativeCanvas/blob/main/README.md)
 
-当前预发布版本：[1.4.0-beta.1](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0-beta.1) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+最新正式版本：[1.4.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0) · [发布说明](RELEASE_NOTES.md) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 Obsidian 社区插件：[Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
@@ -77,7 +77,7 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 4. 使用 `框架` 归组节点。`框架` 默认进入 `事件表`；仅作为画布归组辅助的 `框架` 类型可在类型设置中隐藏。
 5. 选中节点，在右侧 `检查器` 编辑。
 6. 在 `故事` 里查看从 Entry 可到达的故事顺序。
-7. 点击 `演示` 预览当前叙事路线。演示窗口会保留刚刚经过的卡片，向上滚动即可回看，最多保留最近 30 张；历史卡片上的「回到此卡片」可一键回溯到该步。
+7. 点击 `演示` 预览当前叙事路线。演示窗口会保留刚刚经过的卡片，向上滚动即可回看，最多保留最近 30 张；历史卡片上的「回到此卡片」可一键回溯到该步，也可将游玩记录导出为 UTF-8 Markdown。
 8. 结构整理完成后保存或导出。工具栏的 PNG 分辨率按输出像素分档（`4096 x 4096`、`6144 x 6144`、`8192 x 8192`、`12000 x 12000`），导出文件名记录实际像素尺寸；超大画布自动缩放以避开浏览器位图尺寸限制。
 
 ### 默认节点类型
@@ -164,7 +164,7 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 
 「编辑文档」在文件列表中紧跟叙事画布之后，是面向项目运行时叙事的整页编辑器，手感与 VSCode 原生编辑区一致。顶部标签栏显示文件名、`纯文本` / `Ink` / `Yarn` / `Twee` 格式切换以及实时同步状态；下方是铺满整块面板的等宽编辑区，带随内容同步的行号栏。`Tab` 与 `Shift+Tab` 缩进/取消缩进，且文本不自动换行，脚本的排版与代码编辑器一致。
 
-直接编辑现有叙事内容即可写回项目：项目标题与备注、节点标题与正文、变量、现有选项、条件、效果和跳转会逐字段比较后增量合并，而画布布局及格式无法表达的元数据保持不变。节点、选项和路线的新增或删除仍在画布或检查器中完成；稳定节点 ID 与正文边界标记会阻止编辑中的半成品误改项目结构。切换格式会把同一个项目重新渲染为纯文本（Story Markdown）、Ink、Yarn 或 Twee 3 / SugarCube。
+直接编辑现有叙事内容即可写回项目：项目标题与备注、节点标题与正文、变量、现有选项、条件、效果和跳转会逐字段比较后增量合并，而画布布局及格式无法表达的元数据保持不变。节点、选项和路线的新增或删除仍在画布或检查器中完成；稳定节点 ID 与正文边界标记会阻止编辑中的半成品误改项目结构。切换格式会把同一个项目重新渲染为纯文本（Story Markdown）、Ink、Yarn 或 Twee 3 / SugarCube。可在节点检查器中使用“在文档中打开”，跳转到当前文档格式中对应的节点标题。
 
 ### 演示设置
 ![演示设置](assets/screenshots/playbook-zh.png)

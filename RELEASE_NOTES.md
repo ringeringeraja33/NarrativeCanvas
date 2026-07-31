@@ -1,8 +1,8 @@
-# Narrative Canvas 1.4.0-beta.1
+# Narrative Canvas 1.4.0
 
 ## English
 
-Thank you to everyone who opened the current issues and shared feature suggestions. The requests covered by these issues remain works in progress, and further bug reports, edge cases, and suggestions are welcome in the corresponding issue threads.
+Narrative Canvas 1.4.0 is the stable release of the features evaluated in 1.4.0-beta.1. It expands the project Library, strengthens Markdown and portable-document workflows, adds safer backup and collaboration behavior, and improves branching authoring throughout Canvas, Play, and exported formats. Thank you to everyone who reported issues and shared feature suggestions during the prerelease.
 
 - **Characters has become a project Library for characters, locations, items, and lore.** Entries use searchable category/tag filters, managed Markdown files with editable typed frontmatter, freeform note bodies, ordered node references, grouped backlinks, multiple linked Vault files, and compact image boards. Existing character data migrates without losing cast relations; new projects keep the `.ncanvas` file and `Library` folder together ([#5](https://github.com/ringeringeraja33/NarrativeCanvas/issues/5)).
 - **Plugin typography and theme isolation are more reliable.** Content can follow the host font or use system, Cascadia Code, or serif presets; native controls and editor colors are isolated inside the plugin shadow root so themes such as Retroma cannot make text unreadable. Vietnamese and other Latin-script content follows the selected font throughout Play and editing surfaces ([#7](https://github.com/ringeringeraja33/NarrativeCanvas/issues/7)).
@@ -15,9 +15,11 @@ Thank you to everyone who opened the current issues and shared feature suggestio
 - **The multi-project picker now uses project titles.** Search and primary labels come from each project’s internal title, while the `.ncanvas` path remains visible for disambiguation. A **New project** button in the same picker opens the existing named-project creation flow ([#15](https://github.com/ringeringeraja33/NarrativeCanvas/issues/15)).
 - **Versioned project backups are available in the plugin.** Automatic backups are off by default and can be enabled explicitly at a 12- or 24-hour interval; retention is configurable, while manual backup and restore remain available at all times. Backups live in the project’s `Backups` folder; restoring first saves the current canvas and creates a safety snapshot ([#13](https://github.com/ringeringeraja33/NarrativeCanvas/issues/13)).
 - **The requested branching-authoring improvements are now covered.** Twee uses standard links for plain transitions; Play lists every available outgoing branch; Choice nodes resize with their connected option layout; an optional 16 px snap grid can align node creation, movement, and resizing; timed Choices can count down to a selected fallback; and node effects accept `if … then … else …` assignments with variable-to-variable values. Runtime JSON, Yarn, Ink, Twee, validation, and Play all preserve the new conditional behavior ([#14](https://github.com/ringeringeraja33/NarrativeCanvas/issues/14)).
+- **Play sessions are easier to review and share.** Play keeps a bounded history of the current path, supports rewinding to an earlier card, and exports the playthrough as UTF-8 Markdown. The default history limit is 30 cards and can be changed per project.
 - **Shared project files now have collaboration-safe overwrite protection in the plugin.** Changes arriving from Relay, a synced folder, Git, or another editor reload automatically while the local project is clean. If local edits are pending, automatic saving pauses; a save writes the local state into the project’s `Conflicts` folder and leaves the shared `.ncanvas` file untouched. This protects asynchronous team workflows; live cursors and CRDT editing still depend on the external collaboration service ([#16](https://github.com/ringeringeraja33/NarrativeCanvas/issues/16)).
+- **Canvas and document editing are connected more directly.** The Node Inspector can open the full project document and highlight the matching node title, making it faster to move between structural editing and script-level work.
 
-### Known risks in 1.4.0-beta.1
+### Notes and limitations
 
 - Managed Library Markdown/frontmatter synchronization, preview-image boards, portable text round-trips, and AI-assisted edits are still evolving. Keep project backups and inspect generated files before replacing source material.
 - Shared-file protection prevents a whole-file overwrite and preserves local work in `Conflicts`, but it does not merge simultaneous edits or provide live cursors. Conflict copies require manual review.
@@ -26,7 +28,7 @@ Thank you to everyone who opened the current issues and shared feature suggestio
 
 ## 中文
 
-感谢提交现有 issue 和功能建议的每一位用户。相关需求仍在持续完善；如果遇到问题、边界情况或有进一步建议，欢迎继续在对应 issue 中反馈。
+Narrative Canvas 1.4.0 是经过 1.4.0-beta.1 验证后的正式版本。本次发布扩展了项目资料库，强化 Markdown 与可迁移文档工作流，加入更安全的备份和协作保护，并完善画布、演示及导出格式中的分支创作能力。感谢所有在预发布阶段提交问题和功能建议的用户。
 
 - **角色页已扩展为项目资料库，统一管理人物、地点、物品和设定。** 资料条目支持分类与标签搜索、可管理的 Markdown 文件、可增删的类型化 frontmatter、独立笔记正文、有序节点引用、分组反链、多个库文件关联和紧凑预览图白板。原有角色数据和演员关系会保留；新项目会把 `.ncanvas` 与 `Library` 文件夹放在同一项目目录中（[#5](https://github.com/ringeringeraja33/NarrativeCanvas/issues/5)）。
 - **插件端的字体和主题隔离更加可靠。** 正文可跟随宿主字体，也可选择系统字体、Cascadia Code 或衬线字体；原生控件和编辑器颜色封装在插件 shadow root 内，Retroma 等主题不会再造成文字与背景无法区分。越南语及其他拉丁文字会在演示与编辑界面统一使用所选字体（[#7](https://github.com/ringeringeraja33/NarrativeCanvas/issues/7)）。
@@ -39,9 +41,11 @@ Thank you to everyone who opened the current issues and shared feature suggestio
 - **多项目选择器改用项目标题。** 搜索范围和主标签读取项目内部标题，同时保留 `.ncanvas` 路径用于区分同名项目；同一窗口新增“新建项目”按钮，可直接进入已有的命名新建流程（[#15](https://github.com/ringeringeraja33/NarrativeCanvas/issues/15)）。
 - **插件端新增项目版本备份。** 自动备份默认关闭，用户可自行开启并选择每 12 或 24 小时执行；保留数量可调，立即备份和恢复始终可用。备份存放在项目的 `Backups` 文件夹中；恢复前会先保存当前画布并创建安全快照（[#13](https://github.com/ringeringeraja33/NarrativeCanvas/issues/13)）。
 - **补齐分支创作相关改进。** Twee 的普通跳转改用标准链接；演示模式会列出全部可用出线；Choice 节点可随选项布局联动调整尺寸；可选的 16 px 网格吸附覆盖节点新建、移动和缩放；定时 Choice 可倒计时并跳到指定后备分支；节点效果支持带变量引用的 `if … then … else …` 赋值。Runtime JSON、Yarn、Ink、Twee、状态校验和演示模式都会保留新的条件逻辑（[#14](https://github.com/ringeringeraja33/NarrativeCanvas/issues/14)）。
+- **演示过程更便于回顾和分享。** 演示模式会保留当前路线的有限历史记录，支持回到较早的卡片，并可将游玩记录导出为 UTF-8 Markdown。默认保留 30 张卡片，也可按项目调整。
 - **插件端为共享项目文件加入协作安全保护。** Relay、同步文件夹、Git 或其他编辑器写入的新版本，会在本地没有改动时自动重新加载；如有未保存改动，自动保存会暂停，手动保存会把本地状态写入项目的 `Conflicts` 文件夹，同时保留共享 `.ncanvas` 文件。该能力保护异步团队工作流；多人光标和 CRDT 同步仍由外部协作服务提供（[#16](https://github.com/ringeringeraja33/NarrativeCanvas/issues/16)）。
+- **画布与文档编辑之间的衔接更加直接。** 节点检查器可以打开完整项目文档并高亮对应的节点标题，便于在结构编辑与剧本级编辑之间快速切换。
 
-### 1.4.0-beta.1 已知风险
+### 注意事项与限制
 
 - 资料库 Markdown/frontmatter 同步、预览图白板、可迁移文本往返和 AI 修改仍在迭代。请保留项目备份，并在替换源材料前检查生成文件。
 - 共享文件保护可阻止整文件覆盖，并将本地内容保存在 `Conflicts` 中，但不会合并同时发生的修改，也不提供多人实时光标；冲突副本需要人工检查。
