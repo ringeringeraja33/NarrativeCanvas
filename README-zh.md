@@ -4,7 +4,7 @@
 
 English version: [README.md](https://github.com/ringeringeraja33/NarrativeCanvas/blob/main/README.md)
 
-当前版本：[1.3.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.3.0) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+当前预发布版本：[1.4.0-beta.1](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0-beta.1) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 Obsidian 社区插件：[Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
@@ -16,7 +16,7 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 
 界面支持英文与中文。网页端提供 `EN / 中` 浮动切换按钮；Obsidian 插件设置提供 `语言` 选项，支持跟随 Obsidian 界面语言。
 
-多行节点文本框带有展开按钮，可打开大号居中编辑器，并配有格式工具栏（加粗、斜体、删除线、H2/H3、引用、无序列表），对选区包裹或加行前缀 Markdown。所有文本框默认关闭拼写检查下划线；Obsidian 插件设置提供 `拼写检查` 开关可开启。
+多行节点文本框带有展开按钮，可打开大号居中编辑器。格式工具栏支持加粗、斜体、删除线、行内代码、高亮、链接、H1/H2/H3、引用、无序列表、有序列表、任务列表、代码块和分隔线。所有文本框默认关闭拼写检查下划线；Obsidian 插件设置提供 `拼写检查` 开关。
 
 ![Narrative Canvas 主画布](assets/screenshots/main-canvas-zh.png)
 
@@ -31,6 +31,8 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 - `打开`：网页端从本地磁盘选择并导入项目文件；Obsidian 端从库里选择项目文件打开。
 - `重新加载`：放弃未保存修改，重新加载当前保存来源。网页端读取浏览器存储；Obsidian 端重新读取当前 `.ncanvas` 文件。
 - `清除存储`：仅网页端可用。删除浏览器保存的项目，并加载一个空项目。
+
+当前各功能的成熟度不同：画布编辑、本地 `.ncanvas` 读写和演示预览属于主要功能；可迁移文本往返、AI 修改、资料库 Markdown 同步、预览图白板和共享文件外部改动保护仍在迭代。替换源文件前应保留备份，并检查导出报告或冲突副本。超大 PNG 导出可能占用较多内存。
 
 ### 网页 App
 
@@ -57,6 +59,10 @@ Narrative Canvas 是用于复杂叙事写作与设计的节点式工作区。它
 - `示例项目` 打开内置示例。
 - `新项目主路径` 与 `新项目文件名` 控制新项目的位置与命名。每次新建都会生成独立项目文件夹，其中包含 `.ncanvas` 文件与 `Library` 资料库文件夹。已有项目若使用 `Codex/`，会继续读写原目录。
 - `自动保存间隔`（单位秒）控制 Narrative Canvas 写入当前项目文件的频率，留空表示沿用 Obsidian 的自动保存间隔。
+- `正文字体` 控制演示和叙事正文所用字体；`拼写检查` 控制浏览器拼写下划线。
+- `项目备份` 默认关闭。开启 `启用自动备份` 后，可选择每 12 或 24 小时执行，默认保留 20 份。以 `Project/Story.ncanvas` 为例，备份写入 `Project/Backups/Story-<时间戳>.ncanvas.backup`；关闭自动备份时仍可使用立即备份和恢复。
+- `外部项目改动保护` 监视当前 `.ncanvas`。本地无改动时自动载入外部版本；存在未保存内容时暂停自动保存，手动保存会将本地版本写入项目的 `Conflicts` 文件夹。
+- `AI` 区域只需填写 OpenAI 兼容的聊天补全 endpoint、API key 和模型，无需选择服务商预设。
 - `上次编辑的项目` 显示 ribbon 按钮下一次打开的项目路径，并提供清除操作。
 
 ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` 项目时弹出选择列表（当前项目排在最前）；只有一个时直接打开；一个都没有时按默认名称新建项目。
@@ -89,6 +95,7 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 - 点击输出端口，再点击输入端口，建立连线。
 - 连线过程中双击空白画布，取消待建立的连线。
 - 右键点击已有连线，执行重连或删除。
+- `吸附` 将节点的新建位置、移动位置和缩放尺寸对齐到 16 px 画布网格。该功能可随时开关，状态保存在项目中。
 - Canvas 与 `故事` 均可折叠 `框架`，并共享同一折叠状态。Canvas 中 `框架` 折叠时，连到内部节点的线临时显示为从 `框架` 端口进出；真实连线不被改写。
 - `框架` 与 `事件框架` 默认显示在普通节点下层。新建 `框架` 放置在已有默认顺序 `框架` 的最上方，避免覆盖旧归组框架；需要时可通过右键菜单的层级控件手动调整。
 - Choice 与 Dialog 卡片的选项或轮次过多时，内容在节点内部纵向滚动，节点尺寸和画布布局保持不变；Node 检查器中的“添加轮次”位于轮次列表之后。
@@ -181,6 +188,8 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 
 条件字段使用安全的 JavaScript 表达式子集：比较、`&&`、`||`、`!`、括号、字符串、数字、布尔值、点号状态路径和 `.includes(...)`。工具不会执行任意 JavaScript。超出该子集的表达式会保留在 Runtime JSON，并进入导出警告；Yarn、Ink 和 Twee 会给对应分支写出可解析的 `false` 条件保护。
 
+节点效果也支持 `if <条件> then <赋值> else <赋值>`，赋值右侧可引用另一个状态变量。定时 Choice 可倒计时并进入指定后备选项；演示、Runtime JSON、Yarn、Ink 和 Twee 会保留支持范围内的行为。
+
 旧版本保存的 `.ncanvas` 会经过规范化路径加载：旧 `choices[]`、`choiceIndex` 连线、缺失的 `actions`、旧自定义节点类型、事件表列、Frame / Jump 数据、旧 `ports` 和点号状态 key 都会在打开时保留或迁移。旧 `choices[]` 会获得可重复的选项 ID（`opt_1`、`opt_2` 等），旧分支按原顺序保留，保存后的 sidecar 也更容易对齐。
 
 ### 可迁移导出（测试版）
@@ -206,9 +215,9 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 
 网页端点开**连接设置**，填入任意 OpenAI 兼容接口（endpoint、API key、模型），配置仅保存在本地浏览器。插件端在插件设置中填写相同字段，API key 保存在插件本地 `data.json`，请求通过 Obsidian 的 `requestUrl` 发送。该功能为实验性，标记为 **Beta**。
 
-可选的**叙事创作指导**开关（默认关闭）会为 AI 注入精简的叙事、人物与结构原则，使其建议更贴合成熟的叙事创作方法；仅在开启时按有限量增加每次请求的 token。
+可选的**叙事创作指导**开关（默认关闭）会为 AI 注入精简的故事、人物、场面调度、剪辑和声音原则；仅在开启时按有限量增加每次请求的 token。
 
-任意 OpenAI 兼容服务均可使用。例如 Google **Gemini** 提供 OpenAI 兼容端点——填入 `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`、Gemini API key（来自 Google AI Studio）以及 `gemini-2.0-flash` 之类的模型即可。
+提供兼容聊天补全端点的服务都使用同一组 endpoint、API key 和模型字段，界面不设置服务商专用入口。
 
 在 Obsidian 插件中，AI 悬浮按钮只有在 endpoint、API key 和模型三项都配置后才会出现，不用 AI 时不会碍事；独立网页版则始终显示按钮，因为配置表单就在按钮后面。
 

@@ -11,6 +11,9 @@
       "flag_watch_missing": true,
       "flag_boarding_denied": false,
       "ticket_phrase": "red && blue",
+      "variable1": 5,
+      "variable2": 3,
+      "variable3": 0,
       "flag_tokens": [
         "boarding",
         "watch"
@@ -112,6 +115,27 @@
         "type": "Entry",
         "title": "Start",
         "body": "Coins before: {inventory_coins}. Nested coins: {nested_inventory.coins}.",
+        "stateLogic": {
+          "effects": [
+            {
+              "trigger": "onVisit",
+              "op": "ifElse",
+              "condition": "variable1 > variable2",
+              "thenEffect": {
+                "op": "set",
+                "key": "variable3",
+                "value": "variable1",
+                "valueMode": "variable"
+              },
+              "elseEffect": {
+                "op": "set",
+                "key": "variable3",
+                "value": "variable2",
+                "valueMode": "variable"
+              }
+            }
+          ]
+        },
         "x": 80,
         "y": 80
       },
@@ -151,6 +175,11 @@
             "effects": []
           }
         ],
+        "choiceTimer": {
+          "enabled": true,
+          "seconds": 3600,
+          "fallbackLinkId": "l1"
+        },
         "customFields": {
           "readout": "Custom field coins: {inventory_coins}"
         },

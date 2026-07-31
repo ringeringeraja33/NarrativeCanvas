@@ -10,7 +10,10 @@ const NODE_FOCUS_ZOOM = 1;
 const NODE_INLINE_EDIT_CLICK_INTERVAL_MS = 500;
 const CANVAS_MIN_AUTO_SCALE = CANVAS_MIN_ZOOM;
 const CANVAS_MAX_AUTO_SCALE = 1;
+const CANVAS_GRID_SIZE = 16;
 const HISTORY_LIMIT = 80;
+const DEFAULT_PLAY_HISTORY_LIMIT = 30;
+const PLAY_HISTORY_LIMIT_OPTIONS = [10, 30, 50, 100];
 const APP_SHORTCUT_CONTEXT_MS = 30000;
 const EVENT_LAYER_BASE = 0;
 const REGULAR_LAYER_BASE = 1000000;
@@ -107,11 +110,6 @@ const STATE_REPORT_STATUS_LABELS = {
   "export-blocked": "Export risk",
   "invalid-expression": "Invalid expression"
 };
-const PLAYBOOK_CHOICE_DISPLAY_OPTIONS = [
-  { value: "hideUnavailable", label: "Hide unavailable choices" },
-  { value: "disableUnavailable", label: "Show unavailable choices disabled" },
-  { value: "showAll", label: "Show all choices" }
-];
 const NODE_ROUTING_MODES = [
   { value: "continue", label: "Continue by link" },
   { value: "end", label: "End route" },
@@ -146,7 +144,6 @@ const EXPORT_IMAGE_MAX_DIMENSION = 16000;
 const EXPORT_IMAGE_MAX_PIXELS = 150000000;
 const EXPORT_IMAGE_MIN_SCALE = 0.0001;
 const EVENT_ELEMENTS_COLUMN_KEY = "eventElements";
-const STORY_ROW_GAP = 132;
 const STORY_FRAME_PADDING = 32;
 const AUTO_LAYOUT_NODE_GAP = 72;
 const AUTO_LAYOUT_RANK_GAP = 180;
@@ -1159,6 +1156,10 @@ const uiTranslations = {
     "Tag suggestions": "标签建议",
     "Center": "居中",
     "Center canvas": "画布居中",
+    "Snap": "吸附",
+    "Snap nodes to grid": "将节点吸附到网格",
+    "Grid snapping enabled.": "已启用网格吸附。",
+    "Grid snapping disabled.": "已关闭网格吸附。",
     "Characters": "角色",
     "Characters Markdown exported.": "角色 Markdown 已导出。",
     "Characters JSON exported.": "角色 JSON 已导出。",
@@ -1202,6 +1203,7 @@ const uiTranslations = {
     "Show all entries": "显示全部条目",
     "No matching entries.": "没有匹配的条目。",
     "Choice: {label}": "选择：{label}",
+    "Branch {number}": "分支 {number}",
     "Focus source Choice node: {label}": "聚焦来源选择节点：{label}",
     "Focus next node: {title}": "聚焦下一个节点：{title}",
     "No linked next node": "未连接下一个节点",
@@ -1423,6 +1425,10 @@ const uiTranslations = {
     "Find nodes": "查找节点",
     "Find in Playbook": "在演示设置中查找",
     "Focus": "聚焦",
+    "Canvas focus": "画布聚焦",
+    "Document focus": "文档聚焦",
+    "Focused {title} in Document.": "已在文档中定位并高亮“{title}”。",
+    "Could not find this node in Document.": "未在文档中找到该节点。",
     "Frame": "框架",
     "Frame canvas": "框架画布",
     "Frame canvas closed.": "已退出框架画布。",
@@ -1525,6 +1531,12 @@ const uiTranslations = {
     "On choose": "选择时",
     "Selected choice": "选择选项",
     "Choice effect": "选项效果",
+    "Timed choice": "限时选择",
+    "Enable timer": "启用倒计时",
+    "Seconds": "秒数",
+    "Fallback passage": "超时后前往",
+    "Choose a fallback passage": "选择超时后前往的段落",
+    "Time remaining: {seconds}s": "剩余时间：{seconds} 秒",
     "Open": "打开",
     "Open frame canvas": "打开框架画布",
     "Optional: split this Dialog into multiple turns so a single node carries a back-and-forth exchange.": "可选：将该 Dialog 拆成多轮，让单个节点承载来回对话。",
@@ -1571,6 +1583,8 @@ const uiTranslations = {
     "Run": "运行",
     "Save": "保存",
     "Save failed": "保存失败",
+    "Project changed outside Narrative Canvas and was reloaded.": "项目已在 Narrative Canvas 外部改动，现已重新加载。",
+    "Project changed outside Narrative Canvas. Reload before continuing; saving now will preserve local work as a conflict copy.": "项目已在 Narrative Canvas 外部改动。请先重新加载；此时保存会将本地工作保留为冲突副本。",
     "Save project state": "保存项目状态",
     "Save or create a project file in the vault.": "保存或在库中创建项目文件。",
     "Saved": "已保存",
@@ -1780,6 +1794,7 @@ const uiTranslations = {
     "Effects": "效果",
     "Effect added.": "已添加效果。",
     "Effect lines": "效果语句",
+    "Conditional effect syntax: if variable1 > variable2 then set variable3 = variable1 else set variable3 = variable2": "条件效果语法：if variable1 > variable2 then set variable3 = variable1 else set variable3 = variable2",
     "Condition expression": "条件表达式",
     "Each option is available when its condition is met; selecting it runs its Effects. Empty Requires = always available.": "条件成立时选项可用；选择后执行该选项的效果。条件要求为空表示始终可用。",
     "Event Column": "事件列",
@@ -2258,7 +2273,26 @@ const uiTranslations = {
     "Add or delete choices in the node inspector; Document edits existing choices.": "请在节点检查器中新增或删除选项；文档仅编辑现有选项。",
     "Add or delete routes on the canvas; Document edits existing routes.": "请在画布中新增或删除路线；文档仅编辑现有路线。",
     "Document changes synced to project.": "文档修改已同步到项目。",
-    "Fix the Document source error before exporting.": "请先修正文档源错误，再执行导出。"
+    "Fix the Document source error before exporting.": "请先修正文档源错误，再执行导出。",
+    "Field type": "字段类型",
+    "List": "列表",
+    "Empty": "空值",
+    "Field name {key} already exists.": "字段名 {key} 已存在。",
+    "Field value is invalid for type {type}.": "字段值不符合 {type} 类型。",
+    "The library entry and its managed Markdown file will be moved to the vault trash. Linked images and referenced files are kept.": "资料条目及其受管理的 Markdown 文件将移入库废纸篓；关联图片和引用文件会保留。",
+    "The library entry will be removed from this project. Linked images and referenced files are kept.": "资料条目将从项目中移除；关联图片和引用文件会保留。",
+    "Could not move the library Markdown file to trash. The entry was kept.": "无法把资料库 Markdown 文件移入废纸篓，条目已保留。",
+    "Play history": "游玩历史",
+    "{count} cards": "{count} 张卡片",
+    "Export playthrough": "导出游玩记录",
+    "No playthrough is available to export.": "当前没有可导出的游玩记录。",
+    "Playthrough": "游玩记录",
+    "Captured": "记录时间",
+    "Cards": "卡片",
+    "Earlier cards omitted": "已省略的早期卡片",
+    "Operations": "操作记录",
+    "Final state": "最终状态",
+    "Playthrough exported.": "游玩记录已导出。"
   }
 };
 
@@ -2323,6 +2357,7 @@ function createInitialRuntimeState() {
   language: "en",
   theme: "dark",
   exportImageScale: 1,
+  snapToGrid: false,
   view: { x: 0, y: 0, scale: DEFAULT_CANVAS_ZOOM },
   connectingFrom: null,
   draggingNode: null,
@@ -2369,6 +2404,7 @@ function createInitialRuntimeState() {
   hasUnsavedChanges: false,
   isSaving: false,
   saveError: false,
+  externalProjectChangePending: false,
   statusOverride: false,
   statusTimer: null,
   dirtyVersion: 0,
@@ -2418,6 +2454,8 @@ function createInitialRuntimeState() {
   playPath: [],
   playStepIndex: 0,
   playSteps: [],
+  playTrimmedCount: 0,
+  lastPlaySession: null,
   playTurnIndex: 0,
   playVariables: null,
   playVisitedNodeIds: new Set(),
@@ -2425,6 +2463,7 @@ function createInitialRuntimeState() {
   playManualActionRunIds: new Set(),
   playDebugOpen: true,
   playRefreshTimer: null,
+  playChoiceTimer: null,
   immersiveFullscreen: false,
   nodePanelPointerDown: false,
   floatingInspectorPanel: "",
@@ -2458,7 +2497,7 @@ function createInitialRuntimeState() {
   mention: null,
   vaultFileSuggestions: null,
   vaultFileSuggestionRequestId: 0,
-  vaultFileSuggestionSuppressFocusOnce: false,
+  vaultFileSuggestionSuppressedTargets: new WeakSet(),
   vaultFilePreviewCache: new Map(),
   characterRenderContext: null,
   characterIndex: null,
@@ -2505,6 +2544,7 @@ window.NarrativeCanvasApp = {
   createSampleProjectFile,
   ensureVaultFile: ensureVaultProjectFile,
   loadVaultProject: loadCurrentVaultProject,
+  handleExternalProjectChange,
   reloadCodexFiles,
   refreshCodexCanvasPreviews,
   refreshAiLauncher,
@@ -2662,6 +2702,7 @@ function bindDom(scopeOverride = null) {
   dom.themeToggle = dom.scope.querySelector("#themeToggle");
   dom.languageToggle = dom.scope.querySelector("#languageToggle");
   dom.exportImageScale = dom.scope.querySelector("#exportImageScale");
+  dom.snapGridButton = dom.scope.querySelector("#snapGridButton");
   dom.vaultProjectTitle = dom.scope.querySelector("#vaultProjectTitle");
   dom.projectFileName = dom.scope.querySelector("#projectFileName");
   dom.projectFilePath = dom.scope.querySelector("#projectFilePath");
@@ -3076,6 +3117,7 @@ function destroyNarrativeCanvas() {
     window.clearTimeout(state.playRefreshTimer);
     state.playRefreshTimer = null;
   }
+  clearPlayChoiceTimer();
   clearAutoSaveTimer();
   clearStatusTimer();
   clearStoryPanelRenderTimer();
@@ -4106,6 +4148,7 @@ function shouldRecordAction(action) {
     "commit-playbook-choice-effect-draft",
     "commit-playbook-action-draft",
     "delete-node-effect",
+    "toggle-choice-timer",
     "add-variable",
     "delete-playbook-choice-effect",
     "migrate-legacy-gate",
@@ -4252,6 +4295,10 @@ function renderShellState() {
   if (dom.exportImageScale) {
     dom.exportImageScale.value = getExportImageScalePreset().value;
   }
+  if (dom.snapGridButton) {
+    dom.snapGridButton.classList.toggle("active", state.snapToGrid);
+    dom.snapGridButton.setAttribute("aria-pressed", String(state.snapToGrid));
+  }
   if (dom.vaultProjectTitle) {
     dom.vaultProjectTitle.textContent = state.project.title || t("Untitled Story");
   }
@@ -4343,6 +4390,7 @@ function localizeStaticShell() {
     ["[data-action='zoom-out']", "-"],
     ["[data-action='zoom-in']", "+"],
     ["[data-action='center-view']", "Center"],
+    ["[data-action='toggle-snap-grid']", "Snap"],
     ["[data-action='play']", "Play"],
     [".frame-canvas-label", "Frame canvas"],
     ["#frameCanvasExitButton", "Exit"],
@@ -4376,6 +4424,8 @@ function localizeStaticShell() {
     ["[data-action='zoom-out']", "title", "Zoom out"],
     ["[data-action='zoom-in']", "title", "Zoom in"],
     ["[data-action='center-view']", "title", "Center canvas"],
+    ["[data-action='toggle-snap-grid']", "title", "Snap nodes to grid"],
+    ["[data-action='toggle-snap-grid']", "aria-label", "Snap nodes to grid"],
     ["[data-action='play']", "title", "Play from entry"],
     ["[data-action='export-json']", "title", "Export editable project file (.json)"],
     ["[data-action='export-story-md']", "title", "Export readable story text (.md)"],
@@ -5103,7 +5153,7 @@ function configureAutoSave() {
 
 function scheduleAutoSave() {
   clearAutoSaveTimer();
-  if (!initialized || !state.hasUnsavedChanges || state.isSaving) return;
+  if (!initialized || !state.hasUnsavedChanges || state.isSaving || state.externalProjectChangePending) return;
   const interval = getAutoSaveIntervalMs();
   if (!interval) return;
   state.autoSaveTimer = window.setTimeout(() => {
@@ -6147,7 +6197,7 @@ function estimateCharacterCardWeight(character) {
 
 function buildCharacterSearchText(character) {
   const extraFieldText = normalizeCodexExtraFields(character.extraFields)
-    .map((field) => `${field.key} ${field.value}`);
+    .map((field) => `${field.key} ${formatCodexExtraFieldValue(field.value, field.type)}`);
   return [character.name, character.kind, character.role, character.voice, character.tags, character.notes, ...extraFieldText, ...normalizeCodexVaultFiles(character.vaultFiles)]
     .filter(Boolean)
     .map(String)
@@ -6488,7 +6538,17 @@ function renderCodexExtraFieldsEditor(character) {
       ${fields.length ? fields.map((field, index) => `
         <div class="codex-extra-field-row">
           <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="key" value="${escapeAttr(field.key)}" placeholder="${escapeAttr(t("Field name"))}" spellcheck="false">
-          <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="value" value="${escapeAttr(field.value)}" placeholder="${escapeAttr(t("Field value"))}">
+          <select data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="type" aria-label="${escapeAttr(t("Field type"))}">
+            ${[
+              ["string", "Text"],
+              ["number", "Number"],
+              ["boolean", "Boolean"],
+              ["array", "List"],
+              ["object", "Object"],
+              ["null", "Empty"]
+            ].map(([value, label]) => `<option value="${value}" ${field.type === value ? "selected" : ""}>${escapeHtml(t(label))}</option>`).join("")}
+          </select>
+          <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="value" value="${escapeAttr(formatCodexExtraFieldValue(field.value, field.type))}" placeholder="${escapeAttr(t("Field value"))}" ${field.type === "null" ? "disabled" : ""}>
           <button class="icon-button danger-button" type="button" data-action="remove-codex-extra-field" data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" title="${escapeAttr(t("Remove field"))}" aria-label="${escapeAttr(t("Remove field"))}">×</button>
         </div>
       `).join("") : `<div class="codex-extra-fields-empty">${t("No custom fields yet. Fields sync to the entry's markdown frontmatter.")}</div>`}
@@ -7224,50 +7284,6 @@ function renderPlaybookGateEffectsCell(row) {
   `;
 }
 
-function renderPlaybookChoiceEffectDraft(row) {
-  return renderEffectDraftRow({
-    action: "commit-playbook-choice-effect-draft",
-    defaultTrigger: "onChoose",
-    includeTrigger: false,
-    effectId: row.id
-  });
-}
-
-function renderPlaybookGateEffectRow(effect, row, effectIndex) {
-  return `
-    <div class="node-effect-row no-trigger playbook-gate-effect-row">
-      ${renderStateKeySelect({
-        attributes: `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="key"`,
-        selected: effect.key || "",
-        placeholder: "State key"
-      })}
-      ${renderStateEffectOperationControl(effect, `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="op"`)}
-      ${renderStateEffectValueControl(effect, `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="value"`)}
-    </div>
-  `;
-}
-
-function renderPlaybookGateConditionControl(row) {
-  if (row.kind === "legacy") {
-    return `<input value="${escapeAttr(row.condition)}" readonly spellcheck="false">`;
-  }
-  return renderConditionBuilderControl({
-    expression: row.condition,
-    mode: row.conditionMode,
-    className: "gate-condition-builder",
-    keyAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="key"`,
-    opAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="op"`,
-    valueAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="value"`,
-    connectorAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="connector"`,
-    modeAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="mode"`,
-    customAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-field="condition"`
-  });
-}
-
-function getGateConditionStatus(row) {
-  return getConditionEvaluationStatus(row?.condition, state.project.variables);
-}
-
 function getConditionEvaluationStatus(source, variables = state.project.variables) {
   const text = String(source || "").trim();
   if (!text) return { status: "always" };
@@ -7357,45 +7373,82 @@ function parsePlaybookEffectLine(line, { defaultTrigger = "onVisit", forceTrigge
   const triggerMatch = line.match(/^\[(onVisit|onChoose|manual)\]\s*(.+)$/i);
   const trigger = forceTrigger || (triggerMatch ? normalizePlaybookActionTrigger(triggerMatch[1]) : normalizePlaybookActionTrigger(defaultTrigger));
   const body = triggerMatch ? triggerMatch[2].trim() : line;
-  const match = body.match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([^\s=]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
-  if (!match) {
+  const conditional = parseConditionalEffectBody(body, trigger);
+  if (conditional) {
+    const conditionStatus = getConditionEvaluationStatus(conditional.condition, state.project.variables);
+    if (conditionStatus.status === "invalid") {
+      return { effect: null, status: { status: "invalid", message: conditionStatus.message || t("Invalid condition syntax") } };
+    }
+    for (const branch of [conditional.thenEffect, conditional.elseEffect]) {
+      const validation = validateParsedStateEffect(branch);
+      if (validation) return { effect: null, status: validation };
+    }
+    return { effect: conditional, status: { status: "ok" } };
+  }
+  const effect = parseStateEffectBody(body, trigger);
+  if (!effect) {
     return { effect: null, status: { status: "invalid", message: t("Invalid effect syntax") } };
   }
-  const op = normalizePlaybookEffectTextOperation(match[1]);
-  const key = normalizeOptionalString(match[2]).trim();
-  if (!key) return { effect: null, status: { status: "invalid", message: t("Effect key is required.") } };
-  const effect = {
-    trigger,
-    op,
-    key,
-    value: normalizeOptionalString(match[3] ?? match[4] ?? "")
-  };
-  const info = getVariableInfoForStateEffect(effect);
-  if (!info.hasVariable) {
-    return { effect: null, status: { status: "unknown", key, message: t("Unknown variable: {key}", { key }) } };
-  }
-  const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
-  if (!allowed.some((option) => option.value === op)) {
-    return { effect: null, status: { status: "invalid", message: t("Operation not available for this variable type.") } };
-  }
+  const validation = validateParsedStateEffect(effect);
+  if (validation) return { effect: null, status: validation };
   return {
     effect: normalizeStateEffectForVariableSchema(effect, { coerceValue: false }),
     status: { status: "ok" }
   };
 }
 
+function validateParsedStateEffect(effect) {
+  const key = normalizeOptionalString(effect?.key).trim();
+  if (!key) return { status: "invalid", message: t("Effect key is required.") };
+  const info = getVariableInfoForStateEffect(effect);
+  if (!info.hasVariable) {
+    return { status: "unknown", key, message: t("Unknown variable: {key}", { key }) };
+  }
+  const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
+  if (!allowed.some((option) => option.value === effect.op)) {
+    return { status: "invalid", message: t("Operation not available for this variable type.") };
+  }
+  return null;
+}
+
+function parseStateEffectBody(body, trigger = "onVisit") {
+  const match = normalizeOptionalString(body).trim().match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([^\s=]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
+  if (!match) return null;
+  const value = normalizeOptionalString(match[3] ?? match[4] ?? "").trim();
+  return {
+    trigger: normalizePlaybookActionTrigger(trigger),
+    op: normalizePlaybookEffectTextOperation(match[1]),
+    key: normalizeOptionalString(match[2]).trim(),
+    value,
+    valueMode: getStateEffectValueMode(value)
+  };
+}
+
+function parseConditionalEffectBody(body, trigger = "onVisit") {
+  const match = normalizeOptionalString(body).trim().match(/^if\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+)$/i);
+  if (!match) return null;
+  const thenEffect = parseStateEffectBody(match[2], trigger);
+  const elseEffect = parseStateEffectBody(match[3], trigger);
+  if (!thenEffect || !elseEffect) return null;
+  return {
+    trigger: normalizePlaybookActionTrigger(trigger),
+    op: "ifElse",
+    condition: match[1].trim(),
+    thenEffect,
+    elseEffect
+  };
+}
+
+function getStateEffectValueMode(value) {
+  const key = normalizeExpressionVariableTerm(value);
+  if (!key) return "literal";
+  return resolveRuntimeStatePath(key, state.project.variables).found ? "variable" : "literal";
+}
+
 function normalizePlaybookEffectTextOperation(value) {
   const op = normalizeOptionalString(value).trim().toLowerCase();
   if (op === "invert") return "toggle";
   return normalizePlaybookActionOperation(op);
-}
-
-function formatPlaybookEffectSummary(effect) {
-  const operation = PLAYBOOK_ACTION_OPERATIONS.find((option) => option.value === effect?.op)?.label || effect?.op || "Set";
-  const key = normalizeOptionalString(effect?.key).trim();
-  const value = normalizeOptionalString(effect?.value).trim();
-  const valueSuffix = value && effect?.op !== "toggle" && effect?.op !== "clear" ? ` = ${value}` : "";
-  return `${t(operation)} ${key}${valueSuffix}`.trim();
 }
 
 function formatLegacyGateCondition(action) {
@@ -7802,9 +7855,16 @@ function buildStateReport() {
   const scanEffectValue = (effect, node, ref) => {
     if (!effect || effect.op === "clear") return;
     scanTemplateReferences(effect.value, node, { ...ref, label: `${ref?.label || "Effect"} value` }, addInterpolation, addStatus);
+    if (effect.valueMode === "variable") addRead(normalizeExpressionVariableTerm(effect.value), { ...ref, label: `${ref?.label || "Effect"} value` });
   };
   const scanStateEffect = (effect, node, ref) => {
     if (!effect) return;
+    if (effect.op === "ifElse") {
+      scanExpression(effect.condition, node, { ...ref, label: `${ref?.label || "Effect"} condition` });
+      scanStateEffect(effect.thenEffect, node, { ...ref, label: `${ref?.label || "Effect"} then` });
+      scanStateEffect(effect.elseEffect, node, { ...ref, label: `${ref?.label || "Effect"} else` });
+      return;
+    }
     const key = normalizeStateReportKey(effect.key);
     if (key) {
       addWrite(key, ref);
@@ -8003,7 +8063,7 @@ function getStateReportNodeLabel(node) {
 }
 
 function isRuntimeOnlyEffectOperation(op) {
-  return !["set", "add", "subtract", "toggle"].includes(op || "set");
+  return !["set", "add", "subtract", "toggle", "ifElse"].includes(op || "set");
 }
 
 function isPlaybookActionRuntimeOnlyForPortableExport(action) {
@@ -8108,23 +8168,6 @@ function compareStateReportRows(a, b) {
   const issueB = b.statuses.some((status) => status !== "ok") ? 0 : 1;
   if (issueA !== issueB) return issueA - issueB;
   return a.key.localeCompare(b.key);
-}
-
-function getPlaybookCategoryDisplayLabel(category) {
-  const labels = {
-    Quest: "Quest State",
-    "Quest Entry": "Quest Entry State",
-    Variable: "Variable State",
-    Actor: "Actor State",
-    Item: "Item State",
-    Location: "Location State",
-    "Sim Status": "Sim State",
-    Alert: "Alert State",
-    Misc: "Misc State",
-    Custom: "Custom State",
-    "Manual Enter": "Manual Key"
-  };
-  return labels[category] || category;
 }
 
 function getVariableDefinitionFilterOptions(entries) {
@@ -8317,55 +8360,6 @@ function renderEffectOperationOptions(key, selectedOp = "set") {
   return renderPlaybookOptionList(allowedOperations, op);
 }
 
-function renderStateEffectOperationControl(effect, attributes) {
-  const op = normalizePlaybookActionOperation(effect?.op || "set");
-  if (!PLAYBOOK_ACTION_OPERATIONS.some((option) => option.value === op)) {
-    return `
-      <div class="playbook-action-fixed-op" title="${escapeAttr(t("This old action is kept for compatibility. New actions should use state operations."))}">
-        <strong>${escapeHtml(t("Legacy runtime-only action"))}</strong>
-        <small>${escapeHtml(op)}</small>
-      </div>
-    `;
-  }
-  const variableInfo = getVariableInfoForStateEffect(effect);
-  const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
-  if (!allowedOperations.length) {
-    return `
-      <div class="playbook-action-fixed-op" title="${escapeAttr(t("Define this key in Variables before this action can run."))}">
-        <strong>${escapeHtml(t("Missing variable"))}</strong>
-        <small>${escapeHtml(t("Operation"))}</small>
-      </div>
-    `;
-  }
-  if (!allowedOperations.some((option) => option.value === op)) {
-    return `
-      <div class="playbook-action-fixed-op" title="${escapeAttr(t("Operation not available for this variable type."))}">
-        <strong>${escapeHtml(t("Operation not available for this variable type."))}</strong>
-        <small>${escapeHtml(op)}</small>
-      </div>
-    `;
-  }
-  return `
-    <select ${attributes}>
-      ${renderPlaybookOptionList(allowedOperations, op)}
-    </select>
-  `;
-}
-
-function renderStateEffectValueControl(effect, attributes) {
-  const variableInfo = getVariableInfoForStateEffect(effect);
-  const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
-  const op = normalizePlaybookActionOperation(effect?.op || "set");
-  const operationAllowed = allowedOperations.some((option) => option.value === op);
-  return renderPlaybookActionValueField({
-    attributes,
-    value: effect?.value || "",
-    variableInfo,
-    op,
-    disabled: !operationAllowed
-  });
-}
-
 function normalizeStateEffectForVariableSchema(effect, options = {}) {
   const action = {
     id: "effect",
@@ -8422,20 +8416,6 @@ function renderScriptNodeRow(node) {
       ${renderPlaybookJsonButton(getPlaybookJsonPairToken("rowId", `node:${node.id}`))}
     </div>
   `;
-}
-
-function renderScriptNodeConditionControl(node, logic) {
-  return renderConditionBuilderControl({
-    expression: logic.requirements,
-    mode: logic.requirementsMode,
-    className: "script-condition-builder",
-    keyAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="key"`,
-    opAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="op"`,
-    valueAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="value"`,
-    connectorAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="connector"`,
-    modeAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="mode"`,
-    customAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="requirements"`
-  });
 }
 
 function renderPlaybookConditionCodeCell({ value = "", attributes = "", readonly = false } = {}) {
@@ -8798,16 +8778,6 @@ function getPlaybookStateKeySuggestions() {
   return [...keys].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 
-function getPlaybookTargetSuggestions() {
-  const targets = new Set();
-  getProjectNodeTypes().forEach((typeDef) => targets.add(typeDef.type));
-  state.project.nodes.forEach((node) => {
-    if (node.id) targets.add(node.id);
-    if (node.title) targets.add(node.title);
-  });
-  return [...targets].filter(Boolean).sort((a, b) => a.localeCompare(b));
-}
-
 // Richer datalist entries that disambiguate duplicate titles by appending the node id.
 // Used by the renderer in Phase 4 to fix the "two scenes both called Hesitation" silent-fail mode.
 function getPlaybookTargetEntries() {
@@ -8885,13 +8855,6 @@ function renderPlaybookRuleCard(card) {
       ${card.body}
     </article>
   `;
-}
-
-function formatPlaybookRuleKindLabel(kind) {
-  return String(kind || "")
-    .split(" + ")
-    .map((part) => t(part))
-    .join(" + ");
 }
 
 function getPlaybookRuleCards() {
@@ -8979,11 +8942,6 @@ function renderRunnerRuleCardModel(id, rule, rules = getRunnerRules()) {
     help: (helpById[id] || []).map((item) => t(item)).join(" "),
     body: bodyById[id] || `<p>${escapeHtml(String(rule.value ?? ""))}</p>`
   };
-}
-
-function formatPlaybookChoicesSummary(value) {
-  if (Array.isArray(value)) return value.join(" / ");
-  return String(value || "choices");
 }
 
 function getPlaybookJsonRows(value) {
@@ -10195,6 +10153,7 @@ function renderCanvasNodeMarkup(node, query, focusedCharacterId, layerOrder = ge
   const nodeClasses = [
     "node",
     isFrame ? `frame ${frameClass}` : "",
+    isChoiceNode(node) ? "choice-node" : "",
     isFrameCollapsed(node) ? "collapsed" : "",
     isSelected ? "selected" : "",
     isMultiSelected ? "multi-selected" : "",
@@ -10283,7 +10242,10 @@ function renderNodeText(node, inlineEditField) {
   if (inlineEditField && inlineEditField !== "title") {
     return `<textarea class="node-inline-editor node-inline-text" data-inline-node-field="${escapeAttr(inlineEditField)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" aria-label="Edit node content">${escapeHtml(getInlineNodeFieldValue(node, inlineEditField))}</textarea>`;
   }
-  return `<div class="node-text">${escapeHtml(displayBody(node))}</div>`;
+  const body = displayBody(node);
+  // Non-edit cards render the Markdown so bold/italic/heading/quote/list show as
+  // formatted text; the raw markers only appear once you click in to edit.
+  return `<div class="node-text node-text-rendered play-body-text">${renderNarrativeMarkdown(body)}</div>`;
 }
 
 function renderNodeCardContent(node, inlineEditField) {
@@ -11044,9 +11006,17 @@ function renderInspectorTabs() {
   });
 }
 
+// BEGIN WEB_RUNTIME:AI_CONFIG
 function getWebAiConfig() {
   if (window.NarrativeCanvasHost) return { endpoint: "", apiKey: "", model: "" };
-  try { return JSON.parse(localStorage.getItem("narrative-canvas-ai-config") || "{}"); }
+  try {
+    const stored = JSON.parse(localStorage.getItem("narrative-canvas-ai-config") || "{}");
+    return {
+      endpoint: String(stored.endpoint || ""),
+      apiKey: String(stored.apiKey || ""),
+      model: String(stored.model || "")
+    };
+  }
   catch (_error) { return {}; }
 }
 
@@ -11061,6 +11031,7 @@ function saveWebAiConfig() {
   const knowledgeOn = Boolean(dom.aiPanel.querySelector("[data-ai-config='narrativeKnowledge']")?.checked);
   try { localStorage.setItem("narrative-canvas-ai-knowledge-v1", knowledgeOn ? "1" : "0"); } catch (_error) { /* storage unavailable */ }
 }
+// END WEB_RUNTIME:AI_CONFIG
 
 function renderAiMarkdownInline(value) {
   const tokens = [];
@@ -11186,7 +11157,7 @@ function renderAiPanel() {
   const patch = state.aiPendingPatch;
   const operations = Array.isArray(patch?.operations) ? patch.operations : [];
   const proposal = patch ? `<section class="ai-proposal"><h3>${escapeHtml(patch.summary || t("Canvas change proposal"))}</h3><ol>${operations.map((op) => `<li><code>${escapeHtml(op.op || "")}</code> ${escapeHtml(op.node?.title || op.id || op.from || "")}</li>`).join("")}</ol><div class="ai-actions"><button data-action="ai-apply-patch" type="button">${t("Apply to canvas")}</button><button data-action="ai-reject-patch" type="button">${t("Reject")}</button></div></section>` : "";
-  const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><label class="ai-config-check"><input type="checkbox" data-ai-config="narrativeKnowledge"${isAiNarrativeKnowledgeEnabled() ? " checked" : ""}>${t("Narrative craft guidance")}</label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
+    const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><label class="ai-config-check"><input type="checkbox" data-ai-config="narrativeKnowledge"${isAiNarrativeKnowledgeEnabled() ? " checked" : ""}>${t("Narrative craft guidance")}</label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
   const composerLocked = state.aiBusy;
   dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span>${state.aiMessages.length ? `<button class="ai-copy-button" data-action="ai-copy-conversation" type="button" title="${escapeAttr(t("Copy conversation"))}" aria-label="${escapeAttr(t("Copy conversation"))}">${aiCopyIcon()}<span>${escapeHtml(t("Copy conversation"))}</span></button>` : ""}</div><div class="ai-messages" aria-live="polite">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<div class="ai-composer"><textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change. Enter to send; Shift+Enter for a new line."))}" ${composerLocked ? "disabled" : ""}>${escapeHtml(state.aiPromptDraft)}</textarea><div class="ai-composer-toolbar"><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Responding...") : t("Send")}</button>${state.aiBusy ? `<button data-action="ai-stop" type="button">${t("Stop")}</button>` : ""}<button data-action="ai-clear" type="button">${t("Clear")}</button></div></div></div></div>`;
   dom.aiPanel.querySelector(".ai-messages")?.scrollTo?.({ top: 999999 });
@@ -11237,16 +11208,48 @@ function openExpandEditor(nodeId, field, title) {
     dom.expandEditorInput.dataset.nodeField = field;
     dom.expandEditorInput.dataset.nodeId = nodeId;
   }
+  // Open in rendered ("what you see") mode; a click switches to the source editor.
+  const wrap = dom.expandEditorInput?.closest("[data-live-field]");
+  if (wrap) renderLiveField(wrap);
   dom.expandEditorDialog.showModal();
-  runAfterRender(() => {
-    dom.expandEditorInput?.focus?.();
-    const length = dom.expandEditorInput?.value.length || 0;
-    dom.expandEditorInput?.setSelectionRange?.(length, length);
-  });
 }
 
 function closeExpandEditor() {
-  if (dom.expandEditorDialog?.open) dom.expandEditorDialog.close();
+  if (!dom.expandEditorDialog?.open) return;
+  dom.expandEditorDialog.close();
+  // Do not rely on the browser's close-event scheduling to refresh the inspector.
+  // The close handler remains registered for Escape and other native dialog exits.
+  handleExpandEditorClose();
+}
+
+// "Render by default, click to edit" fields. A `[data-live-field]` holds a rendered
+// Markdown view (`[data-live-rendered]`) and a source textarea (`[data-live-source]`).
+// The rendered view is shown until the user clicks in; while the source is focused
+// the raw **/##/> markers are visible so they can be edited, and on blur (unless the
+// field is `[data-live-persist]`, like the large modal) it renders again.
+function renderLiveField(wrap) {
+  const source = wrap?.querySelector("[data-live-source]");
+  const rendered = wrap?.querySelector("[data-live-rendered]");
+  if (!source || !rendered) return;
+  const value = source.value || "";
+  rendered.innerHTML = value.trim()
+    ? renderNarrativeMarkdown(value)
+    : `<span class="field-live-placeholder">${escapeHtml(t("Click to edit"))}</span>`;
+  rendered.hidden = false;
+  source.hidden = true;
+  wrap.classList.remove("live-editing");
+}
+
+function enterLiveFieldEdit(wrap) {
+  const source = wrap?.querySelector("[data-live-source]");
+  const rendered = wrap?.querySelector("[data-live-rendered]");
+  if (!source || !rendered || !source.hidden) return;
+  rendered.hidden = true;
+  source.hidden = false;
+  wrap.classList.add("live-editing");
+  source.focus({ preventScroll: true });
+  const length = source.value.length;
+  source.setSelectionRange?.(length, length);
 }
 
 // Lightweight Markdown formatting for the expanded text editor. Inline styles wrap
@@ -11254,11 +11257,15 @@ function closeExpandEditor() {
 function applyExpandEditorFormat(action) {
   const input = dom.expandEditorInput;
   if (!input) return;
+  // The toolbar only makes sense on the source; switch out of rendered mode first.
+  const wrap = input.closest("[data-live-field]");
+  if (wrap && input.hidden) enterLiveFieldEdit(wrap);
   const value = input.value;
   const start = input.selectionStart ?? value.length;
   const end = input.selectionEnd ?? start;
   const selected = value.slice(start, end);
-  const inlineWrap = { bold: "**", italic: "*", strike: "~~" }[action];
+  const inlineWrap = { bold: "**", italic: "*", strike: "~~", code: "`", highlight: "==" }[action];
+  const prefix = { h1: "# ", h2: "## ", h3: "### ", quote: "> ", list: "- ", ordered: "1. ", task: "- [ ] " }[action];
 
   let nextValue;
   let nextStart;
@@ -11268,9 +11275,28 @@ function applyExpandEditorFormat(action) {
     nextValue = `${value.slice(0, start)}${inlineWrap}${inner}${inlineWrap}${value.slice(end)}`;
     nextStart = start + inlineWrap.length;
     nextEnd = nextStart + inner.length;
-  } else {
-    const prefix = { h2: "## ", h3: "### ", quote: "> ", list: "- " }[action];
-    if (!prefix) return;
+  } else if (action === "link") {
+    const label = selected || t("text");
+    const url = "https://";
+    nextValue = `${value.slice(0, start)}[${label}](${url})${value.slice(end)}`;
+    // Select the URL placeholder so it is ready to overwrite.
+    nextStart = start + label.length + 3;
+    nextEnd = nextStart + url.length;
+  } else if (action === "codeblock") {
+    const inner = selected || t("code");
+    const before = value.slice(0, start);
+    const lead = before && !before.endsWith("\n") ? "\n" : "";
+    const block = `${lead}\`\`\`\n${inner}\n\`\`\`\n`;
+    nextValue = `${before}${block}${value.slice(end)}`;
+    nextStart = start + lead.length + 4;
+    nextEnd = nextStart + inner.length;
+  } else if (action === "divider") {
+    const before = value.slice(0, start);
+    const lead = before && !before.endsWith("\n") ? "\n" : "";
+    const insert = `${lead}---\n`;
+    nextValue = `${before}${insert}${value.slice(end)}`;
+    nextStart = nextEnd = start + insert.length;
+  } else if (prefix) {
     // Expand the range to whole lines, then toggle the prefix on each.
     const lineStart = value.lastIndexOf("\n", start - 1) + 1;
     let lineEnd = value.indexOf("\n", end);
@@ -11283,6 +11309,8 @@ function applyExpandEditorFormat(action) {
     nextValue = `${value.slice(0, lineStart)}${nextBlock}${value.slice(lineEnd)}`;
     nextStart = lineStart;
     nextEnd = lineStart + nextBlock.length;
+  } else {
+    return;
   }
 
   input.value = nextValue;
@@ -11293,6 +11321,7 @@ function applyExpandEditorFormat(action) {
 }
 
 function handleExpandEditorClose() {
+  if (!state.expandEditor && !dom.expandEditorInput?.dataset.nodeField) return;
   state.expandEditor = null;
   // Clear the routing attributes so the closed modal's textarea is not a stray
   // duplicate of the inspector field.
@@ -11379,6 +11408,8 @@ const AI_NARRATIVE_KNOWLEDGE_PROMPT = `Apply established narrative craft when ad
 - Character: drive people by concrete wants (external goal) and needs (internal lack). Reveal character through choices under pressure. Give antagonists their own coherent logic. Track arcs of change.
 - Conflict & stakes: keep dramatic tension via opposing forces and meaningful consequences; raise stakes as the story proceeds.
 - Scene craft: enter late, leave early; ground exposition in action and subtext; let dialogue carry conflict and voice rather than plain information.
+- Cinematic storytelling: express dramatic beats through staging, composition, point of view, shot scale, and motivated camera movement. Preserve screen direction and spatial continuity unless a deliberate break serves the scene.
+- Editing & sound: cut on decisions, revelations, movement, or changes in power; vary shot duration with tension; use sound, silence, and off-screen space to carry story information that dialogue or imagery should not repeat.
 - Branching: make choices reflect values and produce consequences that matter; avoid false choices; keep routes thematically coherent.
 Use these as guidance, not rigid rules; respect the author's intent and existing material.`;
 
@@ -11444,6 +11475,7 @@ async function readAiEventStream(result, onDelta) {
   return content;
 }
 
+// BEGIN WEB_RUNTIME:AI_REQUEST
 async function requestWebAiCompletion(payload, options) {
   const { signal, onDelta } = options;
   const config = getWebAiConfig();
@@ -11452,6 +11484,7 @@ async function requestWebAiCompletion(payload, options) {
   if (!result.ok) throw new Error(`AI request failed (${result.status}).`);
   return readAiEventStream(result, onDelta);
 }
+// END WEB_RUNTIME:AI_REQUEST
 
 async function revealBufferedAiText(content, onDelta, signal) {
   const characters = Array.from(String(content || ""));
@@ -11682,6 +11715,15 @@ function renderProjectPanel() {
         <span>${t("Project notes")}</span>
         <textarea data-project-field="notes" spellcheck="false" placeholder="${escapeAttr(t("Project notes"))}">${escapeHtml(state.project.notes || "")}</textarea>
       </label>
+      <section class="project-play-settings">
+        <label class="field">
+          <span>${t("Play history")}</span>
+          <select data-project-field="playHistoryLimit">
+            ${PLAY_HISTORY_LIMIT_OPTIONS.map((limit) => `<option value="${limit}" ${normalizePlayHistoryLimit(state.project.playHistoryLimit) === limit ? "selected" : ""}>${escapeHtml(t("{count} cards", { count: limit }))}</option>`).join("")}
+          </select>
+        </label>
+        <button class="small-button" type="button" data-action="export-play-session" ${state.lastPlaySession || state.playPath.length ? "" : "disabled"}>${t("Export playthrough")}</button>
+      </section>
       <section class="project-file-box">
         <div class="project-file-box-header">
           <div class="project-file-box-title">
@@ -11744,8 +11786,9 @@ function renderNodePanel(node) {
       <div class="button-row">
         ${isFrameNode(node) ? `<button class="small-button" data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}">${t("Open frame canvas")}</button>` : ""}
         <button class="small-button" data-action="duplicate-node">${t("Duplicate")}</button>
+        <button class="small-button" data-action="focus-node">${t("Canvas focus")}</button>
+        ${!isFrameNode(node) ? `<button class="small-button" data-action="focus-node-document">${t("Document focus")}</button>` : ""}
         <button class="small-button danger-button" data-action="delete-node">${t("Delete node")}</button>
-        <button class="small-button" data-action="focus-node">${t("Focus")}</button>
       </div>
     </div>
   `;
@@ -11825,11 +11868,16 @@ function getNodeBodyLabel(node) {
 }
 
 function renderNodeBodyField(node) {
+  const raw = node.body || "";
+  const rendered = raw.trim()
+    ? renderNarrativeMarkdown(raw)
+    : `<span class="field-live-placeholder">${escapeHtml(t("Click to edit"))}</span>`;
   return `
     <label class="field field-with-expand">
       <span>${escapeHtml(getNodeBodyLabel(node))}</span>
-      <div class="field-expand-wrap">
-        <textarea data-node-field="body">${escapeHtml(node.body || "")}</textarea>
+      <div class="field-expand-wrap field-live" data-live-field>
+        <div class="field-live-rendered play-body-text" data-live-rendered role="textbox" tabindex="0" aria-label="${escapeAttr(getNodeBodyLabel(node))}, ${escapeAttr(t("Click to edit"))}">${rendered}</div>
+        <textarea data-node-field="body" data-live-source hidden>${escapeHtml(raw)}</textarea>
         <button class="icon-button field-expand-button" type="button" data-action="expand-node-field" data-node-id="${escapeAttr(node.id)}" data-expand-field="body" data-expand-title="${escapeAttr(getNodeBodyLabel(node))}" title="${escapeAttr(t("Open large editor"))}" aria-label="${escapeAttr(t("Open large editor"))}">⤢</button>
       </div>
     </label>
@@ -11975,6 +12023,7 @@ function renderNodeStateLogicFields(node) {
         </div>
         ${renderNodeEffectDraft(node)}
         <textarea data-node-logic-field="effects" spellcheck="false" placeholder="${escapeAttr(t("Effect lines"))}">${escapeHtml(formatNodeEffectsText(node))}</textarea>
+        <small>${escapeHtml(t("Conditional effect syntax: if variable1 > variable2 then set variable3 = variable1 else set variable3 = variable2"))}</small>
       </div>
       <div class="node-routing-grid">
         <label class="field">
@@ -12077,65 +12126,6 @@ function renderConditionBuilderFields({
   `;
 }
 
-function renderConditionBuilderControl({
-  expression = "",
-  mode = "",
-  keyAttributes = "",
-  opAttributes = "",
-  valueAttributes = "",
-  connectorAttributes = "",
-  modeAttributes = "",
-  customAttributes = "",
-  className = "",
-  addAction = "",
-  addAttributes = "",
-  deleteAction = "",
-  deleteAttributes = ""
-} = {}) {
-  const model = parseConditionBuilderExpression(expression);
-  const custom = model.custom && normalizeOptionalString(expression).trim();
-  const groupMode = getConditionGroupModeForExpression(expression, mode);
-  const canAdd = Boolean(getDefaultConditionKey()) && !custom;
-  const canDelete = Boolean(deleteAction) && model.clauses.length > 1 && !custom;
-  return `
-    <div class="condition-builder-list ${className}">
-      <div class="condition-builder-toolbar">
-        <label class="condition-builder-mode">
-          <span>${t("Condition relation")}</span>
-          <select ${modeAttributes} ${custom ? "disabled" : ""}>
-            ${renderConditionGroupModeOptions(groupMode)}
-          </select>
-        </label>
-        ${addAction ? `<button class="small-button" type="button" data-action="${escapeAttr(addAction)}" ${addAttributes} ${canAdd ? "" : "disabled"}>${t("Add condition")}</button>` : ""}
-      </div>
-      ${model.clauses.map((clause, index) => {
-        const hasValue = Boolean(clause.key && conditionOperatorNeedsValue(clause.op));
-        const hasDelete = canDelete;
-        return `
-        <div class="condition-builder-row condition-clause-row${index ? " has-connector" : ""}${hasValue ? "" : " no-condition-value"}${hasDelete ? " has-delete" : ""}">
-          ${index ? `
-            <select ${connectorAttributes} data-condition-index="${index}">
-              ${renderPlaybookOptionList(CONDITION_CONNECTORS, normalizeConditionConnector(clause.connector))}
-            </select>
-          ` : ""}
-          ${renderConditionBuilderFields({
-            keyAttributes: `${keyAttributes} data-condition-index="${index}"`,
-            opAttributes: `${opAttributes} data-condition-index="${index}"`,
-            valueAttributes: `${valueAttributes} data-condition-index="${index}"`,
-            selectedKey: clause.key,
-            selectedOp: clause.op,
-            selectedValue: clause.value
-          })}
-          ${hasDelete ? `<button class="icon-button danger-button condition-clause-delete" type="button" title="${escapeAttr(t("Delete condition"))}" data-action="${escapeAttr(deleteAction)}" ${deleteAttributes} data-condition-index="${index}">x</button>` : ""}
-        </div>
-      `; }).join("")}
-    </div>
-    ${custom ? `
-      <textarea class="condition-custom-expression" ${customAttributes} spellcheck="false" placeholder="${escapeAttr(t("Condition expression"))}">${escapeHtml(expression)}</textarea>
-    ` : ""}
-  `;
-}
-
 function getDefaultConditionKey() {
   const variables = normalizeVariablesObject(state.project.variables);
   return Object.keys(variables).sort((a, b) => a.localeCompare(b))[0] || "";
@@ -12201,10 +12191,6 @@ function normalizeConditionGroupMode(value) {
 
 function getConditionConnectorForMode(mode) {
   return normalizeStoredConditionGroupMode(mode) === "any" ? "||" : "&&";
-}
-
-function getConditionModeForConnector(connector) {
-  return normalizeConditionConnector(connector) === "||" ? "any" : "all";
 }
 
 function renderConditionGroupModeOptions(selectedMode) {
@@ -12407,26 +12393,6 @@ function renderNodeRoutingTargetSlot(routing) {
     <div class="field node-routing-hint">
       <span>${t("Next")}</span>
       <p class="nc-routing-hint-body">${escapeHtml(hint)}</p>
-    </div>
-  `;
-}
-
-function renderNodeEffectRow(effect, index) {
-  const trigger = normalizePlaybookActionTrigger(effect.trigger || "onVisit");
-  return `
-    <div class="node-effect-row">
-      <div class="playbook-action-fixed-op node-effect-fixed-trigger" title="${escapeAttr(trigger === "onChoose" ? t("Move this into a Choice option effect.") : t("On visit"))}">
-        <strong>${escapeHtml(t(trigger === "onChoose" ? "Legacy node choose trigger" : "On visit"))}</strong>
-        <small>${escapeHtml(t(trigger === "onChoose" ? "Use Choice Effects" : "Node effects"))}</small>
-      </div>
-      ${renderStateKeySelect({
-        attributes: `data-node-effect-index="${index}" data-node-effect-field="key"`,
-        selected: effect.key,
-        placeholder: "State key"
-      })}
-      ${renderStateEffectOperationControl(effect, `data-node-effect-index="${index}" data-node-effect-field="op"`)}
-      ${renderStateEffectValueControl(effect, `data-node-effect-index="${index}" data-node-effect-field="value"`)}
-      <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete effect"))}" data-action="delete-node-effect" data-node-effect-index="${index}">x</button>
     </div>
   `;
 }
@@ -12712,6 +12678,7 @@ function renderChoiceOptionsField(node) {
           ${renderPlaybookOptionList(CHOICE_REVEAL_MODES, revealMode)}
         </select>
       </label>
+      ${renderChoiceTimerEditor(node)}
       <div class="choice-options-hint">${escapeHtml(t("Each option is available when its condition is met; selecting it runs its Effects. Empty Requires = always available."))}</div>
       <div class="choice-options-list">
         ${options.length === 0 ? `<div class="nc-empty-state">${t("No choices yet.")}</div>` : options.map((opt, index) => renderChoiceOptionCard(opt, index)).join("")}
@@ -12719,6 +12686,42 @@ function renderChoiceOptionsField(node) {
       <div class="choice-options-footer">
         <button class="small-button" type="button" data-action="add-choice-option">${t("Add choice")}</button>
       </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderChoiceTimerEditor(node) {
+  const timer = normalizeChoiceTimer(node?.choiceTimer);
+  const links = getChoiceOrderedLinks(getOutgoing(node?.id));
+  const entries = getRuntimeChoiceEntries(node, getNodeRuntimeScript(node));
+  return `
+    <section class="choice-timer-editor${timer.enabled ? " is-enabled" : ""}">
+      <div class="choice-timer-head">
+        <strong>${escapeHtml(t("Timed choice"))}</strong>
+        <button class="vault-preview-toggle${timer.enabled ? " is-enabled" : ""}" type="button" role="switch" aria-checked="${timer.enabled ? "true" : "false"}" aria-label="${escapeAttr(t("Enable timer"))}" title="${escapeAttr(t("Enable timer"))}" data-action="toggle-choice-timer">
+          <span class="vault-preview-toggle-track" aria-hidden="true"><span class="vault-preview-toggle-thumb"></span></span>
+        </button>
+      </div>
+      ${timer.enabled ? `
+        <div class="choice-timer-fields">
+          <label class="field">
+            <span>${escapeHtml(t("Seconds"))}</span>
+            <input type="number" min="1" max="3600" step="1" data-choice-timer-field="seconds" value="${timer.seconds}">
+          </label>
+          <label class="field">
+            <span>${escapeHtml(t("Fallback passage"))}</span>
+            <select data-choice-timer-field="fallbackLinkId">
+              <option value="">${escapeHtml(t("Choose a fallback passage"))}</option>
+              ${links.map((link, index) => {
+                const label = getChoiceBranchButtonLabel(link, node.choices || [], index, entries);
+                const target = getNode(link.to);
+                const text = target?.title ? `${label} → ${target.title}` : label;
+                return `<option value="${escapeAttr(link.id)}"${link.id === timer.fallbackLinkId ? " selected" : ""}>${escapeHtml(text)}</option>`;
+              }).join("")}
+            </select>
+          </label>
+        </div>
       ` : ""}
     </section>
   `;
@@ -12862,21 +12865,6 @@ function renderChoiceOptionEffectDraft(optionId) {
     includeTrigger: false,
     effectId: optionId
   });
-}
-
-function renderChoiceOptionEffectRow(effect, optionId, effectIndex) {
-  return `
-    <div class="node-effect-row no-trigger">
-      ${renderStateKeySelect({
-        attributes: `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="key"`,
-        selected: effect.key || "",
-        placeholder: "State key"
-      })}
-      ${renderStateEffectOperationControl(effect, `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="op"`)}
-      ${renderStateEffectValueControl(effect, `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="value"`)}
-      <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete effect"))}" data-action="delete-choice-option-effect" data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}">x</button>
-    </div>
-  `;
 }
 
 function renderCustomFields(node) {
@@ -13230,6 +13218,13 @@ function handleDocumentClickEvent(event, retarget = null) {
     && !target.closest?.("[data-vault-file-suggestions]")) {
     hideVaultFileSuggestions();
   }
+  const liveRendered = target.closest("[data-live-rendered]");
+  if (liveRendered && !liveRendered.hidden) {
+    enterLiveFieldEdit(liveRendered.closest("[data-live-field]"));
+    event.preventDefault();
+    return true;
+  }
+
   if (getFormControlTarget(target)) return false;
 
   const layerTarget = target.closest("[data-layer-action]");
@@ -13751,6 +13746,7 @@ function handleAction(target) {
   if (action === "add-node-effect") addNodeEffect();
   if (action === "delete-node-effect") deleteNodeEffect(Number(target.dataset.nodeEffectIndex));
   if (action === "add-choice-option") addChoiceOption();
+  if (action === "toggle-choice-timer") toggleChoiceTimer();
   if (action === "delete-choice-option") deleteChoiceOption(target.dataset.choiceOptionId);
   if (action === "move-choice-option-up") moveChoiceOption(target.dataset.choiceOptionId, -1);
   if (action === "move-choice-option-down") moveChoiceOption(target.dataset.choiceOptionId, 1);
@@ -13801,10 +13797,12 @@ function handleAction(target) {
   if (action === "auto-layout") autoLayoutCanvas(target.dataset.layoutOrientation);
   if (action === "zoom-in") setZoom(state.view.scale + 0.1);
   if (action === "zoom-out") setZoom(state.view.scale - 0.1);
+  if (action === "toggle-snap-grid") toggleSnapToGrid();
   if (action === "toggle-theme") toggleTheme();
   if (action === "toggle-language") toggleLanguage();
   if (action === "center-view") centerView();
   if (action === "export-all") exportAll();
+  if (action === "export-play-session") exportPlaySession();
   if (action === "export-json") exportJson();
   if (action === "export-story-md") exportStoryMarkdown();
   if (action === "export-current-document") exportCurrentDocument();
@@ -13849,6 +13847,7 @@ function handleAction(target) {
   if (action === "reconnect-link-to") startLinkReconnect("to");
   if (action === "assign-choice-link") assignChoiceLink(target.dataset.linkId, target.dataset.choiceIndex);
   if (action === "focus-node") focusSelectedNode();
+  if (action === "focus-node-document") focusSelectedNodeInDocument();
   if (action === "focus-canvas-node") focusCanvasNode(target.dataset.nodeId);
   if (action === "focus-choice-source") focusCanvasNode(target.dataset.choiceSourceNodeId);
   if (action === "select-node") selectNode(target.dataset.nodeId);
@@ -13960,6 +13959,29 @@ async function reloadProjectFileFromUiConfirmed() {
   if (restored === false && !hasWebState) setStatus("No saved project to reload.");
 }
 
+async function handleExternalProjectChange(detail = {}) {
+  if (!initialized || state.isSaving) return { reloaded: false, dirty: state.hasUnsavedChanges };
+  const path = String(detail?.path || getCurrentProjectFilePath() || "");
+  if (state.hasUnsavedChanges) {
+    state.externalProjectChangePending = true;
+    clearAutoSaveTimer();
+    state.saveError = true;
+    renderProjectFileStatus();
+    const message = t("Project changed outside Narrative Canvas. Reload before continuing; saving now will preserve local work as a conflict copy.");
+    setStatus(message);
+    window.NarrativeCanvasHost?.showNotice?.(message);
+    return { reloaded: false, dirty: true, path };
+  }
+  const loaded = await loadCurrentVaultProject();
+  if (loaded) {
+    const message = t("Project changed outside Narrative Canvas and was reloaded.");
+    setStatus(message);
+    window.NarrativeCanvasHost?.showNotice?.(message);
+  }
+  return { reloaded: Boolean(loaded), dirty: false, path };
+}
+
+// BEGIN WEB_RUNTIME:CLEAR_STORAGE
 async function clearBrowserStorageFromUi() {
   if (window.NarrativeCanvasHost) return;
   showGenericConfirm({
@@ -13995,6 +14017,7 @@ async function clearBrowserStorageConfirmed() {
   const saved = await saveCurrentState({ silent: true });
   setStatus(saved ? "Browser storage cleared. Blank project saved." : "Browser storage cleared. Blank project loaded.");
 }
+// END WEB_RUNTIME:CLEAR_STORAGE
 
 function confirmDiscardUnsavedProject(message, onConfirm) {
   if (!state.hasUnsavedChanges) return true;
@@ -14555,7 +14578,7 @@ function getEditableHistoryKey(target) {
   if (!target?.dataset) return "";
   if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
   const parts = [];
-  ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+  ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceTimerField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
   ["nodeId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
@@ -14574,7 +14597,9 @@ function handleEditFocusIn(event) {
   beginNodeTitleReferenceEdit(event.target);
   if (event.target?.dataset?.nodeVaultSizeSlider == null
     && (event.target?.dataset?.nodeVaultFileIndex != null || event.target?.dataset?.characterImageFile || event.target?.dataset?.characterImagePickerInput || event.target?.dataset?.characterVaultFileInput != null || event.target?.dataset?.characterIconInput != null)) {
-    if (state.vaultFileSuggestionSuppressFocusOnce) state.vaultFileSuggestionSuppressFocusOnce = false;
+    if (state.vaultFileSuggestionSuppressedTargets?.has(event.target)) {
+      state.vaultFileSuggestionSuppressedTargets.delete(event.target);
+    }
     // Force so an empty input lists every file on focus — the browse buttons are gone,
     // the search input is the single entry point.
     else void updateVaultFileSuggestions(event.target, { force: true });
@@ -14589,6 +14614,16 @@ function handleEditFocusIn(event) {
 
 function handleEditFocusOut(event) {
   const target = event.target;
+  // "Render by default" fields drop back to the rendered view when the source
+  // textarea loses focus — including clicking the modal chrome or the sidebar.
+  // Clicking a formatting-toolbar button is exempt: it re-enters edit itself, so
+  // rendering there would just flash the view.
+  const liveWrap = target?.dataset?.liveSource !== undefined ? target.closest("[data-live-field]") : null;
+  if (liveWrap
+    && !liveWrap.contains(event.relatedTarget)
+    && !event.relatedTarget?.closest?.(".expand-editor-toolbar")) {
+    renderLiveField(liveWrap);
+  }
   if (target?.hasAttribute?.("data-character-tag-input")) {
     const editor = target.closest("[data-character-tag-editor]");
     if (!editor?.contains(event.relatedTarget)) hideCodexTagSuggestions(target);
@@ -14763,6 +14798,11 @@ function handleInput(event) {
   }
 
   if (target.dataset.characterExtraPart) {
+    if (target.dataset.characterExtraPart === "value") {
+      const character = getCharacters().find((item) => item.id === target.dataset.characterId);
+      const field = normalizeCodexExtraFields(character?.extraFields)[Number(target.dataset.characterExtraIndex)];
+      if (field && field.type !== "string") return;
+    }
     setCharacterExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex), target.dataset.characterExtraPart, target.value, false);
     return;
   }
@@ -14815,6 +14855,10 @@ function handleInput(event) {
   }
   if (target.dataset.nodeEffectField) {
     setNodeEffectField(Number(target.dataset.nodeEffectIndex), target.dataset.nodeEffectField, target.value, false);
+    return;
+  }
+  if (target.dataset.choiceTimerField) {
+    setChoiceTimerField(target.dataset.choiceTimerField, target.value, false);
     return;
   }
   if (target.dataset.choiceOptionField) {
@@ -15003,6 +15047,11 @@ function handleChange(event) {
   }
   if (target.dataset.nodeEffectField) {
     setNodeEffectField(Number(target.dataset.nodeEffectIndex), target.dataset.nodeEffectField, target.value, true);
+    commitFocusedEdit(target);
+    return;
+  }
+  if (target.dataset.choiceTimerField) {
+    setChoiceTimerField(target.dataset.choiceTimerField, target.value, true);
     commitFocusedEdit(target);
     return;
   }
@@ -15721,7 +15770,7 @@ function handleNodeVaultFilePointerMove(event) {
   const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
   if (distance < 5 && !drag.active) return;
   drag.active = true;
-  const placement = getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+  const placement = getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex, event.target);
   clearNodeVaultFileDropMarkers();
   if (placement) {
     const row = dom.nodePanel?.querySelector(`[data-node-vault-row-index="${placement.targetIndex}"]`);
@@ -15734,7 +15783,7 @@ function handleNodeVaultFilePointerUp(event) {
   const drag = state.nodeVaultFileDrag;
   if (!drag) return;
   const placement = drag.active && event.type !== "pointercancel"
-    ? getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+    ? getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex, event.target)
     : null;
   state.nodeVaultFileDrag = null;
   clearNodeVaultFileDropMarkers();
@@ -15811,10 +15860,13 @@ function moveCodexVaultFileReference(characterId, fromIndex, targetIndex, placem
   return true;
 }
 
-function getNodeVaultFileDropPlacement(x, y, fromIndex) {
-  const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
-  const target = root.elementFromPoint(x, y);
-  const row = target?.closest?.("[data-node-vault-row-index]");
+function getNodeVaultFileDropPlacement(x, y, fromIndex, eventTarget = null) {
+  let row = eventTarget?.closest?.("[data-node-vault-row-index]") || null;
+  if (!row || !dom.nodePanel?.contains(row)) {
+    const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+    const target = root.elementFromPoint(x, y);
+    row = target?.closest?.("[data-node-vault-row-index]") || null;
+  }
   if (!row || !dom.nodePanel?.contains(row)) return null;
   const targetIndex = Number(row.dataset.nodeVaultRowIndex);
   if (!Number.isInteger(targetIndex)) return null;
@@ -16320,14 +16372,6 @@ function canCaptureNodeInFrame(frame, node) {
   return true;
 }
 
-function getFrameCaptureCandidates(frame, candidateIds = null) {
-  const nodes = Array.isArray(candidateIds) ? candidateIds.map(getNode).filter(Boolean) : state.project.nodes;
-  return nodes.filter((node) => {
-    if (!canCaptureNodeInFrame(frame, node)) return false;
-    return frameContainsNodeCenter(frame, node);
-  });
-}
-
 function getFrameEnteredCaptureCandidates(frame, enteredIds) {
   return enteredIds
     .map(getNode)
@@ -16600,18 +16644,18 @@ function handleViewportPointerMove(event) {
     if (!node) return;
     const handle = state.resizingNode.handle;
     if (handle.includes("e")) {
-      node.width = Math.round(clamp(
+      node.width = clamp(snapCanvasValue(clamp(
         state.resizingNode.width + (event.clientX - state.resizingNode.startX) / state.view.scale,
         minNodeWidth(node),
         maxNodeWidth(node)
-      ));
+      ), { enabled: state.snapToGrid }), minNodeWidth(node), maxNodeWidth(node));
     }
     if (handle.includes("s")) {
-      node.height = Math.round(clamp(
+      node.height = clamp(snapCanvasValue(clamp(
         state.resizingNode.height + (event.clientY - state.resizingNode.startY) / state.view.scale,
         minNodeHeight(node),
         maxNodeHeight(node)
-      ));
+      ), { enabled: state.snapToGrid }), minNodeHeight(node), maxNodeHeight(node));
     }
     // Patch only this node + its links in place; full resync runs on pointer-up.
     if (patchNodeElementGeometry(node, state.resizingNode.element, state.resizingNode.ports)) {
@@ -16632,11 +16676,18 @@ function handleViewportPointerMove(event) {
     const deltaX = moveX / state.view.scale;
     const deltaY = moveY / state.view.scale;
     const positions = state.draggingNode.nodePositions || [];
+    const anchorPosition = positions.find((position) => position.id === state.draggingNode.id) || positions[0];
+    const snappedDeltaX = anchorPosition && state.snapToGrid
+      ? snapCanvasValue(anchorPosition.x + deltaX) - anchorPosition.x
+      : deltaX;
+    const snappedDeltaY = anchorPosition && state.snapToGrid
+      ? snapCanvasValue(anchorPosition.y + deltaY) - anchorPosition.y
+      : deltaY;
     positions.forEach((position) => {
       const item = getNode(position.id);
       if (!item) return;
-      item.x = Math.round(position.x + deltaX);
-      item.y = Math.round(position.y + deltaY);
+      item.x = Math.round(position.x + snappedDeltaX);
+      item.y = Math.round(position.y + snappedDeltaY);
     });
     const node = getNode(state.draggingNode.id);
     if (!node) return;
@@ -16882,11 +16933,11 @@ function addNode(type, spawnPoint = null) {
     title: type === "Entry" ? "Start" : getNodeTypeLabel(type),
     body: defaultBody(type),
     x: 0,
-    y: Math.round(center.y - 70)
+    y: snapCanvasValue(center.y - 70, { enabled: state.snapToGrid })
   };
   if (getNodeTypeTemplate(type) === "choice") node.choices = ["Continue", "Turn back"];
   applyNodeTypeDefaults(node);
-  node.x = Math.round(center.x - nodeLayoutSize(node).width / 2);
+  node.x = snapCanvasValue(center.x - nodeLayoutSize(node).width / 2, { enabled: state.snapToGrid });
   const activeFrame = getActiveFrameCanvas();
   const dropFrame = getCanvasDropFrameForNode(node);
   node.frameId = activeFrame
@@ -17155,6 +17206,35 @@ function revealCharacterCard(id) {
 function deleteCharacter(id) {
   const characters = getCharacters();
   const character = characters.find((item) => item.id === id);
+  if (!character) return;
+  showGenericConfirm({
+    kicker: "Narrative Library",
+    title: t('Delete "{name}"?', { name: character.name }),
+    message: character.codexFile
+      ? t("The library entry and its managed Markdown file will be moved to the vault trash. Linked images and referenced files are kept.")
+      : t("The library entry will be removed from this project. Linked images and referenced files are kept."),
+    confirmLabel: "Delete entry",
+    danger: true,
+    recordHistory: false,
+    onConfirm: async () => {
+      const historyBefore = getHistorySnapshot();
+      const host = window.NarrativeCanvasHost;
+      try {
+        if (host?.deleteCodexEntryFile) await host.deleteCodexEntryFile(character);
+      } catch (error) {
+        console.error(error);
+        setStatus(t("Could not move the library Markdown file to trash. The entry was kept."));
+        return;
+      }
+      performDeleteCharacter(id);
+      commitHistoryFromSnapshot(historyBefore);
+    }
+  });
+}
+
+function performDeleteCharacter(id) {
+  const characters = getCharacters();
+  const character = characters.find((item) => item.id === id);
   state.project.characters = characters.filter((item) => item.id !== id);
   if (state.codexSelectedEntryId === id) state.codexSelectedEntryId = "";
   invalidateCharacterRenderContext();
@@ -17290,9 +17370,26 @@ function setCharacterExtraField(id, index, part, value, rerender) {
       if (rerender) renderWorkspaceFile();
       return;
     }
+    if (nextKey && fields.some((field, fieldIndex) => fieldIndex !== index && field.key.toLowerCase() === nextKey.toLowerCase())) {
+      setStatus(t("Field name {key} already exists.", { key: nextKey }));
+      if (rerender) renderWorkspaceFile();
+      return;
+    }
     fields[index].key = nextKey;
+  } else if (part === "type") {
+    const type = CODEX_EXTRA_FIELD_TYPES.has(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "string";
+    const formatted = formatCodexExtraFieldValue(fields[index].value, fields[index].type);
+    const parsed = parseCodexExtraFieldInput(formatted, type);
+    fields[index].type = type;
+    fields[index].value = parsed.valid ? parsed.value : normalizeCodexExtraFieldValue(undefined, type);
   } else {
-    fields[index].value = String(value ?? "");
+    const parsed = parseCodexExtraFieldInput(value, fields[index].type);
+    if (!parsed.valid) {
+      setStatus(t("Field value is invalid for type {type}.", { type: t(fields[index].type) }));
+      if (rerender) renderWorkspaceFile();
+      return;
+    }
+    fields[index].value = parsed.value;
   }
   character.extraFields = fields;
   invalidateCharacterRenderContext();
@@ -17304,7 +17401,7 @@ function addCodexExtraField(id) {
   const character = getCharacters().find((item) => item.id === id);
   if (!character) return;
   const fields = normalizeCodexExtraFields(character.extraFields);
-  fields.push({ key: "", value: "" });
+  fields.push({ key: "", type: "string", value: "" });
   character.extraFields = fields;
   invalidateCharacterRenderContext();
   setProjectDirty(true);
@@ -18048,7 +18145,7 @@ function deleteNodeEffect(index) {
 
 function cleanupNodeStateLogic(node) {
   const logic = normalizeNodeStateLogic(node.stateLogic);
-  logic.effects = logic.effects.filter((effect) => effect.key || effect.op === "clear");
+  logic.effects = logic.effects.filter((effect) => effect.op === "ifElse" || effect.key || effect.op === "clear");
   if (logic.requirements || logic.effects.length) node.stateLogic = logic;
   else delete node.stateLogic;
 }
@@ -18058,6 +18155,32 @@ function cleanupNodeStateLogic(node) {
 function getSelectedChoiceNode() {
   const node = getNode(state.selectedNodeId);
   return node && isChoiceNode(node) ? node : null;
+}
+
+function toggleChoiceTimer() {
+  const node = getSelectedChoiceNode();
+  if (!node) return;
+  const timer = normalizeChoiceTimer(node.choiceTimer);
+  timer.enabled = !timer.enabled;
+  if (timer.enabled && !timer.fallbackLinkId) {
+    timer.fallbackLinkId = getChoiceOrderedLinks(getOutgoing(node.id))[0]?.id || "";
+  }
+  node.choiceTimer = timer;
+  setProjectDirty(true);
+  renderNodePanel(node);
+  scheduleOpenPreviewRefresh();
+}
+
+function setChoiceTimerField(field, value, rerender = false) {
+  const node = getSelectedChoiceNode();
+  if (!node) return;
+  const timer = normalizeChoiceTimer(node.choiceTimer);
+  if (field === "seconds") timer.seconds = normalizeChoiceTimerSeconds(value);
+  if (field === "fallbackLinkId") timer.fallbackLinkId = normalizeOptionalString(value).trim();
+  node.choiceTimer = timer;
+  setProjectDirty(true);
+  if (rerender) renderNodePanel(node);
+  scheduleOpenPreviewRefresh();
 }
 
 function ensureChoiceOptionsArray(node) {
@@ -18998,16 +19121,11 @@ function parseNodeEffectsText(value) {
       const triggerMatch = line.match(/^\[(onVisit|onChoose)\]\s*(.+)$/i);
       const trigger = triggerMatch ? normalizePlaybookActionTrigger(triggerMatch[1]) : "onVisit";
       const body = triggerMatch ? triggerMatch[2].trim() : line;
-      const match = body.match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([A-Za-z0-9_.-]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
-      if (!match) return { trigger, op: "set", key: body, value: "true" };
-      return {
-        trigger,
-        op: normalizePlaybookEffectTextOperation(match[1]),
-        key: normalizeOptionalString(match[2]).trim(),
-        value: normalizeOptionalString(match[3] ?? match[4] ?? "")
-      };
+      return parseConditionalEffectBody(body, trigger)
+        || parseStateEffectBody(body, trigger)
+        || { trigger, op: "set", key: body, value: "true", valueMode: "literal" };
     })
-    .filter((effect) => effect.key || effect.op === "clear");
+    .filter((effect) => effect.op === "ifElse" || effect.key || effect.op === "clear");
 }
 
 function formatStateEffectsText(effects, { defaultTrigger = "onVisit" } = {}) {
@@ -19017,6 +19135,12 @@ function formatStateEffectsText(effects, { defaultTrigger = "onVisit" } = {}) {
       if (!effect || typeof effect !== "object" || Array.isArray(effect)) return "";
       const trigger = normalizePlaybookActionTrigger(effect.trigger || fallbackTrigger);
       const prefix = trigger && trigger !== fallbackTrigger ? `[${trigger}] ` : "";
+      if (effect.op === "ifElse") {
+        const thenText = formatStateEffectBody(effect.thenEffect);
+        const elseText = formatStateEffectBody(effect.elseEffect);
+        const condition = normalizeOptionalString(effect.condition).trim();
+        return condition && thenText && elseText ? `${prefix}if ${condition} then ${thenText} else ${elseText}` : "";
+      }
       const op = normalizePlaybookActionOperation(effect.op || "set");
       const key = normalizeOptionalString(effect.key || effect.variable || effect.name).trim();
       const value = normalizeOptionalString(effect.value);
@@ -19024,6 +19148,13 @@ function formatStateEffectsText(effects, { defaultTrigger = "onVisit" } = {}) {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function formatStateEffectBody(effect) {
+  const op = normalizePlaybookActionOperation(effect?.op || "set");
+  const key = normalizeOptionalString(effect?.key || effect?.variable || effect?.name).trim();
+  const value = normalizeOptionalString(effect?.value);
+  return key || op === "clear" ? `${op} ${key}${value ? ` = ${value}` : ""}`.trim() : "";
 }
 
 function formatNodeEffectsText(node) {
@@ -19141,16 +19272,6 @@ function selectPlaybookTab(tab) {
   renderPlaybookSurfaces();
 }
 
-function scrollPlaybookToTop() {
-  if (!dom.variablesPanel) return;
-  try {
-    dom.variablesPanel.scrollTo({ top: 0, behavior: "auto" });
-  } catch (error) {
-    // Fallback for embedded WebViews with partial Element.scrollTo support.
-  }
-  dom.variablesPanel.scrollTop = 0;
-}
-
 function togglePlaybookRuleHelp(ruleId) {
   if (!ruleId) return;
   if (state.playbookRuleHelpOpenIds.has(ruleId)) state.playbookRuleHelpOpenIds.delete(ruleId);
@@ -19214,24 +19335,6 @@ function addPlaybookRule(kind) {
   setStatus(`${getRunnerRuleTitle(ruleKind)} enabled.`);
 }
 
-function addSelectedNodePlaybookRule() {
-  const node = getNode(state.selectedNodeId);
-  if (!node) {
-    setStatus("Select a node first.");
-    return;
-  }
-  const ruleKind = inferPlaybookRuleKindFromNode(node);
-  const target = node.type || node.id;
-  const scripts = getScriptNodeTypes();
-  scripts[target] = applyPlaybookRulePreset(ruleKind, scripts[target]);
-  state.project.script = normalizeScriptConfig({ ...state.project.script, nodeTypes: scripts });
-  state.activeFileId = "variables";
-  state.playbookTab = "rules";
-  renderPlaybookSurfaces();
-  updateStatus();
-  setStatus(`${target} rule added from selected node.`);
-}
-
 function normalizePlaybookRuleKind(kind) {
   return ["startNode", "endCondition", "visitTracking", "debugMode"].includes(kind) ? kind : "endCondition";
 }
@@ -19244,45 +19347,6 @@ function getRunnerRuleTitle(kind) {
     debugMode: "Debug Mode"
   };
   return labels[kind] || "Play rule";
-}
-
-function getPlaybookRuleKindLabel(kind) {
-  const labels = {
-    text: "text rule",
-    choices: "choice behavior"
-  };
-  return labels[kind] || "rule";
-}
-
-function getDefaultPlaybookRuleTargetForKind(kind, scripts) {
-  if (kind === "choices") return "Choice";
-  return getDefaultPlaybookRuleTarget(scripts);
-}
-
-function applyPlaybookRulePreset(kind, existing = {}) {
-  const script = { ...(existing || {}) };
-  if (kind === "text") {
-    script.title = script.title || "{title}";
-    script.body = script.body || "{body}";
-  }
-  if (kind === "choices") {
-    script.title = script.title || "{title}";
-    script.body = script.body || "{body}";
-    script.choices = script.choices || "choices";
-  }
-  return script;
-}
-
-function inferPlaybookRuleKindFromNode(node) {
-  if (hasNodeChoices(node)) return "choices";
-  return "text";
-}
-
-function getDefaultPlaybookRuleTarget(scripts) {
-  const selectedNode = getNode(state.selectedNodeId);
-  if (selectedNode?.type && !scripts[selectedNode.type]) return selectedNode.type;
-  const unusedType = getProjectNodeTypes().find((typeDef) => !scripts[typeDef.type]);
-  return unusedType?.type || selectedNode?.type || "Content";
 }
 
 function deleteVariable(key) {
@@ -20134,12 +20198,15 @@ function setProjectField(field, value) {
       setStatus("Playbook JSON is invalid.");
       return;
     }
+  } else if (field === "playHistoryLimit") {
+    state.project.playHistoryLimit = normalizePlayHistoryLimit(value);
+    trimPreviewHistory();
   } else {
     state.project[field] = value;
   }
   setProjectDirty(true);
 
-  if (field === "title" || field === "notes") {
+  if (field === "title" || field === "notes" || field === "playHistoryLimit") {
     renderShellState();
     renderStoryPanel();
     renderWorkspaceFile();
@@ -20421,11 +20488,11 @@ function selectVaultFileSuggestion(path) {
   setNodeVaultFile(index, reference);
   commitFocusedEdit(target);
   hideVaultFileSuggestions();
-  state.vaultFileSuggestionSuppressFocusOnce = true;
   renderInspector();
   runAfterRender(() => {
     const input = dom.nodePanel?.querySelector?.(`[data-node-vault-file-index="${Math.min(index, getNodeVaultFiles(getNode(state.selectedNodeId)).length)}"]`);
     if (!input) return;
+    state.vaultFileSuggestionSuppressedTargets?.add(input);
     input.focus({ preventScroll: true });
     input.setSelectionRange?.(input.value.length, input.value.length);
   });
@@ -20845,12 +20912,6 @@ function findCodexImageReference(value, depth = 0) {
     }
   }
   return "";
-}
-
-function toggleCodexImagePreview(characterId) {
-  const character = getCharacters().find((entry) => entry.id === characterId);
-  if (!character?.imageFile) return;
-  setCharacterField(characterId, "imagePreview", !character.imagePreview, true);
 }
 
 async function openNodeVaultFile(nodeId = state.selectedNodeId, index = 0) {
@@ -21284,6 +21345,107 @@ function focusSelectedNode() {
   setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
 }
 
+function focusSelectedNodeInDocument() {
+  const node = getNode(state.selectedNodeId);
+  if (!node || isFrameNode(node)) return;
+  selectFile("document");
+  const editor = dom.documentPanel?.querySelector("[data-document-source]");
+  const range = editor
+    ? findDocumentNodeTitleRange(editor.value, state.documentFormat, node.id)
+    : null;
+  if (!editor || !range) {
+    setStatus(t("Could not find this node in Document."));
+    return;
+  }
+  focusDocumentSourceRange(editor, range);
+  setStatus(t("Focused {title} in Document.", { title: node.title || getNodeDisplayId(node) }));
+}
+
+function findDocumentNodeTitleRange(source, format, nodeId) {
+  const lines = getDocumentSourceLines(source);
+  const id = String(nodeId || "").trim();
+  if (!id) return null;
+  const normalizedFormat = normalizeDocumentFormat(format);
+  if (normalizedFormat === "plain") {
+    const idIndex = lines.findIndex((line) => line.text.match(/^<!--\s*id:\s*(.*?)\s*-->$/)?.[1]?.trim() === id);
+    if (idIndex < 1) return null;
+    return getDocumentCapturedRange(lines[idIndex - 1], /^(##\s+)(.*?)(\s*)$/, 2);
+  }
+  if (normalizedFormat === "yarn") {
+    const idIndex = lines.findIndex((line) => line.text.match(/^narrativeCanvasId:\s*(.*?)\s*$/)?.[1]?.trim() === id);
+    if (idIndex < 0) return null;
+    for (let index = idIndex + 1; index < lines.length && !/^---\s*$/.test(lines[index].text); index += 1) {
+      const range = getDocumentCapturedRange(lines[index], /^(nodeTitle:\s*)(.*?)(\s*)$/, 2);
+      if (range) return trimDocumentLiteralQuotes(source, range);
+    }
+    return null;
+  }
+  if (normalizedFormat === "ink") {
+    const idIndex = lines.findIndex((line) => line.text.match(/^\/\/\s*narrativeCanvasId:\s*(.*?)\s*$/)?.[1]?.trim() === id);
+    if (idIndex < 0) return null;
+    for (let index = idIndex + 1; index < lines.length && !/^===\s+/.test(lines[index].text); index += 1) {
+      const range = getDocumentCapturedRange(lines[index], /^(\/\/\s*nodeTitle:\s*)(.*?)(\s*)$/, 2);
+      if (range) return trimDocumentLiteralQuotes(source, range);
+    }
+    return null;
+  }
+  const idIndex = lines.findIndex((line) => line.text.match(/^<!--\s*narrativeCanvasId:\s*(.*?)\s*-->$/)?.[1]?.trim() === id);
+  if (idIndex < 0) return null;
+  for (let index = idIndex + 1; index < lines.length && !/^::\s+/.test(lines[index].text); index += 1) {
+    const range = getDocumentCapturedRange(lines[index], /^(<!--\s*narrativeCanvasTitle:\s*)(.*?)(\s*-->)$/, 2);
+    if (range) return range;
+  }
+  return null;
+}
+
+function getDocumentSourceLines(source) {
+  const text = String(source || "");
+  const lines = [];
+  let start = 0;
+  text.split("\n").forEach((line) => {
+    lines.push({ text: line, start, end: start + line.length });
+    start += line.length + 1;
+  });
+  return lines;
+}
+
+function getDocumentCapturedRange(line, pattern, groupIndex) {
+  const match = line?.text?.match(pattern);
+  const value = match?.[groupIndex];
+  if (value == null) return null;
+  const relativeStart = match[0].indexOf(value, (match[1] || "").length);
+  if (relativeStart < 0) return null;
+  return {
+    start: line.start + relativeStart,
+    end: line.start + relativeStart + value.length
+  };
+}
+
+function trimDocumentLiteralQuotes(source, range) {
+  if (!range || range.end - range.start < 2) return range;
+  const text = String(source || "");
+  return text[range.start] === '"' && text[range.end - 1] === '"'
+    ? { start: range.start + 1, end: range.end - 1 }
+    : range;
+}
+
+function focusDocumentSourceRange(editor, range) {
+  const start = Math.max(0, Math.min(editor.value.length, Number(range?.start) || 0));
+  const end = Math.max(start, Math.min(editor.value.length, Number(range?.end) || start));
+  const lineHeight = getDocumentEditorLineHeight(editor);
+  const lineIndex = editor.value.slice(0, start).split("\n").length - 1;
+  editor.scrollTop = Math.max(0, lineIndex * lineHeight - editor.clientHeight / 2);
+  editor.scrollLeft = 0;
+  try {
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(start, end);
+  } catch (_error) {
+    // no-op for embedded WebViews without selection support
+  }
+  syncDocumentEditorGutter(editor);
+  syncDocumentOverlayScroll(editor);
+}
+
 function centerCanvasOnNode(node, scale = state.view.scale, options = {}) {
   const size = nodeSize(node);
   centerCanvasOnBoardPoint(node.x + size.width / 2, node.y + size.height / 2, scale, options);
@@ -21561,6 +21723,19 @@ function toggleTheme() {
   updateGridPosition();
 }
 
+function snapCanvasValue(value, options = {}) {
+  const enabled = options.enabled ?? state.snapToGrid;
+  if (!enabled) return Math.round(value);
+  return Math.round(Number(value || 0) / CANVAS_GRID_SIZE) * CANVAS_GRID_SIZE;
+}
+
+function toggleSnapToGrid() {
+  state.snapToGrid = !state.snapToGrid;
+  renderShellState();
+  setProjectDirty(true);
+  setStatus(t(state.snapToGrid ? "Grid snapping enabled." : "Grid snapping disabled."));
+}
+
 function toggleLanguage() {
   setLanguage(state.language === "zh" ? "en" : "zh");
 }
@@ -21752,9 +21927,10 @@ async function saveCurrentState(options = {}) {
     console.error(error);
     state.isSaving = false;
     state.saveError = true;
+    if (error?.code === "NARRATIVE_CANVAS_PROJECT_CONFLICT") state.externalProjectChangePending = true;
     renderProjectFileStatus();
-    scheduleAutoSave();
-    if (!silent) setStatus("Project save failed.");
+    if (!state.externalProjectChangePending) scheduleAutoSave();
+    if (!silent) setStatus(error?.code === "NARRATIVE_CANVAS_PROJECT_CONFLICT" ? error.message : "Project save failed.");
     return false;
   }
 }
@@ -21934,6 +22110,7 @@ function buildSavedState() {
     activeFileId: state.activeFileId,
     theme: state.theme,
     exportImageScale: state.exportImageScale,
+    snapToGrid: state.snapToGrid,
     view: { ...state.view },
     sidebar: getSavedSidebarState(),
     aiButtonPos: state.aiButtonPos ? { ...state.aiButtonPos } : null,
@@ -21961,6 +22138,7 @@ function buildSavedStateForProject(project, uiOverrides = {}) {
       activeFileId: "adventure",
       theme: state.theme,
       exportImageScale: state.exportImageScale,
+      snapToGrid: false,
       view: { x: 0, y: 0, scale: DEFAULT_CANVAS_ZOOM },
       sidebar: getSavedSidebarState(),
       aiButtonPos: null,
@@ -21992,6 +22170,7 @@ function applySavedState(saved) {
   state.activeFileId = fileViews[ui.activeFileId] ? ui.activeFileId : "adventure";
   state.theme = ui.theme === "light" ? "light" : "dark";
   state.exportImageScale = normalizeExportImageScale(ui.exportImageScale);
+  state.snapToGrid = Boolean(ui.snapToGrid);
   applySavedSidebarState(ui.sidebar);
   state.aiButtonPos = ui.aiButtonPos && Number.isFinite(ui.aiButtonPos.left) && Number.isFinite(ui.aiButtonPos.top)
     ? { left: ui.aiButtonPos.left, top: ui.aiButtonPos.top }
@@ -22062,6 +22241,7 @@ function applySavedView(view) {
   return true;
 }
 
+// BEGIN WEB_RUNTIME:PROJECT_STORAGE
 function loadWebState() {
   try {
     return getWebProjectStorage()?.getItem(WEB_STORAGE_KEY) || null;
@@ -22087,6 +22267,7 @@ function getWebProjectStorage() {
     return null;
   }
 }
+// END WEB_RUNTIME:PROJECT_STORAGE
 
 async function loadFromVault(announce = true) {
   if (!window.NarrativeCanvasHost?.loadProject) return null;
@@ -22097,6 +22278,7 @@ async function loadFromVault(announce = true) {
     if (!payload) throw new Error("Vault project JSON could not be parsed.");
     const restoredView = applySavedState(payload);
     if (!state.selectedNodeId) state.selectedNodeId = state.project.nodes[0]?.id || null;
+    state.externalProjectChangePending = false;
     setProjectDirty(false);
     await reloadCodexFiles({ render: false, silent: true });
     if (announce) setStatus(`Loaded ${getHostProjectFileLabel()}.`);
@@ -22138,6 +22320,40 @@ function exportJson() {
   const blob = new Blob([buildProjectJson()], { type: "application/json" });
   downloadBlob(blob, `${slugify(state.project.title || "narrative-canvas")}.json`);
   setStatus("JSON exported.");
+}
+
+function exportPlaySession() {
+  const session = state.playPath.length ? capturePlaySessionSnapshot() : state.lastPlaySession;
+  if (!session?.steps?.length) {
+    setStatus(t("No playthrough is available to export."));
+    return;
+  }
+  const lines = [
+    `# ${session.projectTitle || "Narrative Canvas"} — ${t("Playthrough")}`,
+    "",
+    `- ${t("Captured")}: ${session.capturedAt}`,
+    `- ${t("Cards")}: ${session.steps.length}`,
+    `- ${t("Earlier cards omitted")}: ${session.trimmedCount || 0}`,
+    ""
+  ];
+  session.steps.forEach((step, index) => {
+    lines.push(`## ${index + 1}. ${step.title || step.displayId || step.nodeId}`);
+    lines.push("");
+    lines.push(`- ${t("Type")}: ${step.type || ""}`);
+    lines.push(`- ID: ${step.displayId || step.nodeId}`);
+    if (step.body) lines.push("", step.body);
+    if (step.operations?.length) {
+      lines.push("", `### ${t("Operations")}`, "", ...step.operations.map((operation) => `- ${operation}`));
+    }
+    lines.push("");
+  });
+  const finalVariables = session.steps[session.steps.length - 1]?.variables;
+  if (finalVariables) {
+    lines.push(`## ${t("Final state")}`, "", "```json", JSON.stringify(finalVariables, null, 2), "```", "");
+  }
+  const slug = slugify(session.projectTitle || "narrative-canvas");
+  downloadBlob(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" }), `${slug}-playthrough.md`);
+  setStatus(t("Playthrough exported."));
 }
 
 function exportRuntimeJson() {
@@ -22617,6 +22833,7 @@ function buildRuntimeExportNode(node, model, warnings) {
     requirements: transformExportExpression(requirementsSource, model, warnings, { nodeId: node.id }),
     effects: getRuntimeExportNodeEffects(node, model, warnings),
     choices,
+    timer: buildRuntimeExportChoiceTimer(node, outgoing, model),
     next: choices.length ? [] : getExportNextTransitions(node, outgoing, routing, model, warnings),
     routing: {
       mode: routing.mode,
@@ -22625,6 +22842,20 @@ function buildRuntimeExportNode(node, model, warnings) {
     },
     cast: getRuntimeExportCast(node),
     customFields: getRuntimeExportCustomFields(node, model)
+  };
+}
+
+function buildRuntimeExportChoiceTimer(node, outgoing, model) {
+  const timer = normalizeChoiceTimer(node?.choiceTimer);
+  if (!timer.enabled || !timer.fallbackLinkId) return null;
+  const link = (outgoing || []).find((item) => item.id === timer.fallbackLinkId);
+  if (!link) return null;
+  return {
+    seconds: timer.seconds,
+    fallbackLinkId: link.id,
+    fallbackChoiceOptionId: link.choiceOptionId || "",
+    targetId: link.to || "",
+    target: model.nodeNameMap[link.to] || ""
   };
 }
 
@@ -22837,9 +23068,23 @@ function getExportLinkCondition(link, model, warnings, ref) {
 }
 
 function buildRuntimeExportEffect(effect, model, warnings, ref) {
+  if (effect?.op === "ifElse") {
+    return {
+      trigger: effect.trigger || "onVisit",
+      op: "ifElse",
+      condition: transformExportExpression(effect.condition, model, warnings, ref),
+      thenEffect: buildRuntimeExportEffect(effect.thenEffect, model, warnings, ref),
+      elseEffect: buildRuntimeExportEffect(effect.elseEffect, model, warnings, ref)
+    };
+  }
   const sourceKey = normalizeOptionalString(effect?.key).trim();
   const key = sourceKey ? getOrCreateExportVariableName(sourceKey, model, warnings, ref) : "";
   const op = effect?.op || "set";
+  const valueMode = effect?.valueMode === "variable" ? "variable" : "literal";
+  const rawValueSource = normalizeOptionalString(effect?.value);
+  const valueSource = valueMode === "variable"
+    ? getOrCreateExportVariableName(normalizeExpressionVariableTerm(rawValueSource), model, warnings, ref)
+    : rawValueSource;
   if (!["set", "add", "subtract", "toggle"].includes(op)) {
     pushExportWarning(warnings, "effect-op-runtime-only", `Effect "${op}" on "${sourceKey || "(no key)"}" is kept in runtime JSON but commented in Yarn and Ink.`, ref);
   }
@@ -22849,7 +23094,8 @@ function buildRuntimeExportEffect(effect, model, warnings, ref) {
     sourceKey,
     key,
     value: coerceValue(effect?.value ?? ""),
-    valueSource: normalizeOptionalString(effect?.value)
+    valueSource,
+    valueMode
   };
 }
 
@@ -23595,7 +23841,7 @@ function appendYarnRouting(lines, node, nodeMap, document, context = {}) {
       const condition = formatRuntimeExpressionForFormat(choice.condition, "yarn", context);
       const suffix = condition ? ` <<if ${condition}>>` : "";
       lines.push(`-> ${formatYarnOptionLabel(convertRuntimeTextForFormat(choice.label, document, "yarn"))}${suffix}`);
-      choice.effects.forEach((effect) => lines.push(`    ${formatYarnEffect(effect)}`));
+      choice.effects.forEach((effect) => lines.push(indentEffectText(formatYarnEffect(effect), "    ")));
       appendYarnJump(lines, choice.targetId, nodeMap, "    ");
     });
     return;
@@ -23626,7 +23872,7 @@ function appendInkRouting(lines, node, nodeMap, document, context = {}) {
       const condition = formatRuntimeExpressionForFormat(choice.condition, "ink", context);
       const conditionPrefix = condition ? `{${condition}} ` : "";
       lines.push(`+ ${conditionPrefix}[${formatInkOptionLabel(convertRuntimeTextForFormat(choice.label, document, "ink"))}]`);
-      choice.effects.forEach((effect) => lines.push(`    ${formatInkEffect(effect)}`));
+      choice.effects.forEach((effect) => lines.push(indentEffectText(formatInkEffect(effect), "    ")));
       appendInkDivert(lines, choice.targetId, nodeMap, "    ");
     });
     return;
@@ -23712,32 +23958,67 @@ function appendTweeLink(lines, label, targetId, nodeMap, effects, indent = "") {
     lines.push(`${indent}${text}`);
     return;
   }
+  const entries = Array.isArray(effects) ? effects : [];
+  if (!entries.length) {
+    lines.push(`${indent}[[${formatTweeWikiLinkText(text)}->${formatTweeWikiLinkText(target.slug)}]]`);
+    return;
+  }
   lines.push(`${indent}<<link ${formatSugarCubeString(text)} ${formatSugarCubeString(target.slug)}>>`);
-  (Array.isArray(effects) ? effects : []).forEach((effect) => lines.push(`${indent}  ${formatTweeEffect(effect)}`));
+  entries.forEach((effect) => lines.push(indentEffectText(formatTweeEffect(effect), `${indent}  `)));
   lines.push(`${indent}<</link>>`);
 }
 
 function formatYarnEffect(effect) {
+  if (effect?.op === "ifElse") {
+    const condition = formatRuntimeExpressionForFormat(effect.condition, "yarn");
+    return [
+      `<<if ${condition}>>`,
+      indentEffectText(formatYarnEffect(effect.thenEffect), "    "),
+      "<<else>>",
+      indentEffectText(formatYarnEffect(effect.elseEffect), "    "),
+      "<<endif>>"
+    ].join("\n");
+  }
   if (!effect?.key) return "// Skipped effect without a state key.";
-  if (effect.op === "set") return `<<set $${effect.key} to ${formatExportEffectValue(effect)}>>`;
-  if (effect.op === "add") return `<<set $${effect.key} to $${effect.key} + ${formatExportEffectValue(effect)}>>`;
-  if (effect.op === "subtract") return `<<set $${effect.key} to $${effect.key} - ${formatExportEffectValue(effect)}>>`;
+  if (effect.op === "set") return `<<set $${effect.key} to ${formatExportEffectValue(effect, "yarn")}>>`;
+  if (effect.op === "add") return `<<set $${effect.key} to $${effect.key} + ${formatExportEffectValue(effect, "yarn")}>>`;
+  if (effect.op === "subtract") return `<<set $${effect.key} to $${effect.key} - ${formatExportEffectValue(effect, "yarn")}>>`;
   if (effect.op === "toggle") return `<<set $${effect.key} to not $${effect.key}>>`;
   return `// Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key}`;
 }
 
 function formatInkEffect(effect) {
+  if (effect?.op === "ifElse") {
+    const condition = formatRuntimeExpressionForFormat(effect.condition, "ink");
+    return [
+      `{ ${condition}:`,
+      indentEffectText(formatInkEffect(effect.thenEffect), "    "),
+      "- else:",
+      indentEffectText(formatInkEffect(effect.elseEffect), "    "),
+      "}"
+    ].join("\n");
+  }
   if (!effect?.key) return "// Skipped effect without a state key.";
-  if (effect.op === "set") return `~ ${effect.key} = ${formatExportEffectValue(effect)}`;
-  if (effect.op === "add") return `~ ${effect.key} = ${effect.key} + ${formatExportEffectValue(effect)}`;
-  if (effect.op === "subtract") return `~ ${effect.key} = ${effect.key} - ${formatExportEffectValue(effect)}`;
+  if (effect.op === "set") return `~ ${effect.key} = ${formatExportEffectValue(effect, "ink")}`;
+  if (effect.op === "add") return `~ ${effect.key} = ${effect.key} + ${formatExportEffectValue(effect, "ink")}`;
+  if (effect.op === "subtract") return `~ ${effect.key} = ${effect.key} - ${formatExportEffectValue(effect, "ink")}`;
   if (effect.op === "toggle") return `~ ${effect.key} = not ${effect.key}`;
   return `// Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key}`;
 }
 
 function formatTweeEffect(effect) {
+  if (effect?.op === "ifElse") {
+    const condition = formatRuntimeExpressionForFormat(effect.condition, "twee");
+    return [
+      `<<if ${condition}>>`,
+      indentEffectText(formatTweeEffect(effect.thenEffect), "  "),
+      "<<else>>",
+      indentEffectText(formatTweeEffect(effect.elseEffect), "  "),
+      "<</if>>"
+    ].join("\n");
+  }
   if (!effect?.key) return "/* Skipped effect without a state key. */";
-  const value = formatSugarCubeLiteral(coerceValue(effect?.valueSource ?? effect?.value ?? ""));
+  const value = formatExportEffectValue(effect, "twee");
   if (effect.op === "set") return `<<set $${effect.key} = ${value}>>`;
   if (effect.op === "add") return `<<set $${effect.key} += ${value}>>`;
   if (effect.op === "subtract") return `<<set $${effect.key} -= ${value}>>`;
@@ -23745,8 +24026,20 @@ function formatTweeEffect(effect) {
   return `/* Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key} */`;
 }
 
-function formatExportEffectValue(effect) {
-  return formatExportLiteral(coerceValue(effect?.valueSource ?? effect?.value ?? ""));
+function indentEffectText(text, indent) {
+  return String(text || "").split("\n").map((line) => `${indent}${line}`).join("\n");
+}
+
+function formatExportEffectValue(effect, format = "plain") {
+  const source = normalizeOptionalString(effect?.valueSource ?? effect?.value).trim();
+  if (effect?.valueMode === "variable" && source) {
+    if (format === "yarn") return `$${source}`;
+    if (format === "twee") return `$${source}`;
+    return source;
+  }
+  return format === "twee"
+    ? formatSugarCubeLiteral(coerceValue(source))
+    : formatExportLiteral(coerceValue(source));
 }
 
 function formatExportLiteral(value) {
@@ -23874,6 +24167,10 @@ function formatTweeTag(value) {
 
 function formatTweeLinkText(value) {
   return String(value || "Continue").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim() || "Continue";
+}
+
+function formatTweeWikiLinkText(value) {
+  return String(value || "").replace(/\]/g, "&#93;");
 }
 
 function buildDeterministicIfid(document) {
@@ -24145,6 +24442,9 @@ function appendStoryMarkdownNext(lines, node, nodeMap) {
 }
 
 function formatStoryMarkdownEffect(effect) {
+  if (effect?.op === "ifElse") {
+    return `if ${formatMarkdownInline(effect.condition)} then ${formatStateEffectBody(effect.thenEffect)} else ${formatStateEffectBody(effect.elseEffect)}`;
+  }
   const parts = [
     effect?.trigger || "onVisit",
     effect?.op || "set",
@@ -24184,7 +24484,7 @@ function buildCharactersMarkdown() {
     if (character.voice) lines.push(`- Voice: ${character.voice}`);
     normalizeCodexExtraFields(character.extraFields)
       .filter((field) => field.key)
-      .forEach((field) => lines.push(`- ${field.key}: ${field.value}`));
+      .forEach((field) => lines.push(`- ${field.key}: ${formatCodexExtraFieldValue(field.value, field.type)}`));
     if (character.notes) lines.push("", character.notes);
     getCharacterBacklinkGroups(character, backlinkIndex)
       .filter((group) => group.items.length)
@@ -25039,8 +25339,10 @@ function parseTweeDocumentNode(passage) {
     const link = parseTweeDocumentLink(trimmed);
     if (link) {
       const commands = [];
-      for (index += 1; index < lines.length && lines[index].trim() !== "<</link>>"; index += 1) {
-        commands.push(lines[index]);
+      if (link.macro) {
+        for (index += 1; index < lines.length && lines[index].trim() !== "<</link>>"; index += 1) {
+          commands.push(lines[index]);
+        }
       }
       const effects = commands.map((command) => parseTweeDocumentEffect(command.trim())).filter(Boolean);
       if (type.toLowerCase() === "choice") {
@@ -25068,8 +25370,22 @@ function parseTweeDocumentNode(passage) {
 }
 
 function parseTweeDocumentLink(source) {
-  const match = String(source || "").match(/^<<link\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s*>>$/);
-  return match ? { label: parseTweeDocumentString(match[1]), target: parseTweeDocumentString(match[2]) } : null;
+  const text = String(source || "").trim();
+  const macro = text.match(/^<<link\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s*>>$/);
+  if (macro) return { label: parseTweeDocumentString(macro[1]), target: parseTweeDocumentString(macro[2]), macro: true };
+  const wiki = text.match(/^\[\[([\s\S]*?)\]\]$/);
+  if (!wiki) return null;
+  const content = wiki[1];
+  const forward = content.match(/^([\s\S]*?)(?:->|\|)([\s\S]+)$/);
+  if (forward) return { label: parseTweeWikiLinkText(forward[1]), target: parseTweeWikiLinkText(forward[2]), macro: false };
+  const backward = content.match(/^([\s\S]+)<-([\s\S]*?)$/);
+  if (backward) return { label: parseTweeWikiLinkText(backward[2]), target: parseTweeWikiLinkText(backward[1]), macro: false };
+  const target = parseTweeWikiLinkText(content);
+  return { label: target, target, macro: false };
+}
+
+function parseTweeWikiLinkText(value) {
+  return String(value || "").trim().replace(/&#93;/gi, "]");
 }
 
 function parseTweeDocumentGoto(source) {
@@ -26015,6 +26331,11 @@ function buildVariablesFromStateSchemaDocument(document) {
   return variables;
 }
 
+function normalizePlayHistoryLimit(value) {
+  const number = Number(value);
+  return PLAY_HISTORY_LIMIT_OPTIONS.includes(number) ? number : DEFAULT_PLAY_HISTORY_LIMIT;
+}
+
 function normalizeProject(project) {
   const nodeTypesList = normalizeProjectNodeTypes(project.nodeTypes, project.customNodeTypes);
   const nodeTypeTemplates = new Map(nodeTypesList.map((typeDef) => [typeDef.type, getNodeTypeTemplate(typeDef)]));
@@ -26024,6 +26345,7 @@ function normalizeProject(project) {
     title: project.title || "Sample",
     workflowMode: normalizeWorkflowMode(project.workflowMode || project.sourceMode || project.mode),
     notes: project.notes || "",
+    playHistoryLimit: normalizePlayHistoryLimit(project.playHistoryLimit),
     variables: normalizeVariablesObject(project.variables),
     script: normalizeScriptConfig(project.script),
     eventSheet,
@@ -26268,12 +26590,6 @@ function getFrameContainmentCandidates(source, cx, cy) {
   const cellX = Math.floor(cx / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
   const cellY = Math.floor(cy / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
   return source.cells.get(`${cellX}:${cellY}`) || [];
-}
-
-function frameArea(frame) {
-  const width = Number(frame?.width) || 0;
-  const height = Number(frame?.height) || 0;
-  return Math.max(0, width) * Math.max(0, height);
 }
 
 function frameContainsNodeCenter(frame, node) {
@@ -26675,6 +26991,8 @@ function normalizeNode(node, eventFrameTypes = null, eventColumns = null, templa
   }
   delete normalized.revealMode;
   normalized.choiceOptions = normalizeChoiceOptions(normalized);
+  normalized.choiceTimer = normalizeChoiceTimer(normalized.choiceTimer);
+  if (!normalized.choiceTimer.enabled && !normalized.choiceTimer.fallbackLinkId) delete normalized.choiceTimer;
   if (normalized.choiceOptions.length) {
     // Mirror option labels into the legacy choices[] field so existing runtime paths and
     // story/preview UI that read `node.choices` see the same list as `choiceOptions`.
@@ -26687,6 +27005,20 @@ function normalizeNode(node, eventFrameTypes = null, eventColumns = null, templa
 
 function normalizeChoiceRevealMode(value) {
   return value === "disabled" || value === "disableUnavailable" ? "disabled" : "hide";
+}
+
+function normalizeChoiceTimerSeconds(value) {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) ? clamp(Math.round(seconds), 1, 3600) : 10;
+}
+
+function normalizeChoiceTimer(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    enabled: Boolean(source.enabled),
+    seconds: normalizeChoiceTimerSeconds(source.seconds),
+    fallbackLinkId: normalizeOptionalString(source.fallbackLinkId || source.linkId).trim()
+  };
 }
 
 function normalizeFrameLayout(value) {
@@ -26779,14 +27111,39 @@ function normalizeNodeEffects(value) {
   return value
     .map((effect) => {
       if (!effect || typeof effect !== "object" || Array.isArray(effect)) return null;
+      if (effect.op === "ifElse" || (effect.condition && effect.thenEffect && effect.elseEffect)) {
+        const thenEffect = normalizeNodeEffectBranch(effect.thenEffect);
+        const elseEffect = normalizeNodeEffectBranch(effect.elseEffect);
+        const condition = normalizeOptionalString(effect.condition).trim();
+        if (!condition || !thenEffect || !elseEffect) return null;
+        return {
+          trigger: normalizePlaybookActionTrigger(effect.trigger || "onVisit"),
+          op: "ifElse",
+          condition,
+          thenEffect,
+          elseEffect
+        };
+      }
       return {
         trigger: normalizePlaybookActionTrigger(effect.trigger || "onVisit"),
         op: normalizePlaybookActionOperation(effect.op || "set"),
         key: normalizeOptionalString(effect.key || effect.variable || effect.name).trim(),
-        value: normalizeOptionalString(effect.value)
+        value: normalizeOptionalString(effect.value),
+        valueMode: effect.valueMode === "variable" ? "variable" : "literal"
       };
     })
-    .filter((effect) => effect && (effect.key || effect.op === "clear"));
+    .filter((effect) => effect && (effect.op === "ifElse" || effect.key || effect.op === "clear"));
+}
+
+function normalizeNodeEffectBranch(effect) {
+  if (!effect || typeof effect !== "object" || Array.isArray(effect)) return null;
+  const normalized = {
+    op: normalizePlaybookActionOperation(effect.op || "set"),
+    key: normalizeOptionalString(effect.key || effect.variable || effect.name).trim(),
+    value: normalizeOptionalString(effect.value),
+    valueMode: effect.valueMode === "variable" ? "variable" : "literal"
+  };
+  return normalized.key || normalized.op === "clear" ? normalized : null;
 }
 
 function normalizeNodeRouting(value) {
@@ -26983,19 +27340,64 @@ function openPreview() {
 }
 
 function resetPreviewSessionState() {
+  capturePlaySessionSnapshot();
   if (state.playRefreshTimer) {
     window.clearTimeout(state.playRefreshTimer);
     state.playRefreshTimer = null;
   }
+  clearPlayChoiceTimer();
   state.playNodeId = null;
   state.playPath = [];
   state.playStepIndex = 0;
   state.playSteps = [];
+  state.playTrimmedCount = 0;
   state.playTurnIndex = 0;
   state.playVariables = null;
   state.playManualActionRunIds = new Set();
   state.playVisitedNodeIds = new Set();
   state.playVisitRecords = [];
+}
+
+function getPlayHistoryLimit() {
+  return normalizePlayHistoryLimit(state.project?.playHistoryLimit);
+}
+
+function capturePlaySessionSnapshot() {
+  if (!Array.isArray(state.playPath) || !state.playPath.length) return null;
+  const steps = state.playPath.map((nodeId, index) => {
+    const node = getNode(nodeId);
+    const snapshot = Array.isArray(state.playSteps) ? state.playSteps[index] : null;
+    return {
+      nodeId,
+      displayId: node ? getNodeDisplayId(node) : "",
+      type: node?.type || "",
+      title: node?.title || "",
+      body: node ? displayBody(node) : "",
+      variables: snapshot?.variables ? clonePreviewVariables(snapshot.variables) : null,
+      operations: clonePreviewVisitRecords(snapshot?.visitRecords || [])
+        .find((record) => record.nodeId === nodeId)?.operations || []
+    };
+  });
+  state.lastPlaySession = {
+    projectTitle: state.project?.title || "Narrative Canvas",
+    capturedAt: new Date().toISOString(),
+    trimmedCount: Number(state.playTrimmedCount || 0),
+    steps
+  };
+  return state.lastPlaySession;
+}
+
+function trimPreviewHistory() {
+  const limit = getPlayHistoryLimit();
+  const maximum = limit;
+  const excess = Math.max(0, state.playPath.length - maximum);
+  if (!excess) return false;
+  state.playPath = state.playPath.slice(excess);
+  state.playSteps = Array.isArray(state.playSteps) ? state.playSteps.slice(excess) : [];
+  state.playVisitRecords = Array.isArray(state.playVisitRecords) ? state.playVisitRecords.slice(excess) : [];
+  state.playStepIndex = Math.max(0, state.playStepIndex - excess);
+  state.playTrimmedCount = Number(state.playTrimmedCount || 0) + excess;
+  return true;
 }
 
 function scheduleOpenPreviewRefresh() {
@@ -27122,6 +27524,7 @@ function recordPreviewOperation(node, text) {
 }
 
 function advancePreview(nodeId, opts = {}) {
+  clearPlayChoiceTimer();
   const currentIndex = getPreviewCurrentPathIndex();
   const currentNode = getNode(state.playNodeId);
   if (currentNode) {
@@ -27192,14 +27595,11 @@ function executePreviewManualAction(nodeId, actionIdValue) {
   renderPreviewNode(node.id, { skipVisit: true });
 }
 
-// Play keeps a scrollable log of the cards the reader just passed; older cards fall out
-// of the visible span so long sessions stay light.
-const PLAY_HISTORY_CARD_LIMIT = 30;
-
 function renderPreviewHistoryCards() {
   const index = getPreviewCurrentPathIndex();
   if (index <= 0) return "";
-  const start = Math.max(0, index - PLAY_HISTORY_CARD_LIMIT);
+  const historyLimit = getPlayHistoryLimit();
+  const start = Math.max(0, index - Math.max(0, historyLimit - 1));
   const cards = [];
   for (let i = start; i < index; i += 1) {
     const node = getNode(state.playPath[i]);
@@ -27208,8 +27608,8 @@ function renderPreviewHistoryCards() {
     cards.push(renderPreviewHistoryCard(node, step, i));
   }
   if (!cards.length) return "";
-  const trimmedNotice = start > 0
-    ? `<div class="play-history-trimmed">${escapeHtml(t("Showing the last {count} cards.", { count: PLAY_HISTORY_CARD_LIMIT }))}</div>`
+  const trimmedNotice = start > 0 || state.playTrimmedCount > 0
+    ? `<div class="play-history-trimmed">${escapeHtml(t("Showing the last {count} cards.", { count: historyLimit }))}</div>`
     : "";
   return `<section class="play-history" aria-label="${escapeAttr(t("Recent cards"))}">${trimmedNotice}${cards.join("")}</section>`;
 }
@@ -27219,31 +27619,59 @@ function renderPreviewHistoryCards() {
 // fixed set of block and inline markers is converted — no raw HTML passes through.
 function renderNarrativeMarkdown(text) {
   const source = String(text ?? "");
+  // Inline formatting runs on already-escaped text, so Markdown markers survive but
+  // no raw HTML gets through. Links are limited to safe schemes.
   const inline = (line) => escapeHtml(line)
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) =>
+      `<a href="${/^(https?:|mailto:|#)/i.test(url) ? url : "#"}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
-    .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    .replace(/~~([^~]+)~~/g, "<del>$1</del>")
+    .replace(/==([^=]+)==/g, "<mark>$1</mark>");
   const lines = source.split("\n");
   const out = [];
   let listItems = null;
-  const flushList = () => {
-    if (listItems) { out.push(`<ul>${listItems.join("")}</ul>`); listItems = null; }
-  };
+  let orderedItems = null;
+  let codeLines = null;
+  const flushList = () => { if (listItems) { out.push(`<ul>${listItems.join("")}</ul>`); listItems = null; } };
+  const flushOrdered = () => { if (orderedItems) { out.push(`<ol>${orderedItems.join("")}</ol>`); orderedItems = null; } };
+  const flushBlocks = () => { flushList(); flushOrdered(); };
   for (const rawLine of lines) {
     const line = rawLine.replace(/\r$/, "");
+    const fence = /^\s*```/.test(line);
+    if (codeLines) {
+      if (fence) { out.push(`<pre><code>${codeLines.map((code) => escapeHtml(code)).join("\n")}</code></pre>`); codeLines = null; }
+      else codeLines.push(line);
+      continue;
+    }
+    if (fence) { flushBlocks(); codeLines = []; continue; }
+    const taskMatch = line.match(/^\s*-\s+\[([ xX])\]\s+(.*)$/);
+    if (taskMatch) {
+      flushOrdered();
+      const checked = taskMatch[1].toLowerCase() === "x";
+      (listItems ||= []).push(`<li class="nc-md-task"><input type="checkbox" disabled${checked ? " checked" : ""}>${inline(taskMatch[2])}</li>`);
+      continue;
+    }
     const listMatch = line.match(/^\s*-\s+(.*)$/);
-    if (listMatch) { (listItems ||= []).push(`<li>${inline(listMatch[1])}</li>`); continue; }
-    flushList();
+    if (listMatch) { flushOrdered(); (listItems ||= []).push(`<li>${inline(listMatch[1])}</li>`); continue; }
+    const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (orderedMatch) { flushList(); (orderedItems ||= []).push(`<li>${inline(orderedMatch[1])}</li>`); continue; }
+    flushBlocks();
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { out.push("<hr>"); continue; }
     const h3 = line.match(/^###\s+(.*)$/);
     const h2 = line.match(/^##\s+(.*)$/);
+    const h1 = line.match(/^#\s+(.*)$/);
     const quote = line.match(/^>\s+(.*)$/);
     if (h3) out.push(`<h5>${inline(h3[1])}</h5>`);
     else if (h2) out.push(`<h4>${inline(h2[1])}</h4>`);
+    else if (h1) out.push(`<h3>${inline(h1[1])}</h3>`);
     else if (quote) out.push(`<blockquote>${inline(quote[1])}</blockquote>`);
     else if (line.trim() === "") out.push("<br>");
     else out.push(`<p>${inline(line)}</p>`);
   }
-  flushList();
+  if (codeLines) out.push(`<pre><code>${codeLines.map((code) => escapeHtml(code)).join("\n")}</code></pre>`);
+  flushBlocks();
   return out.join("");
 }
 
@@ -27326,6 +27754,7 @@ function scrollPreviewToCurrentCard() {
 function renderPreviewNode(nodeId, options = {}) {
   const node = getNode(nodeId);
   if (!node) return;
+  if (state.playChoiceTimer?.nodeId && state.playChoiceTimer.nodeId !== node.id) clearPlayChoiceTimer();
   const runtimeScript = getNodeRuntimeScript(node);
   if (!options.skipVisit) {
     ensurePreviewVisitRecord(node);
@@ -27333,6 +27762,7 @@ function renderPreviewNode(nodeId, options = {}) {
     applyPlaybookActionsForNode(node, "onVisit", "Node visit");
     applyVisitTrackingRule(node);
     capturePreviewStep(node.id);
+    trimPreviewHistory();
   }
 
   const outgoing = getOutgoing(node.id);
@@ -27386,6 +27816,7 @@ function renderPreviewNode(nodeId, options = {}) {
   if (!options.skipCanvasFocus) focusCanvasOnPreviewNode(node);
 
   if (dialogTurns.length && dialogTurnIndex < dialogTurns.length - 1) {
+    clearPlayChoiceTimer();
     const linePrevButton = dialogTurnIndex > 0
       ? `<button class="play-action" type="button" data-action="play-dialog-prev">${escapeHtml(t("Previous line"))}</button>`
       : "";
@@ -27394,6 +27825,7 @@ function renderPreviewNode(nodeId, options = {}) {
   }
 
   if (isPreviewEndConditionMet() || normalizeNodeRouting(node.routing).mode === "end") {
+    clearPlayChoiceTimer();
     dom.playActions.innerHTML = previousButton + manualActionButtons + `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`;
     return;
   }
@@ -27407,21 +27839,90 @@ function renderPreviewNode(nodeId, options = {}) {
       if (!link.choiceOptionId) return true;  // legacy links with no option id stay visible
       return availability.get(link.choiceOptionId) !== false;
     });
-    dom.playActions.innerHTML = previousButton + manualActionButtons + visibleLinks.map((link, index) => {
+    const timer = normalizeChoiceTimer(node.choiceTimer);
+    const fallbackLink = timer.enabled
+      ? visibleLinks.find((link) => link.id === timer.fallbackLinkId
+        && (!link.choiceOptionId || availability.get(link.choiceOptionId) !== false))
+      : null;
+    const timerStatus = fallbackLink
+      ? `<div class="play-choice-countdown" data-play-choice-countdown aria-live="polite"></div>`
+      : "";
+    dom.playActions.innerHTML = previousButton + manualActionButtons + timerStatus + visibleLinks.map((link, index) => {
       const label = getChoiceBranchButtonLabel(link, runtimeChoices, index, entries);
       const optionAttr = link.choiceOptionId ? ` data-choice-option-id="${escapeAttr(link.choiceOptionId)}"` : "";
       const available = link.choiceOptionId ? availability.get(link.choiceOptionId) !== false : true;
       const disabledAttr = revealMode === "disabled" && !available ? ` disabled aria-disabled="true" title="${escapeAttr(t("Requirements not met"))}"` : "";
       return `<button class="play-action play-choice-action" type="button" data-action="play-next" data-node-id="${escapeAttr(link.to)}"${optionAttr}${disabledAttr}>${escapeHtml(label)}</button>`;
     }).join("");
+    if (fallbackLink) ensurePlayChoiceTimer(node, timer, fallbackLink);
+    else clearPlayChoiceTimer();
+    return;
+  }
+
+  if (nextLinks.length > 1) {
+    clearPlayChoiceTimer();
+    dom.playActions.innerHTML = previousButton + manualActionButtons + nextLinks.map((link, index) => {
+      const rawLabel = normalizeOptionalString(link.label).trim();
+      const target = getNode(link.to);
+      const generic = !rawLabel || /^(?:continue|next|next page)$/i.test(rawLabel);
+      const label = generic
+        ? (target?.title || t("Branch {number}", { number: index + 1 }))
+        : rawLabel;
+      return `<button class="play-action play-choice-action" type="button" data-action="play-next" data-node-id="${escapeAttr(link.to)}">${escapeHtml(label)}</button>`;
+    }).join("");
     return;
   }
 
   const routingNextId = getRoutingNextNodeId(node);
+  clearPlayChoiceTimer();
   const nextId = routingNextId || nextLinks[0]?.to || nextPathId;
   dom.playActions.innerHTML = previousButton + manualActionButtons + (nextId
     ? `<button class="play-action primary" type="button" data-action="play-next" data-node-id="${escapeAttr(nextId)}">${escapeHtml(t("Next page"))}</button>`
     : `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`);
+}
+
+function clearPlayChoiceTimer() {
+  const timer = state.playChoiceTimer;
+  if (timer?.timeoutId) window.clearTimeout(timer.timeoutId);
+  if (timer?.intervalId) window.clearInterval(timer.intervalId);
+  state.playChoiceTimer = null;
+}
+
+function ensurePlayChoiceTimer(node, timer, fallbackLink) {
+  if (!node || !fallbackLink || !timer?.enabled) {
+    clearPlayChoiceTimer();
+    return;
+  }
+  const key = `${node.id}|${fallbackLink.id}|${timer.seconds}`;
+  if (state.playChoiceTimer?.key === key) {
+    updatePlayChoiceCountdown();
+    return;
+  }
+  clearPlayChoiceTimer();
+  const deadline = Date.now() + timer.seconds * 1000;
+  const timeoutId = window.setTimeout(() => {
+    const active = state.playChoiceTimer;
+    if (!active || active.key !== key || state.playNodeId !== node.id) return;
+    const currentLink = getLink(fallbackLink.id);
+    clearPlayChoiceTimer();
+    if (!currentLink || currentLink.from !== node.id || !isLinkRequirementMet(currentLink, node) || !isTargetNodeRequirementMet(currentLink)) return;
+    const fallbackEntry = currentLink.choiceOptionId
+      ? getRuntimeChoiceEntries(node, getNodeRuntimeScript(node)).find((entry) => entry.optionId === currentLink.choiceOptionId)
+      : null;
+    if (fallbackEntry && !isChoiceOptionAvailable(fallbackEntry, node)) return;
+    advancePreview(currentLink.to, { optionId: currentLink.choiceOptionId || "", timed: true });
+  }, timer.seconds * 1000);
+  const intervalId = window.setInterval(updatePlayChoiceCountdown, 250);
+  state.playChoiceTimer = { key, nodeId: node.id, deadline, timeoutId, intervalId };
+  updatePlayChoiceCountdown();
+}
+
+function updatePlayChoiceCountdown() {
+  const timer = state.playChoiceTimer;
+  const target = dom.playActions?.querySelector?.("[data-play-choice-countdown]");
+  if (!timer || !target) return;
+  const seconds = Math.max(0, Math.ceil((timer.deadline - Date.now()) / 1000));
+  target.textContent = t("Time remaining: {seconds}s", { seconds });
 }
 
 function renderPreviewManualActions(node) {
@@ -27542,12 +28043,6 @@ function getEndConditionStatus(source) {
   return { status: "ok" };
 }
 
-function collectEndConditionUnknownKeys(text, variables) {
-  const result = collectExpressionKeys(text, variables);
-  if (result.invalid) return null;
-  return result.keys.filter((key) => !resolveRuntimeStatePath(key, variables).found);
-}
-
 function collectExpressionKeys(text, variables = {}) {
   const trimmed = String(text || "").trim();
   if (!trimmed) return { keys: [], membershipKeys: [], invalid: false };
@@ -27656,13 +28151,27 @@ function collectPreviewAffectedValueRows(node) {
     if (row) rows.push(row);
   };
   normalizeNodeStateLogic(node?.stateLogic).effects.forEach((effect) => {
-    push(`${t("Node effect")} / ${t(effect.trigger === "onChoose" ? "On choose" : "On visit")}`, effect);
+    const label = `${t("Node effect")} / ${t(effect.trigger === "onChoose" ? "On choose" : "On visit")}`;
+    if (effect.op === "ifElse") {
+      push(`${label} / if`, effect.thenEffect);
+      push(`${label} / else`, effect.elseEffect);
+    } else {
+      push(label, effect);
+    }
   });
   getMatchingPlaybookActions(node, "onVisit").forEach((action) => push(`${t("Variable action")} / ${t("On visit")}`, action));
   getMatchingPlaybookActions(node, "manual").forEach((action) => push(t("Manual action"), action));
   getMatchingPlaybookActions(node, "onChoose").forEach((action) => push(`${t("Variable action")} / ${t("On choose")}`, action));
   getRuntimeChoiceEntries(node, getNodeRuntimeScript(node)).forEach((entry) => {
-    (entry.effects || []).forEach((effect) => push(`${t("Choice effect")} / ${entry.label || entry.optionId || t("Option")}`, effect));
+    (entry.effects || []).forEach((effect) => {
+      const label = `${t("Choice effect")} / ${entry.label || entry.optionId || t("Option")}`;
+      if (effect.op === "ifElse") {
+        push(`${label} / if`, effect.thenEffect);
+        push(`${label} / else`, effect.elseEffect);
+      } else {
+        push(label, effect);
+      }
+    });
   });
   return [...new Set(rows)];
 }
@@ -27773,6 +28282,18 @@ function applyNodeEffectsForNode(node, trigger, contextLabel = "") {
 }
 
 function applyNodeEffect(effect, node, contextLabel = "") {
+  if (effect?.op === "ifElse") {
+    const condition = renderRuntimeTemplate(effect.condition, node, effect.condition);
+    const branch = evaluateRequirementExpression(condition) ? effect.thenEffect : effect.elseEffect;
+    if (!branch) return false;
+    return applyPlaybookActionWithPreviewLog({
+      ...branch,
+      id: "",
+      trigger: effect.trigger || "onVisit",
+      target: "",
+      category: "Variable"
+    }, node, contextLabel);
+  }
   return applyPlaybookActionWithPreviewLog({
     id: "",
     trigger: effect.trigger || "onVisit",
@@ -27780,7 +28301,8 @@ function applyNodeEffect(effect, node, contextLabel = "") {
     op: effect.op || "set",
     category: "Variable",
     key: effect.key || "",
-    value: effect.value || ""
+    value: effect.value || "",
+    valueMode: effect.valueMode === "variable" ? "variable" : "literal"
   }, node, contextLabel);
 }
 
@@ -27992,7 +28514,12 @@ function applyPlaybookAction(action, node) {
   const key = getPlaybookActionStateKey(action);
   if (!key) return false;
   const variables = getPlayRuntimeVariables();
-  const value = coercePlaybookActionValueForVariable(renderRuntimeTemplate(action.value, node, action.value), info, action);
+  const valueReference = action?.valueMode === "variable"
+    ? resolveRuntimeStatePath(normalizeExpressionVariableTerm(action.value), variables)
+    : null;
+  const value = valueReference?.found
+    ? cloneRuntimeExportValue(valueReference.value)
+    : coercePlaybookActionValueForVariable(renderRuntimeTemplate(action.value, node, action.value), info, action);
   const existing = variables[key];
   if (action.op === "set") {
     variables[key] = value;
@@ -28292,22 +28819,6 @@ function isPreviewVisitedStateKeyMet(key) {
   });
 }
 
-function parseExpressionPredicate(source) {
-  const match = String(source || "").trim().match(/^(has|contains)\s*\(([\s\S]*)\)$/i);
-  if (!match) return null;
-  const args = splitExpressionArguments(match[2]);
-  if (args.length !== 2) return { invalid: true };
-  const key = normalizeExpressionVariableTerm(args[0]);
-  if (!key) return { invalid: true };
-  return {
-    name: match[1].toLowerCase(),
-    keySource: args[0].trim(),
-    key,
-    value: args[1].trim(),
-    invalid: false
-  };
-}
-
 function collectExpressionPredicates(source) {
   const parsed = parseJsConditionExpression(source);
   if (parsed.invalid) return [];
@@ -28346,42 +28857,6 @@ function collectExpressionPredicates(source) {
   return predicates;
 }
 
-function splitExpressionArguments(source) {
-  const text = String(source || "");
-  const args = [];
-  let quote = "";
-  let escaped = false;
-  let depth = 0;
-  let start = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === quote) quote = "";
-      continue;
-    }
-    if (char === "\"" || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === "(") {
-      depth += 1;
-      continue;
-    }
-    if (char === ")") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth === 0 && char === ",") {
-      args.push(text.slice(start, index).trim());
-      start = index + 1;
-    }
-  }
-  args.push(text.slice(start).trim());
-  return args.filter((arg) => arg !== "");
-}
-
 function normalizeExpressionVariableTerm(source) {
   const text = String(source || "").trim().replace(/^\$/, "");
   const variablePrefix = text.match(/^variables\.([a-zA-Z_][\w.-]*)$/);
@@ -28403,31 +28878,6 @@ function parseExpressionLiteral(source) {
 function isQuotedExpressionLiteral(source) {
   return /^"(?:\\.|[^"\\])*"$/.test(String(source || "").trim())
     || /^'(?:\\.|[^'\\])*'$/.test(String(source || "").trim());
-}
-
-function isPlainExpressionLiteral(source) {
-  const text = String(source || "").trim();
-  return isQuotedExpressionLiteral(text)
-    || /^(true|false|null)$/i.test(text)
-    || (text !== "" && !Number.isNaN(Number(text)));
-}
-
-function evaluateExpressionPredicate(predicate, variables) {
-  const key = normalizeExpressionVariableTerm(predicate.key);
-  const container = resolveRuntimeStatePath(key, variables).value;
-  const value = resolveExpressionPredicateValue(predicate.value, variables);
-  return expressionContainerHasValue(container, value);
-}
-
-function resolveExpressionPredicateValue(source, variables) {
-  const text = String(source || "").trim();
-  if (isPlainExpressionLiteral(text)) return parseExpressionLiteral(text);
-  const key = normalizeExpressionVariableTerm(text);
-  if (key) {
-    const resolved = resolveRuntimeStatePath(key, variables);
-    if (resolved.found) return resolved.value;
-  }
-  return parseExpressionLiteral(text);
 }
 
 function expressionContainerHasValue(container, value) {
@@ -28516,6 +28966,74 @@ const CODEX_RESERVED_FRONTMATTER_KEYS = new Set([
   "narrative_canvas_codex", "id", "name", "category", "kind", "role", "voice",
   "tags", "notes", "images", "image", "image_preview", "hidden", "files", "canvas", "icon"
 ]);
+const CODEX_EXTRA_FIELD_TYPES = new Set(["string", "number", "boolean", "array", "object", "null"]);
+
+function inferCodexExtraFieldType(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "number" && Number.isFinite(value)) return "number";
+  if (typeof value === "boolean") return "boolean";
+  if (value && typeof value === "object") return "object";
+  return "string";
+}
+
+function normalizeCodexExtraFieldValue(value, type = inferCodexExtraFieldType(value)) {
+  if (type === "null") return null;
+  if (type === "number") {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  }
+  if (type === "boolean") {
+    if (typeof value === "string") return value.trim().toLowerCase() === "true";
+    return Boolean(value);
+  }
+  if (type === "array") {
+    if (Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(String(value || "[]"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+  if (type === "object") {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(String(value || "{}"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+  return String(value ?? "");
+}
+
+function formatCodexExtraFieldValue(value, type = inferCodexExtraFieldType(value)) {
+  if (type === "array" || type === "object") return JSON.stringify(value);
+  if (type === "null") return "null";
+  return String(value ?? "");
+}
+
+function parseCodexExtraFieldInput(value, type) {
+  const source = String(value ?? "").trim();
+  if (type === "string") return { valid: true, value: String(value ?? "") };
+  if (type === "null") return { valid: true, value: null };
+  if (type === "number") {
+    const number = Number(source);
+    return { valid: source !== "" && Number.isFinite(number), value: number };
+  }
+  if (type === "boolean") {
+    if (!["true", "false"].includes(source.toLowerCase())) return { valid: false, value: false };
+    return { valid: true, value: source.toLowerCase() === "true" };
+  }
+  try {
+    const parsed = JSON.parse(source);
+    if (type === "array") return { valid: Array.isArray(parsed), value: parsed };
+    return { valid: Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed), value: parsed };
+  } catch (_error) {
+    return { valid: false, value: type === "array" ? [] : {} };
+  }
+}
 
 function normalizeCodexVaultFiles(value) {
   const source = Array.isArray(value) ? value : [];
@@ -28538,8 +29056,9 @@ function normalizeCodexExtraFields(value) {
     const key = String(entry?.key ?? "").trim();
     if (CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase())) return;
     const raw = entry?.value;
-    const fieldValue = raw == null ? "" : (typeof raw === "object" ? JSON.stringify(raw) : String(raw));
-    normalized.push({ key, value: fieldValue });
+    const requestedType = String(entry?.type || "").trim().toLowerCase();
+    const type = CODEX_EXTRA_FIELD_TYPES.has(requestedType) ? requestedType : inferCodexExtraFieldType(raw);
+    normalized.push({ key, type, value: normalizeCodexExtraFieldValue(raw, type) });
   });
   return normalized;
 }
@@ -28579,7 +29098,7 @@ function applyCodexTemplateToCharacter(character) {
   let changed = false;
   template.forEach((key) => {
     if (present.has(key.toLowerCase())) return;
-    fields.push({ key, value: "" });
+    fields.push({ key, type: "string", value: "" });
     changed = true;
   });
   if (changed) character.extraFields = fields;
@@ -28902,10 +29421,6 @@ function getEventFrameCharacterSummary(node) {
   return getNodeCharacterSummary(node, { includeEventAggregate: true });
 }
 
-function getEventFrameCharacterIds(node) {
-  return new Set(getNodeCharacterLinks(node, { includeEventAggregate: true }).map((link) => link.characterId));
-}
-
 function createCharacterBacklinkGroups() {
   return CHARACTER_BACKLINK_GROUP_DEFS.map((group) => ({
     ...group,
@@ -29208,38 +29723,6 @@ function getStoryEntriesForParent(parentId) {
   return [];
 }
 
-function getSmallestContainingFrame(node, frames) {
-  const nodeBounds = getNodeBounds(node);
-  const nodeCenter = boundsCenter(nodeBounds);
-  const nodeArea = boundsArea(nodeBounds);
-  let smallest = null;
-  let smallestArea = Number.POSITIVE_INFINITY;
-  frames.forEach((frame) => {
-    if (frame.id === node.id) return;
-    const frameBounds = getExpandedFrameBounds(frame);
-    if (!boundsContainPoint(frameBounds, nodeCenter)) return;
-    const area = boundsArea(frameBounds);
-    if (isFrameNode(node) && area <= nodeArea) return;
-    if (area < smallestArea) {
-      smallest = frame;
-      smallestArea = area;
-    }
-  });
-  return smallest;
-}
-
-function getExpandedFrameBounds(frame) {
-  if (!isFrameNode(frame)) return getNodeBounds(frame);
-  const width = getManualNodeWidth(frame) || defaultNodeWidth(frame);
-  const height = getManualNodeHeight(frame) || defaultNodeHeight(frame, width);
-  return {
-    left: frame.x,
-    top: frame.y,
-    right: frame.x + width,
-    bottom: frame.y + height
-  };
-}
-
 function getNodeBounds(node) {
   // Pure arithmetic size: never touch the DOM here. getNodeBounds is called for
   // every node on every viewport cull (and inside frame-containment scans), so
@@ -29252,13 +29735,6 @@ function getNodeBounds(node) {
     top: node.y,
     right: node.x + size.width,
     bottom: node.y + size.height
-  };
-}
-
-function boundsCenter(bounds) {
-  return {
-    x: bounds.left + (bounds.right - bounds.left) / 2,
-    y: bounds.top + (bounds.bottom - bounds.top) / 2
   };
 }
 
@@ -29290,13 +29766,6 @@ function boundsContainBounds(container, child) {
     && child.top >= container.top
     && child.right <= container.right
     && child.bottom <= container.bottom;
-}
-
-function boundsContainPoint(container, point) {
-  return point.x >= container.left
-    && point.x <= container.right
-    && point.y >= container.top
-    && point.y <= container.bottom;
 }
 
 function boundsArea(bounds) {
@@ -29749,24 +30218,6 @@ function getFrameDescendantNodeStore() {
   store.cache = new Map();
   state.derived.frameDescendantNodes = store;
   return store;
-}
-
-function getEventBounds(eventNode) {
-  const size = nodeLayoutSize(eventNode);
-  return {
-    left: eventNode.x,
-    top: eventNode.y,
-    right: eventNode.x + size.width,
-    bottom: eventNode.y + size.height
-  };
-}
-
-function isNodeInsideBounds(node, bounds) {
-  const size = nodeLayoutSize(node);
-  return node.x >= bounds.left
-    && node.y >= bounds.top
-    && node.x + size.width <= bounds.right
-    && node.y + size.height <= bounds.bottom;
 }
 
 function formatEventElement(node) {
@@ -30450,14 +30901,6 @@ function queryCanMatchCharacterTerms(query) {
   return getCharacters().some((character) => String(character.name || "").toLowerCase().includes(text));
 }
 
-function getCanvasRenderNodes() {
-  const query = state.search.trim().toLowerCase();
-  const visibleIds = getCanvasVisibleNodeIds(query);
-  return getCanvasLayerItems()
-    .filter((item) => visibleIds.has(item.node.id))
-    .map((item) => item.node);
-}
-
 function getCanvasLayerItems() {
   return state.project.nodes
     .map((node, index) => ({ node, index, order: getNodeLayerOrder(node, index) }))
@@ -30479,10 +30922,6 @@ function isFrameKind(kind) {
 
 function isEventSheetNode(node) {
   return isEventSheetTypeDef(getNodeMeta(node?.type));
-}
-
-function isEventFrameKind(kind) {
-  return isFrameKind(normalizeNodeTypeKind(kind));
 }
 
 function isEventSheetTypeDef(typeDef) {

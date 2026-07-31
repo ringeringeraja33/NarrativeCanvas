@@ -10,6 +10,7 @@ const defaultFixture = path.join(projectRoot, "tests", "fixtures", "state-runtim
 const defaultStoryFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.story.md");
 const defaultStoryLayoutFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.layout.json");
 const defaultStoryStateFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.state.schema.json");
+const defaultStoryRouteCasesFixture = path.join(projectRoot, "tests", "fixtures", "story-source-acceptance.routes.json");
 const defaultToolCache = path.join(os.homedir(), ".cache", "narrative-canvas-export-tools");
 
 const args = parseArgs(process.argv.slice(2));
@@ -18,6 +19,7 @@ if (args.help) {
   process.exit(0);
 }
 const useStoryFixture = Boolean(args["story-fixture"]);
+const runtimeOnly = Boolean(args["runtime-only"]);
 const autoSidecars = Boolean(args["auto-sidecars"]);
 const decisionGate = Boolean(args["decision-gate"]);
 const requireLayout = Boolean(args["require-layout"]);
@@ -26,7 +28,7 @@ const fixturePath = path.resolve(args.fixture || defaultFixture);
 const storySourcePath = args.story ? path.resolve(args.story) : useStoryFixture ? defaultStoryFixture : "";
 let layoutSourcePath = args.layout ? path.resolve(args.layout) : useStoryFixture ? defaultStoryLayoutFixture : "";
 let stateSourcePath = args.state ? path.resolve(args.state) : useStoryFixture ? defaultStoryStateFixture : "";
-let routeCasesPath = args["route-cases"] ? path.resolve(args["route-cases"]) : "";
+let routeCasesPath = args["route-cases"] ? path.resolve(args["route-cases"]) : useStoryFixture ? defaultStoryRouteCasesFixture : "";
 if (autoSidecars && storySourcePath) {
   const detectedSidecars = detectStorySidecars(storySourcePath);
   if (!layoutSourcePath && detectedSidecars.layout) layoutSourcePath = detectedSidecars.layout;
@@ -82,7 +84,7 @@ async function main() {
   } else {
     assertFileExists(fixturePath, "fixture");
   }
-  Object.entries(tools).forEach(([name, toolPath]) => assertFileExists(toolPath, name));
+  if (!runtimeOnly) Object.entries(tools).forEach(([name, toolPath]) => assertFileExists(toolPath, name));
 
   const outputContext = prepareOutputDirectory();
   const outputDir = outputContext.path;
@@ -97,7 +99,7 @@ async function main() {
     console.log(`[info] output: ${outputDir}`);
     console.log(`[info] chrome: ${chromePath}`);
 
-    const exported = exportFixtureWithChrome({
+    const exported = await exportFixtureWithChrome({
       outputDir,
       scratchDir,
       fixturePath,
@@ -134,11 +136,13 @@ async function main() {
       exportWarnings = validateExportWarningLimit(profile);
       validateRuntimeJson(runtimePath);
       if (routeTemplatePath) writeRouteCaseTemplate(routeTemplatePath, runtimePath);
-      validateYarn(yarnPath, scratchDir);
-      validateYarnPlaythrough(yarnPath);
-      validateInk(inkPath, scratchDir);
-      validateInkPlaythrough(inkPath);
-      validateTwee(tweePath, scratchDir);
+      if (!runtimeOnly) {
+        validateYarn(yarnPath, scratchDir);
+        validateYarnPlaythrough(yarnPath);
+        validateInk(inkPath, scratchDir);
+        validateInkPlaythrough(inkPath);
+        validateTwee(tweePath, scratchDir);
+      }
     }
 
     if (summaryPath || reportPath) {
@@ -149,9 +153,11 @@ async function main() {
     }
     console.log("[ok] portable export acceptance passed");
   } finally {
-    if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
+    if (fs.existsSync(scratchDir)) {
+      fs.rmSync(scratchDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
     if (outputContext.temporary && !keepOutput && fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true, force: true });
+      fs.rmSync(outputDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } else {
       console.log(`[info] kept output: ${outputDir}`);
     }
@@ -161,7 +167,7 @@ async function main() {
 function parseArgs(items) {
   const result = {};
   const repeatable = new Set(["allow-warning-code", "choice-label", "expect-text", "expect-node", "expect-state"]);
-  const booleanFlags = new Set(["auto-sidecars", "clean-output", "decision-gate", "help", "keep-output", "require-layout", "require-state", "story-fixture"]);
+  const booleanFlags = new Set(["auto-sidecars", "clean-output", "decision-gate", "help", "keep-output", "require-layout", "require-state", "runtime-only", "story-fixture"]);
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     if (!item.startsWith("--")) continue;
@@ -197,6 +203,7 @@ Story source checks:
   --require-layout                        Require a Layout JSON sidecar and verify it re-exports
   --require-state                         Require a State Schema sidecar
   --story-fixture                         Run the built-in Story Markdown regression fixture
+  --runtime-only                          Validate Runtime JSON routes without external Yarn, Ink, or Twee compilers
 
 Route assertions:
   --choice-label label                    Select a route choice; repeat for multiple choice nodes
@@ -282,6 +289,7 @@ function unique(items) {
 
 function validateDecisionGateInputs() {
   if (!decisionGate) return;
+  assert(!runtimeOnly, "--decision-gate cannot use --runtime-only because release decisions require at least two independent route consumers.");
   assert(sourceMode === "story" && storySourcePath && !useStoryFixture, "--decision-gate requires --story path/to/story.md and cannot use --story-fixture.");
   assertFileExists(storySourcePath, "story");
   assert(path.resolve(storySourcePath) !== path.resolve(defaultStoryFixture), "--decision-gate cannot use the built-in story fixture; pass a real story source.");
@@ -487,7 +495,16 @@ function findChrome() {
   ];
   const found = candidates.find((candidate) => fs.existsSync(candidate));
   if (found) return found;
-  const commandFound = findExecutableOnPath(["chrome.exe", "chrome", "chromium", "chromium-browser", "msedge.exe", "msedge"]);
+  const commandFound = findExecutableOnPath([
+    "chrome.exe",
+    "google-chrome",
+    "google-chrome-stable",
+    "chrome",
+    "chromium",
+    "chromium-browser",
+    "msedge.exe",
+    "msedge"
+  ]);
   if (!commandFound) {
     throw new Error("Chrome, Chromium, or Edge was not found. Set NARRATIVE_CANVAS_CHROME to a Chromium-based browser.");
   }
@@ -665,6 +682,7 @@ function buildAcceptanceSummary({ exported, outputDir, routeSummary, routeCasesS
       minRouteCases,
       requireLayout: isLayoutRequired(),
       requireState,
+      runtimeOnly,
       timeoutMs,
       route: {
         choiceLabels: [...storyRouteOptions.choiceLabels],
@@ -680,9 +698,9 @@ function buildAcceptanceSummary({ exported, outputDir, routeSummary, routeCasesS
       .sort(),
     consumers: {
       runtimeJson: "pass",
-      yarn: "pass",
-      ink: "pass",
-      twee: "pass"
+      yarn: runtimeOnly ? "skipped" : "pass",
+      ink: runtimeOnly ? "skipped" : "pass",
+      twee: runtimeOnly ? "skipped" : "pass"
     },
     warnings: {
       count: exportWarnings.length,
@@ -860,9 +878,9 @@ function renderAcceptanceReport(summary) {
       lines.push(`### ${routeCase.name}`, "");
       lines.push(`Choices: ${routeCase.options.choiceLabels.join(" -> ") || "(default path)"}`);
       lines.push(`Runtime JSON: ${formatVisited(routeCase.runtimeJson.visited)}`);
-      lines.push(`Yarn: ${formatVisited(routeCase.yarn.visited)}`);
-      lines.push(`Ink choices: ${formatInkChoices(routeCase.ink.selectedChoices)}`);
-      lines.push(`Twee: ${formatVisited(routeCase.twee.visited)}`);
+      lines.push(`Yarn: ${routeCase.yarn ? formatVisited(routeCase.yarn.visited) : "skipped"}`);
+      lines.push(`Ink choices: ${routeCase.ink ? formatInkChoices(routeCase.ink.selectedChoices) : "skipped"}`);
+      lines.push(`Twee: ${routeCase.twee ? formatVisited(routeCase.twee.visited) : "skipped"}`);
       lines.push(`Final state: ${JSON.stringify(routeCase.runtimeJson.finalState)}`);
       lines.push("");
     });
@@ -914,25 +932,25 @@ function formatLocalPath(filePath) {
   return path.relative(process.cwd(), filePath) || ".";
 }
 
-function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySourcePath, layoutSourcePath, stateSourcePath, sourceMode, timeoutMs }) {
+async function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySourcePath, layoutSourcePath, stateSourcePath, sourceMode, timeoutMs }) {
   const runnerPath = path.join(scratchDir, "portable-export-runner.html");
-  const projectRootUrl = pathToFileURL(projectRoot + path.sep).href;
-  const fixtureUrl = pathToFileURL(fixturePath).href;
-  const storyUrl = storySourcePath ? pathToFileURL(storySourcePath).href : "";
-  const layoutUrl = layoutSourcePath ? pathToFileURL(layoutSourcePath).href : "";
-  const stateUrl = stateSourcePath ? pathToFileURL(stateSourcePath).href : "";
   fs.writeFileSync(runnerPath, buildRunnerHtml({
-    projectRootUrl,
-    fixtureUrl,
-    storyUrl,
-    layoutUrl,
-    stateUrl,
+    html: fs.readFileSync(path.join(projectRoot, "index.html"), "utf8"),
+    css: fs.readFileSync(path.join(projectRoot, "canvas.css"), "utf8"),
+    appJs: fs.readFileSync(path.join(projectRoot, "app.js"), "utf8"),
+    fixtureText: fs.readFileSync(fixturePath, "utf8"),
+    storyText: storySourcePath ? fs.readFileSync(storySourcePath, "utf8") : "",
+    layoutText: layoutSourcePath ? fs.readFileSync(layoutSourcePath, "utf8") : "",
+    stateText: stateSourcePath ? fs.readFileSync(stateSourcePath, "utf8") : "",
     sourceMode
   }), "utf8");
 
+  const chromeProfileDir = path.join(scratchDir, "chrome-profile");
+  const attemptTimeoutMs = Math.max(30000, Math.ceil(timeoutMs / 2));
   const chromeArgs = [
     "--headless=new",
     "--disable-gpu",
+    "--disable-dev-shm-usage",
     "--disable-background-networking",
     "--disable-component-update",
     "--no-first-run",
@@ -940,12 +958,17 @@ function exportFixtureWithChrome({ outputDir, scratchDir, fixturePath, storySour
     "--disable-extensions",
     "--no-sandbox",
     "--allow-file-access-from-files",
-    `--user-data-dir=${path.join(scratchDir, "chrome-profile")}`,
-    `--virtual-time-budget=${getChromeVirtualTimeBudget(timeoutMs)}`,
+    `--user-data-dir=${chromeProfileDir}`,
+    `--virtual-time-budget=${getChromeVirtualTimeBudget(attemptTimeoutMs)}`,
     "--dump-dom",
     pathToFileURL(runnerPath).href
   ];
-  const run = spawnWithTimeout(chromePath, chromeArgs, { timeoutMs });
+  let run = await spawnWithTimeout(chromePath, chromeArgs, { timeoutMs: attemptTimeoutMs, workDir: scratchDir });
+  if (run.timedOut && !run.stdout.includes('data-export-status="pass"') && !run.stdout.includes('data-export-status="fail"')) {
+    console.warn("[retry] Chromium timed out before producing DOM output; retrying with a fresh profile.");
+    fs.rmSync(chromeProfileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    run = await spawnWithTimeout(chromePath, chromeArgs, { timeoutMs: attemptTimeoutMs, workDir: scratchDir });
+  }
   if (!run.stdout) {
     throw new Error(`Chrome produced no DOM output.${run.stderr ? `\n${run.stderr}` : ""}`);
   }
@@ -973,19 +996,57 @@ function getChromeVirtualTimeBudget(timeoutMs) {
   return Math.max(25000, Math.min(Math.floor(normalized), 120000));
 }
 
-function spawnWithTimeout(command, commandArgs, { timeoutMs }) {
-  const result = childProcess.spawnSync(command, commandArgs, {
-    cwd: projectRoot,
-    encoding: "utf8",
-    maxBuffer: 50 * 1024 * 1024,
-    timeout: timeoutMs,
-    killSignal: "SIGTERM"
-  });
-  if (result.error && result.error.code !== "ETIMEDOUT") throw result.error;
-  if (result.error?.code === "ETIMEDOUT" && !result.stdout) {
-    throw new Error(`Process timed out after ${timeoutMs}ms: ${command}`);
+async function spawnWithTimeout(command, commandArgs, { timeoutMs, workDir }) {
+  const stdoutPath = path.join(workDir, "chrome-output.html");
+  const stderrPath = path.join(workDir, "chrome-output.log");
+  const stdoutFd = fs.openSync(stdoutPath, "w");
+  const stderrFd = fs.openSync(stderrPath, "w");
+  let child = null;
+  let spawnError = null;
+  let timedOut = false;
+  try {
+    child = childProcess.spawn(command, commandArgs, {
+      cwd: projectRoot,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", stdoutFd, stderrFd],
+      windowsHide: true
+    });
+    child.once("error", (error) => {
+      spawnError = error;
+    });
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, "utf8") : "";
+      if (stdout.includes('data-export-status="pass"') || stdout.includes('data-export-status="fail"') || child.exitCode != null || spawnError) break;
+    }
+    timedOut = child.exitCode == null && !spawnError;
+    stopProcessTree(child);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (spawnError) throw spawnError;
+    return {
+      stdout: fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, "utf8") : "",
+      stderr: fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, "utf8") : "",
+      timedOut
+    };
+  } finally {
+    stopProcessTree(child);
+    fs.closeSync(stdoutFd);
+    fs.closeSync(stderrFd);
   }
-  return { stdout: result.stdout || "", stderr: result.stderr || "", timedOut: result.error?.code === "ETIMEDOUT" };
+}
+
+function stopProcessTree(child) {
+  if (!child) return;
+  if (process.platform === "win32") {
+    childProcess.spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    if (child.exitCode == null) child.kill("SIGTERM");
+  }
 }
 
 function writeExportedFiles(outputDir, exported) {
@@ -997,21 +1058,22 @@ function writeExportedFiles(outputDir, exported) {
   }
 }
 
-function buildRunnerHtml({ projectRootUrl, fixtureUrl, storyUrl, layoutUrl, stateUrl, sourceMode }) {
+function buildRunnerHtml({ html, css, appJs, fixtureText, storyText, layoutText, stateText, sourceMode }) {
   return `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><title>Narrative Canvas Portable Export Runner</title></head>
   <body data-export-status="running"><pre id="export-output">running</pre>
     <script>
-      const projectRootUrl = ${JSON.stringify(projectRootUrl)};
-      const fixtureUrl = ${JSON.stringify(fixtureUrl)};
-      const storyUrl = ${JSON.stringify(storyUrl)};
-      const layoutUrl = ${JSON.stringify(layoutUrl)};
-      const stateUrl = ${JSON.stringify(stateUrl)};
-      const sourceMode = ${JSON.stringify(sourceMode)};
+      const html = ${toInlineScriptLiteral(html)};
+      const css = ${toInlineScriptLiteral(css)};
+      const appJs = ${toInlineScriptLiteral(appJs)};
+      const fixtureText = ${toInlineScriptLiteral(fixtureText)};
+      const storyText = ${toInlineScriptLiteral(storyText)};
+      const layoutText = ${toInlineScriptLiteral(layoutText)};
+      const stateText = ${toInlineScriptLiteral(stateText)};
+      const sourceMode = ${toInlineScriptLiteral(sourceMode)};
       const actions = ["export-story-md", "export-story-layout", "export-state-schema", "export-profile", "export-runtime-json", "export-yarn", "export-ink", "export-twee"];
       const output = document.querySelector("#export-output");
-      function assetUrl(path) { return new URL(path, projectRootUrl).href; }
       function extractBodyHtml(html) {
         const match = html.match(/<body[^>]*>([\\s\\S]*?)<\\/body>/i);
         return match ? match[1].replace(/<script[\\s\\S]*?<\\/script>/gi, "") : html;
@@ -1049,15 +1111,6 @@ function buildRunnerHtml({ projectRootUrl, fixtureUrl, storyUrl, layoutUrl, stat
       }
       async function run() {
         try {
-          const [html, css, appJs, fixtureText, storyText, layoutText, stateText] = await Promise.all([
-            fetch(assetUrl("index.html")).then((response) => response.text()),
-            fetch(assetUrl("canvas.css")).then((response) => response.text()),
-            fetch(assetUrl("app.js")).then((response) => response.text()),
-            fetch(fixtureUrl).then((response) => response.text()),
-            storyUrl ? fetch(storyUrl).then((response) => response.text()) : Promise.resolve(""),
-            layoutUrl ? fetch(layoutUrl).then((response) => response.text()) : Promise.resolve(""),
-            stateUrl ? fetch(stateUrl).then((response) => response.text()) : Promise.resolve("")
-          ]);
           const frame = document.createElement("iframe");
           document.body.append(frame);
           const win = frame.contentWindow;
@@ -1142,6 +1195,10 @@ function buildRunnerHtml({ projectRootUrl, fixtureUrl, storyUrl, layoutUrl, stat
 </html>`;
 }
 
+function toInlineScriptLiteral(value) {
+  return JSON.stringify(String(value || "")).replace(/</g, "\\u003c");
+}
+
 function decodeHtml(value) {
   return String(value)
     .replace(/&quot;/g, "\"")
@@ -1156,6 +1213,11 @@ function validateJsonSchemaSubset(value, schema, location = "$", root = schema) 
   if (schema.$ref) {
     const target = resolveLocalSchemaRef(schema.$ref, root);
     return target ? validateJsonSchemaSubset(value, target, location, root) : [`${location}: unresolved schema ref ${schema.$ref}`];
+  }
+  if (Array.isArray(schema.anyOf)) {
+    const candidates = schema.anyOf.map((candidate) => validateJsonSchemaSubset(value, candidate, location, root));
+    if (candidates.some((errors) => errors.length === 0)) return [];
+    return [`${location}: did not match any allowed schema (${candidates.map((errors) => errors.join(", ")).join(" | ")})`];
   }
   const errors = [];
   if (Object.prototype.hasOwnProperty.call(schema, "const") && value !== schema.const) {
@@ -1244,15 +1306,31 @@ function validateStorySourceExport(outputDir, scratchDir) {
   validateStoryLayoutSourceApplied(layoutDocument);
   validateDocumentSchema(stateSchemaPath, "docs/state-schema.schema.json", "State schema");
   if (routeTemplatePath) writeRouteCaseTemplate(routeTemplatePath, runtimePath);
-  validateYarn(yarnPath, scratchDir);
-  const routeCases = storyRouteCases.map((routeCase) => validateStoryRouteCase(routeCase, runtimePath, yarnPath, inkPath, tweePath));
-  validateInk(inkPath, scratchDir);
-  validateTwee(tweePath, scratchDir);
-  console.log(`[ok] Story source acceptance exported and ran ${routeCases.length} Runtime JSON + Yarn + ink + Twee route case(s)`);
+  if (!runtimeOnly) validateYarn(yarnPath, scratchDir);
+  const routeCases = storyRouteCases.map((routeCase) => runtimeOnly
+    ? validateStoryRuntimeRouteCase(routeCase, runtimePath)
+    : validateStoryRouteCase(routeCase, runtimePath, yarnPath, inkPath, tweePath));
+  if (!runtimeOnly) {
+    validateInk(inkPath, scratchDir);
+    validateTwee(tweePath, scratchDir);
+  }
+  console.log(`[ok] Story source acceptance exported and ran ${routeCases.length} Runtime JSON${runtimeOnly ? "" : " + Yarn + ink + Twee"} route case(s)`);
   return {
     warnings,
     route: routeCases[0] ? { runtimeJson: routeCases[0].runtimeJson, yarn: routeCases[0].yarn, ink: routeCases[0].ink, twee: routeCases[0].twee } : null,
     routeCases
+  };
+}
+
+function validateStoryRuntimeRouteCase(routeCase, runtimePath) {
+  const runtimeResult = validateRuntimeJsonGeneric(runtimePath, routeCase);
+  return {
+    name: routeCase.name,
+    options: summarizeRouteOptions(routeCase),
+    runtimeJson: summarizeRouteResult(runtimeResult),
+    yarn: null,
+    ink: null,
+    twee: null
   };
 }
 
@@ -2001,7 +2079,10 @@ function runYarnNode(lines, state, output, choiceLabels, visitedCounts) {
     if (ifMatch) {
       const block = collectYarnIfBlock(lines, index);
       const selected = evaluateYarnCondition(ifMatch[1], state, visitedCounts) ? block.thenLines : block.elseLines;
-      return runYarnNode(selected, state, output, choiceLabels, visitedCounts);
+      const branchRoute = runYarnNode(selected, state, output, choiceLabels, visitedCounts);
+      if (branchRoute.next) return branchRoute;
+      index = block.endIndex;
+      continue;
     }
     if (line.startsWith("<<")) {
       applyYarnCommand(line, state);

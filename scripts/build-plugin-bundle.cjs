@@ -77,67 +77,19 @@ function indentAppSource(source) {
     .join("\n");
 }
 
-function replaceFunctionBlock(source, signaturePattern, replacement) {
-  const match = source.match(signaturePattern);
-  if (!match || match.index == null) return { source, changed: false };
-  const start = match.index;
-  const openIndex = source.indexOf("{", start);
-  if (openIndex === -1) return { source, changed: false };
-  let depth = 0;
-  let inString = "";
-  let escaped = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let index = openIndex; index < source.length; index += 1) {
-    const char = source[index];
-    const next = source[index + 1] || "";
-    if (inLineComment) {
-      if (char === "\n") inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      if (char === "*" && next === "/") {
-        inBlockComment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === inString) {
-        inString = "";
-      }
-      continue;
-    }
-    if (char === "/" && next === "/") {
-      inLineComment = true;
-      index += 1;
-      continue;
-    }
-    if (char === "/" && next === "*") {
-      inBlockComment = true;
-      index += 1;
-      continue;
-    }
-    if (char === "\"" || char === "'" || char === "`") {
-      inString = char;
-      continue;
-    }
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return {
-          source: `${source.slice(0, start)}${replacement}${source.slice(index + 1)}`,
-          changed: true
-        };
-      }
-    }
+function replaceMarkedBlock(source, name, replacement) {
+  const startMarker = `// BEGIN WEB_RUNTIME:${name}`;
+  const endMarker = `// END WEB_RUNTIME:${name}`;
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  if (start === -1 || end === -1) {
+    throw new Error(`Plugin-bundle marker ${name} is missing or incomplete.`);
   }
-  return { source, changed: false };
+  if (source.indexOf(startMarker, start + startMarker.length) !== -1
+      || source.indexOf(endMarker, end + endMarker.length) !== -1) {
+    throw new Error(`Plugin-bundle marker ${name} must appear exactly once.`);
+  }
+  return `${source.slice(0, start)}${replacement.trim()}${source.slice(end + endMarker.length)}`;
 }
 
 const main = fs.readFileSync(mainPath, "utf8").replace(/\r\n/g, "\n");
@@ -148,66 +100,42 @@ const rawApp = fs.readFileSync(appPath, "utf8");
 // into the Obsidian plugin entry, so main.js doesn't ship any localStorage references.
 // The standalone app.js keeps the real implementation for the browser build.
 let app = rawApp.replace(/^const WEB_STORAGE_KEY = .*\r?\n/m, "");
-const pluginOnlyRewrites = [
-  [
-    /function loadWebState\(\) \{/,
-    `function loadWebState() {
+const pluginOnlyRewrites = {
+  PROJECT_STORAGE: `function loadWebState() {
   return null;
-}`
-  ],
-  [
-    /function saveWebState\(savedState\) \{/,
-    `function saveWebState(_savedState) {
+}
+
+function saveWebState(_savedState) {
   return;
-}`
-  ],
-  [
-    /function getWebProjectStorage\(\) \{/,
-    `function getWebProjectStorage() {
+}
+
+function getWebProjectStorage() {
   // Obsidian-plugin bundle: persistence runs through NarrativeCanvasHost, no browser storage.
   return null;
-}`
-  ],
-  [
-    /async function clearBrowserStorageFromUi\(\) \{/,
-    `async function clearBrowserStorageFromUi() {
+}`,
+  CLEAR_STORAGE: `async function clearBrowserStorageFromUi() {
   return;
-}`
-  ],
-  [
-    /async function clearBrowserStorageConfirmed\(\) \{/,
-    `async function clearBrowserStorageConfirmed() {
+}
+
+async function clearBrowserStorageConfirmed() {
   return;
-}`
-  ],
+}`,
   // AI is web-only inside Obsidian (requests go through NarrativeCanvasHost.aiChat).
   // Strip the localStorage config and direct browser fetch. Plugin requests are routed
   // through NarrativeCanvasHost.aiChat and Obsidian's requestUrl implementation.
-  [
-    /function getWebAiConfig\(\) \{/,
-    `function getWebAiConfig() {
+  AI_CONFIG: `function getWebAiConfig() {
   return { endpoint: "", apiKey: "", model: "" };
-}`
-  ],
-  [
-    /function saveWebAiConfig\(\) \{/,
-    `function saveWebAiConfig() {
+}
+
+function saveWebAiConfig() {
   return;
-}`
-  ],
-  [
-    /async function requestWebAiCompletion\(payload, options\) \{/,
-    `async function requestWebAiCompletion(_payload, _options) {
+}`,
+  AI_REQUEST: `async function requestWebAiCompletion(_payload, _options) {
   throw new Error("AI networking is only available through the Narrative Canvas host in Obsidian.");
 }`
-  ]
-];
-for (const [pattern, replacement] of pluginOnlyRewrites) {
-  const result = replaceFunctionBlock(app, pattern, replacement);
-  if (!result.changed) {
-    throw new Error(`Plugin-bundle rewrite failed for ${pattern}.`);
-  }
-  app = result.source;
+};
+for (const [name, replacement] of Object.entries(pluginOnlyRewrites)) {
+  app = replaceMarkedBlock(app, name, replacement);
 }
 
 let next = main.replace(

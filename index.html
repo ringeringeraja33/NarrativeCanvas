@@ -10,7 +10,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32x32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png">
     <link rel="manifest" href="./site.webmanifest">
-    <link rel="stylesheet" href="./canvas.css?v=1.3.3-f394f8c7">
+    <link rel="stylesheet" href="./canvas.css?v=1.4.0-beta.1-9725bafd">
   </head>
   <body>
     <div class="app-shell" spellcheck="false">
@@ -120,6 +120,7 @@
             <span id="zoomReadout" class="zoom-readout" data-files="adventure">100%</span>
             <button class="toolbar-button" data-action="zoom-in" data-files="adventure" title="Zoom in">+</button>
             <button class="toolbar-button" data-action="center-view" data-files="adventure" title="Center canvas">Center</button>
+            <button id="snapGridButton" class="toolbar-button" data-action="toggle-snap-grid" data-files="adventure" type="button" title="Snap nodes to grid" aria-label="Snap nodes to grid" aria-pressed="false">Snap</button>
             <button class="toolbar-button primary" data-action="play" data-files="adventure" title="Play from entry">Play</button>
           </div>
           <div id="frameCanvasScope" class="frame-canvas-scope" hidden>
@@ -434,13 +435,26 @@
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="bold" title="Bold" aria-label="Bold"><b>B</b></button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="italic" title="Italic" aria-label="Italic"><i>I</i></button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="strike" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="code" title="Inline code" aria-label="Inline code"><code>&lt;/&gt;</code></button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="highlight" title="Highlight" aria-label="Highlight"><mark>H</mark></button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="link" title="Link" aria-label="Link"><u>A</u></button>
           <span class="expand-editor-toolbar-sep" aria-hidden="true"></span>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="h1" title="Heading 1" aria-label="Heading 1">H1</button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="h2" title="Heading 2" aria-label="Heading 2">H2</button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="h3" title="Heading 3" aria-label="Heading 3">H3</button>
+          <span class="expand-editor-toolbar-sep" aria-hidden="true"></span>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="quote" title="Quote" aria-label="Quote">&gt;</button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="list" title="Bullet list" aria-label="Bullet list">•</button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="ordered" title="Numbered list" aria-label="Numbered list">1.</button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="task" title="Task list" aria-label="Task list">☑</button>
+          <span class="expand-editor-toolbar-sep" aria-hidden="true"></span>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="codeblock" title="Code block" aria-label="Code block">{ }</button>
+          <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="divider" title="Divider" aria-label="Divider">—</button>
         </div>
-        <textarea id="expandEditorInput" class="expand-editor-input" spellcheck="false" aria-label="Expanded text editor"></textarea>
+        <div class="expand-editor-live" data-live-field>
+          <div class="expand-editor-rendered play-body-text" data-live-rendered role="textbox" tabindex="0" aria-label="Formatted text, click to edit"></div>
+          <textarea id="expandEditorInput" class="expand-editor-input" data-live-source spellcheck="false" aria-label="Expanded text editor" hidden></textarea>
+        </div>
       </div>
     </dialog>
 
@@ -586,6 +600,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=1.3.3-f394f8c7"></script>
+    <script src="./app.js?v=1.4.0-beta.1-9725bafd"></script>
   </body>
 </html>

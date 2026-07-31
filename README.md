@@ -2,7 +2,7 @@
 
 [![Verify plugin artifacts](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg?branch=main)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml?query=branch%3Amain)
 
-Current release: [1.3.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.3.0) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+Current prerelease: [1.4.0-beta.1](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0-beta.1) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 Obsidian Community Plugins: [Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
@@ -16,7 +16,7 @@ It is intended for structure planning, branch validation, pitch preparation, and
 
 The interface supports both English and Chinese. The web app has an `EN / 中` floating language switch, and the Obsidian plugin has a `Language` setting that can follow Obsidian’s language.
 
-Multi-line node text fields have an expand button that opens a large centered editor with a formatting toolbar (bold, italic, strikethrough, H2/H3, quote, bullet list) that wraps or prefixes the selection with Markdown. Spell-check underlines are off by default across all text fields; the Obsidian plugin has a `Spell check` setting to turn them on.
+Multi-line node text fields have an expand button that opens a large centered editor. Its formatting toolbar supports bold, italic, strikethrough, inline code, highlight, links, H1/H2/H3, quotes, bullet, numbered and task lists, code blocks, and dividers. Spell-check underlines are off by default; the Obsidian plugin has a `Spell check` setting to turn them on.
 
 ![Narrative Canvas main canvas](assets/screenshots/main-canvas.png)
 
@@ -31,6 +31,8 @@ Multi-line node text fields have an expand button that opens a large centered ed
 - `Open`: in the web app, imports a project file from disk; in Obsidian, opens a project file from the vault.
 - `Reload`: discards unsaved changes and reloads the last saved source. In the web app, this reads browser storage; in Obsidian, it rereads the active `.ncanvas` file.
 - `Clear storage`: web app only. Removes the browser-stored project and opens an empty project.
+
+Newer integration paths have different maturity levels. Canvas authoring, local `.ncanvas` save/load, and Play preview are the established core. Portable text round-trips, AI-assisted edits, managed Library Markdown synchronization, vision boards, and external shared-file protection are still evolving. Keep backups and inspect generated exports or conflict copies before replacing source material. Very large PNG exports can consume substantial memory.
 
 ### Web App
 
@@ -58,6 +60,10 @@ Plugin settings:
 - `Sample project` opens the bundled sample project.
 - `New project root folder` and `New project file name` control the project location and naming. Each new project gets its own folder containing the `.ncanvas` file and a `Library` folder. Existing projects that already use `Codex/` keep that folder for compatibility.
 - `Auto-save interval` (seconds) sets how often Narrative Canvas writes the active project file. Empty means Obsidian’s own autosave behavior applies.
+- `Content font` selects the font used by Play and narrative text; `Spell check` controls browser spelling underlines.
+- `Project backups` are disabled by default. Turn on `Enable automatic backups`, then choose a 12- or 24-hour interval; retention defaults to 20 snapshots. A project such as `Project/Story.ncanvas` stores backups as `Project/Backups/Story-<timestamp>.ncanvas.backup`. Manual backup and restore remain available while automatic backups are off.
+- `External project change protection` watches the open `.ncanvas` file. Clean projects reload external changes automatically. If local edits are pending, auto-save pauses and a manual save writes the local version to the project's `Conflicts` folder.
+- The `AI` section accepts a generic OpenAI-compatible chat-completions endpoint, API key, and model. No provider preset is required.
 - `Current project` shows the path that the ribbon button will open next, with a clear action.
 
 The ribbon button adapts to the vault: with several `.ncanvas` projects it opens a project picker, with exactly one it opens that project directly, and with none it creates a new default project.
@@ -90,6 +96,7 @@ Default node types are editable templates. `Entry` is a system type and cannot b
 - Click an output port then an input port to create a link.
 - Double-click empty canvas space to cancel a pending connection.
 - Right-click an existing link to reconnect or delete it.
+- `Snap` aligns node creation, movement, and resizing to the 16 px canvas grid. It is optional and stored with the project.
 - `Canvas` and `Story` can both collapse frames, with shared collapse state. When collapsed in Canvas, links to child nodes are routed through frame ports temporarily; underlying links are not rewritten.
 - `Frame` and `Event Frame` are rendered below normal nodes by default. New frames are inserted above existing frame layers; frame depth can be adjusted via the node context menu.
 - Choice and Dialog cards keep long option or turn lists inside a vertically scrollable preview, so node size and canvas layout stay unchanged. In the Node inspector, `Add turn` appears after the turn list.
@@ -183,6 +190,8 @@ Runtime state keys are flat names by default. For values shared across requireme
 
 Condition fields use a safe JavaScript expression subset: comparisons, `&&`, `||`, `!`, parentheses, quoted strings, numbers, booleans, dotted state paths, and `.includes(...)`. Arbitrary JavaScript is not executed. Expressions outside this subset stay in Runtime JSON with an export warning; Yarn, Ink, and Twee receive a parseable `false` guard for that branch.
 
+Node effects also accept `if <condition> then <assignment> else <assignment>`. The assignment value may reference another state variable. Timed Choice nodes can count down to a selected fallback option; Play, Runtime JSON, Yarn, Ink, and Twee preserve the supported behavior.
+
 Projects saved in older versions continue to load through normalization: legacy `choices[]`, `choiceIndex` links, missing `actions`, old custom node types, Events Sheet columns, Frame / Jump data, legacy `ports`, and dotted state keys are preserved or migrated. Legacy `choices[]` receive stable IDs (`opt_1`, `opt_2`, ...), so older branches keep order and sidecar output remains aligned after save.
 
 ### Portable Exports (Beta)
@@ -209,9 +218,9 @@ The **AI** button at the bottom-left of the canvas opens an experimental copilot
 
 In the web app, open **Connection settings** and point it at any OpenAI-compatible endpoint (endpoint URL, API key, model); that config is stored only in your browser. In the Obsidian plugin, configure the same fields in plugin settings; the API key is stored in the plugin's local `data.json`, and requests use Obsidian's `requestUrl`. The feature is experimental and marked **Beta**.
 
-An optional **Narrative craft guidance** toggle (off by default) primes the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft; it adds a bounded amount of tokens per request only when enabled.
+An optional **Narrative craft guidance** toggle (off by default) primes the AI with condensed story, character, cinematic staging, editing, and sound principles; it adds a bounded amount of tokens per request only when enabled.
 
-Any OpenAI-compatible provider works. For example, Google **Gemini** exposes an OpenAI-compatible endpoint — use `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` with a Gemini API key (from Google AI Studio) and a model such as `gemini-2.0-flash`.
+Any service that exposes a compatible chat-completions endpoint can use the same endpoint, API key, and model fields. Provider-specific controls are omitted.
 
 In the Obsidian plugin, the floating AI button appears only once the endpoint, API key, and model are all set, so it stays out of the way if you don't use the copilot. In the standalone web app the button is always available because its configuration form lives behind it.
 

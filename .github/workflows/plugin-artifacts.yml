@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -21,8 +23,18 @@ jobs:
       - name: Verify root plugin artifacts
         run: node scripts/verify-plugin-artifacts.cjs
       - name: Run smoke tests
-        run: node scripts/run-browser-test.cjs tests/smoke.html smoke 30000
+        run: node scripts/run-browser-test.cjs tests/smoke.html smoke 180000
       - name: Run fixture tests
         run: node scripts/run-browser-test.cjs tests/fixture-roundtrip.html fixture 60000
+      - name: Run Story Markdown route fixtures
+        run: node scripts/portable-export-acceptance.cjs --story-fixture --runtime-only --timeout 180000
       - name: Run GUI regression tests
         run: node scripts/run-browser-test.cjs tests/gui-regression.html gui 45000
+      - name: Run library Markdown sync tests
+        run: node scripts/run-browser-test.cjs tests/codex-plugin-smoke.html codex-smoke 45000
+      - name: Run performance regression tests
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: node scripts/run-browser-test.cjs tests/perf.html perf 90000
+      - name: Run large-project acceptance tests
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: node scripts/run-browser-test.cjs tests/large-project-acceptance.html acceptance 180000

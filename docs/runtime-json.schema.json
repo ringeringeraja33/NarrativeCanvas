@@ -139,6 +139,7 @@
         "requirements",
         "effects",
         "choices",
+        "timer",
         "next",
         "routing",
         "cast",
@@ -161,6 +162,12 @@
           "type": "array",
           "items": { "$ref": "#/$defs/choice" }
         },
+        "timer": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/choiceTimer" }
+          ]
+        },
         "next": {
           "type": "array",
           "items": { "$ref": "#/$defs/transition" }
@@ -177,8 +184,14 @@
       }
     },
     "effect": {
+      "anyOf": [
+        { "$ref": "#/$defs/stateEffect" },
+        { "$ref": "#/$defs/conditionalEffect" }
+      ]
+    },
+    "stateEffect": {
       "type": "object",
-      "required": ["trigger", "op", "sourceKey", "key", "value", "valueSource"],
+      "required": ["trigger", "op", "sourceKey", "key", "value", "valueSource", "valueMode"],
       "additionalProperties": false,
       "properties": {
         "trigger": { "type": "string" },
@@ -186,7 +199,32 @@
         "sourceKey": { "type": "string" },
         "key": { "type": "string" },
         "value": true,
-        "valueSource": { "type": "string" }
+        "valueSource": { "type": "string" },
+        "valueMode": { "enum": ["literal", "variable"] }
+      }
+    },
+    "conditionalEffect": {
+      "type": "object",
+      "required": ["trigger", "op", "condition", "thenEffect", "elseEffect"],
+      "additionalProperties": false,
+      "properties": {
+        "trigger": { "type": "string" },
+        "op": { "const": "ifElse" },
+        "condition": { "type": "string" },
+        "thenEffect": { "$ref": "#/$defs/effect" },
+        "elseEffect": { "$ref": "#/$defs/effect" }
+      }
+    },
+    "choiceTimer": {
+      "type": "object",
+      "required": ["seconds", "fallbackLinkId", "fallbackChoiceOptionId", "targetId", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "seconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "fallbackLinkId": { "type": "string" },
+        "fallbackChoiceOptionId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "target": { "type": "string" }
       }
     },
     "choice": {

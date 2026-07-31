@@ -5,6 +5,12 @@ const { spawnSync } = require("child_process");
 const projectRoot = path.resolve(__dirname, "..");
 const releaseFiles = ["main.js", "manifest.json", "styles.css"];
 const sourceFiles = ["app.js", "canvas.css", "plugin.css", "index.html", "versions.json", "RELEASE_NOTES.md"];
+const supportFiles = [
+  "docs/portable-acceptance-summary.schema.json",
+  ".github/workflows/plugin-artifacts.yml",
+  ".github/workflows/publish-plugin-release.yml",
+  ".github/workflows/verify-release-assets.yml"
+];
 const failures = [];
 
 function fail(message) {
@@ -41,7 +47,7 @@ function runBuildCheck(scriptName, artifactName) {
   fail((result.stderr || result.stdout || `${artifactName} build check failed`).trim());
 }
 
-for (const relativePath of [...releaseFiles, ...sourceFiles]) {
+for (const relativePath of [...releaseFiles, ...sourceFiles, ...supportFiles]) {
   const absolutePath = path.join(projectRoot, relativePath);
   if (!fs.existsSync(absolutePath)) {
     fail(`${relativePath} is missing`);
@@ -92,6 +98,7 @@ if (manifest) {
 }
 
 const main = readUtf8("main.js");
+const canvasCss = readUtf8("canvas.css");
 const appSource = readUtf8("app.js");
 if (!main.includes("// BEGIN bundled app.js") || !main.includes("// END bundled app.js")) {
   fail("main.js is missing bundled app markers");
@@ -187,11 +194,36 @@ const aiArtifactRequirements = [
   ["data-floating-window-drag=\\\"ai\\\"", "AI window includes a drag handle"],
   ["data-floating-window=\\\"ai\\\"", "AI window includes resize handles"],
   ["data-action=\"ai-copy-message\"", "AI messages expose copy controls"],
-  ["Shift+Enter for a new line", "AI composer documents its send and newline keys"]
+  ["Shift+Enter for a new line", "AI composer documents its send and newline keys"],
+  ['data-ai-config="endpoint"', "AI settings include a generic endpoint field"],
+  ['data-ai-config="apiKey"', "AI settings include a generic API key field"],
+  ['data-ai-config="model"', "AI settings include a generic model field"],
+  ["Cinematic storytelling: express dramatic beats through staging", "AI foundational knowledge includes cinematic staging"],
+  ["Editing & sound: cut on decisions", "AI foundational knowledge includes editing and sound"]
 ];
 for (const [token, description] of aiArtifactRequirements) {
   if (!main.includes(token)) fail(`main.js ${description} check failed`);
   else pass(description);
+}
+if (main.includes('data-ai-config="provider"') || main.includes("AI_PROVIDER_GEMINI") || main.includes("GEMINI_DEFAULT_MODEL")) {
+  fail("AI settings still expose provider-specific controls or presets");
+} else {
+  pass("AI settings remain provider-neutral");
+}
+if (!canvasCss.includes(".toolbar-button {\n  font-weight: 600;")
+  || /\.toolbar-button\.active\s*\{[^}]*font-weight:/s.test(canvasCss)
+  || !/\.toolbar-button\.active\s*\{[^}]*background:\s*var\(--interactive-accent\);[^}]*color:\s*var\(--text-on-accent\);/s.test(canvasCss)) {
+  fail("toolbar buttons do not use a consistent font weight");
+} else {
+  pass("toolbar buttons use consistent typography and a solid active accent");
+}
+if (!canvasCss.includes("--text-faint: #686b72;")
+  || !canvasCss.includes('.toolbar-button:not(.primary):not(.danger-button):not(.active)')
+  || !/:root\[data-theme="light"\] \.toolbar-button\.active,[\s\S]{0,180}background:\s*var\(--interactive-accent\);/.test(canvasCss)
+  || !/:root\[data-theme="light"\] \.nc-file-item\.active,[\s\S]{0,300}background:\s*color-mix\(in srgb, var\(--interactive-accent\) 13%/.test(canvasCss)) {
+  fail("light theme active controls or secondary text palette are inconsistent");
+} else {
+  pass("light theme uses readable secondary text, solid active actions, and tinted selected navigation");
 }
 if (!main.includes("M5 7h14M5 12h14M5 17h14")) {
   fail("main.js outline toggle does not use the centered SVG icon");
@@ -315,10 +347,97 @@ if (!main.includes('`notes: ${JSON.stringify(entry.notes)}`')
   || !main.includes('images: data.images')
   || !main.includes('const hasFrontmatterNotes = Object.prototype.hasOwnProperty.call(data, "notes")')
   || !main.includes('markdownBody: hasFrontmatterNotes ? body : ""')
-  || !main.includes('markdownBody: existing?.markdownBody || ""')) {
+  || !main.includes('markdownBody: diskEntry?.markdownBody || baseline?.markdownBody || ""')) {
   fail("main.js does not migrate Codex notes into frontmatter while preserving Markdown bodies");
 } else {
   pass("Codex structured fields and vision-board images live in frontmatter while free Markdown bodies are preserved");
+}
+if (!main.includes("async deleteCodexEntryFile(entry)")
+  || !main.includes('joinVaultPath(folderPath, "Conflicts")')
+  || !main.includes("-unparsed-")
+  || !main.includes("this.codexFileCache")
+  || main.includes("existingEntries.filter((entry) => !targetIds.has(entry.id))")) {
+  fail("main.js is missing explicit library deletion, conflict backups, or incremental Markdown sync");
+} else {
+  pass("Codex Markdown deletion is explicit and sync uses cached fingerprints with conflict backups");
+}
+if (!main.includes("const CODEX_EXTRA_FIELD_TYPES")
+  || !main.includes("serializeCodexFrontmatterValue(field.value)")
+  || !main.includes('data-character-extra-part="type"')) {
+  fail("main.js is missing typed custom frontmatter fields");
+} else {
+  pass("Codex custom fields preserve editable scalar, list, and object types");
+}
+if (!main.includes("cached?.stamp === stamp && cached.entry")
+  || !main.includes("this.projectFileValidationCache")
+  || !main.includes("cached?.stamp === stamp) return { file, valid: cached.valid, title: cached.title }")) {
+  fail("main.js is missing incremental Library or project-index reads");
+} else {
+  pass("Library Markdown and ribbon project validation reuse unchanged cached files");
+}
+if (!main.includes("readNarrativeCanvasProjectDescriptor")
+  || !main.includes("narrative-canvas-project-picker-new")
+  || !main.includes("project.title")
+  || !main.includes('executeCommand?.("new-project")')) {
+  fail("main.js is missing title-based project selection or its New project action");
+} else {
+  pass("the multi-project picker uses project titles and exposes New project");
+}
+if (!main.includes("DEFAULT_BACKUP_INTERVAL_HOURS = 24")
+  || !main.includes("PROJECT_BACKUP_FOLDER_NAME = \"Backups\"")
+  || !main.includes('"Enable automatic backups": "启用自动备份"')
+  || !main.includes("backupEnabled: Boolean(source.backupEnabled)")
+  || !main.includes("if (!this.settings.backupEnabled) return \"\";")
+  || !main.includes(".setDisabled(!this.plugin.settings.backupEnabled)")
+  || !main.includes("await this.maybeCreateProjectBackup(path)")
+  || !main.includes("async restoreProjectBackup(")
+  || !main.includes("await this.saveCanvasWithoutAutomaticBackup()")
+  || !main.includes("backups.slice(retention)")
+  || !main.includes("this.app.vault.trash(file, false)")) {
+  fail("main.js is missing scheduled, retained, or restorable project backups");
+} else {
+  pass("automatic backups require opt-in; manual backup, retention, and safety restore remain available");
+}
+if (!main.includes("externalProjectChangeProtection: source.externalProjectChangeProtection !== false")
+  || !main.includes("scheduleProjectExternalChangeCheck(file)")
+  || !main.includes("async preserveConflictingProjectWrite(path, savedStateJson)")
+  || !main.includes("NARRATIVE_CANVAS_PROJECT_CONFLICT")
+  || !main.includes("handleExternalProjectChange")) {
+  fail("main.js is missing external project change detection or conflict-copy protection");
+} else {
+  pass("shared project files reload safely and preserve conflicting local work");
+}
+if (!main.includes("DEFAULT_PLAY_HISTORY_LIMIT = 30")
+  || !main.includes('data-project-field="playHistoryLimit"')
+  || !main.includes("function trimPreviewHistory()")
+  || !main.includes("const maximum = limit;")
+  || !main.includes("function exportPlaySession()")
+  || !main.includes('type: "text/markdown;charset=utf-8"')) {
+  fail("main.js is missing configurable bounded Play history or UTF-8 playthrough export");
+} else {
+  pass("Play history defaults to 30 cards, remains bounded, and exports UTF-8 Markdown");
+}
+if (!main.includes("snapGridButton")
+  || !main.includes("toggle-snap-grid")
+  || !main.includes("function snapCanvasValue(value, options = {})")) {
+  fail("main.js is missing the optional snap-to-grid controls or geometry helper");
+} else {
+  pass("snap-to-grid remains optional and is applied through the shared geometry helper");
+}
+if (!main.includes("toggle-choice-timer")
+  || !main.includes("function renderChoiceTimerEditor(node)")
+  || !main.includes("function ensurePlayChoiceTimer(node, timer, fallbackLink)")) {
+  fail("main.js is missing timed Choice authoring or runtime fallback");
+} else {
+  pass("Choice nodes expose a timed fallback and Play runs its countdown");
+}
+if (!main.includes("function parseConditionalEffectBody(body, trigger = \"onVisit\")")
+  || !main.includes('op: "ifElse"')
+  || !main.includes("effect.thenEffect")
+  || !main.includes("effect.elseEffect")) {
+  fail("main.js is missing conditional if/else state effects");
+} else {
+  pass("state effects support validated if/else branches and variable references");
 }
 if (!main.includes('this.app.vault.getConfig?.("attachmentFolderPath")')
   || !main.includes('const assetFolder = attachmentSubpath')
@@ -327,6 +446,37 @@ if (!main.includes('this.app.vault.getConfig?.("attachmentFolderPath")')
   fail("main.js is missing Library-scoped attachment imports or vision-board persistence");
 } else {
   pass("local images follow the Vault attachment setting inside Library and vision-board positions persist");
+}
+
+const buildScript = readUtf8("scripts/build-plugin-bundle.cjs");
+const runtimeMarkers = ["AI_CONFIG", "AI_REQUEST", "CLEAR_STORAGE", "PROJECT_STORAGE"];
+if (runtimeMarkers.some((name) => !appSource.includes(`// BEGIN WEB_RUNTIME:${name}`) || !appSource.includes(`// END WEB_RUNTIME:${name}`))
+  || !buildScript.includes("function replaceMarkedBlock(source, name, replacement)")
+  || !buildScript.includes("must appear exactly once")) {
+  fail("plugin bundle rewrites are missing explicit, unique source markers");
+} else {
+  pass("plugin bundle rewrites use explicit, uniquely validated source markers");
+}
+
+const browserTestRunner = readUtf8("scripts/run-browser-test.cjs");
+if (browserTestRunner.includes("--dump-dom")
+  || !browserTestRunner.includes("--remote-debugging-port=")
+  || !browserTestRunner.includes('cdp.call("Runtime.evaluate"')
+  || !browserTestRunner.includes("data-${statusName}-status")) {
+  fail("browser tests do not read their live status through the Chrome debugging protocol");
+} else {
+  pass("browser tests stop on live page status without waiting for Chrome dump-dom");
+}
+
+const workflowSources = supportFiles
+  .filter((file) => file.startsWith(".github/workflows/"))
+  .map(readUtf8);
+const codexSmokePage = readUtf8("tests/codex-plugin-smoke.html");
+if (!codexSmokePage.includes('data-codex-smoke-status="running"')
+  || workflowSources.some((source) => !source.includes("tests/codex-plugin-smoke.html codex-smoke"))) {
+  fail("a workflow status name does not match the codex-plugin-smoke page");
+} else {
+  pass("workflow browser tests use the status names emitted by their test pages");
 }
 
 // Since the shadow-DOM mount, the app stylesheet ships inside main.js; the checks

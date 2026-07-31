@@ -7,7 +7,6 @@ const LEGACY_JSON_EXTENSION = "json";
 const DEFAULT_PROJECT_EXTENSION = "ncanvas";
 const DEFAULT_LIBRARY_FOLDER_NAME = "Library";
 const LEGACY_CODEX_FOLDER_NAME = "Codex";
-const DEFAULT_CODEX_ASSET_FOLDER_NAME = "Assets";
 const SAVED_STATE_VERSION = 1;
 const DEFAULT_FILENAME_TEMPLATE = "{{project title}}-{{YYYY-MM-DD HHmmss}}.ncanvas";
 const DEFAULT_AUTO_SAVE_INTERVAL_SECONDS = 0;
@@ -16,6 +15,12 @@ const DEFAULT_CONTENT_FONT_SETTING = "obsidian";
 const FALLBACK_AUTO_SAVE_INTERVAL_SECONDS = 2;
 const MIN_AUTO_SAVE_INTERVAL_SECONDS = 1;
 const MAX_AUTO_SAVE_INTERVAL_SECONDS = 3600;
+const DEFAULT_BACKUP_INTERVAL_HOURS = 24;
+const DEFAULT_BACKUP_RETENTION = 20;
+const BACKUP_INTERVAL_OPTIONS = new Set([12, 24]);
+const MIN_BACKUP_RETENTION = 1;
+const MAX_BACKUP_RETENTION = 100;
+const PROJECT_BACKUP_FOLDER_NAME = "Backups";
 const LANGUAGE_SETTING_VALUES = new Set(["auto", "en", "zh"]);
 const CONTENT_FONT_SETTING_VALUES = new Set(["obsidian", "system", "cascadia", "serif"]);
 const CONTENT_FONT_CSS_VALUES = {
@@ -31,26 +36,38 @@ const FILENAME_TEMPLATE_TOKENS = [
   "{{YYYYMMDD-HHmmss}}",
   "{{HHmmss}}"
 ];
-const DEFAULT_SETTINGS = {
-  saveFolder: "",
-  filenameTemplate: DEFAULT_FILENAME_TEMPLATE,
-  autoSaveIntervalSeconds: DEFAULT_AUTO_SAVE_INTERVAL_SECONDS,
-  language: DEFAULT_LANGUAGE_SETTING,
-  contentFont: DEFAULT_CONTENT_FONT_SETTING,
-  spellCheck: false,
-  aiNarrativeKnowledge: false,
-  aiEndpoint: "",
-  aiApiKey: "",
-  aiModel: "",
-  currentProjectPath: "",
-  lastProjectPath: ""
-};
 const PLUGIN_TEXT = {
   zh: {
     "Auto-save interval": "自动保存间隔",
+    "Project backups": "项目备份",
+    "Enable automatic backups": "启用自动备份",
+    "Automatically create versioned snapshots before eligible project saves. Manual backup and restore remain available when disabled.": "在符合间隔条件的项目保存前自动创建版本快照。关闭后仍可手动备份和恢复。",
+    "Automatic backup interval": "自动备份间隔",
+    "Create a versioned copy before overwriting the project at this interval.": "按此间隔在覆盖项目文件前创建版本快照。",
+    "Every 12 hours": "每 12 小时",
+    "Every 24 hours": "每 24 小时",
+    "Backup versions to keep": "保留备份版本数",
+    "Older versions beyond this limit are moved to the vault trash.": "超出数量限制的旧版本会移入库回收站。",
+    "Backup actions": "备份操作",
+    "Create backup now": "立即备份",
+    "Restore backup": "恢复备份",
+    "Create a snapshot of the current project or restore an older version. Restore creates a safety snapshot first.": "为当前项目创建快照，或恢复旧版本。恢复前会先创建安全快照。",
+    "No current project is available to back up.": "当前没有可备份的项目。",
+    "Project backup created.": "项目备份已创建。",
+    "Project backup failed.": "项目备份失败。",
+    "No project backups found.": "没有找到项目备份。",
+    "Choose a project backup to restore": "选择要恢复的项目备份",
+    "Project backup restored.": "项目备份已恢复。",
+    "Team file protection": "团队文件保护",
+    "External project change protection": "外部项目改动保护",
+    "Watch the open .ncanvas file for changes from sync tools or teammates. Clean projects reload automatically; unsaved local work is preserved as a conflict copy instead of overwriting the shared file.": "监视当前打开的 .ncanvas 文件是否被同步工具或协作者修改。没有本地改动时自动重新加载；存在未保存改动时写入冲突副本，避免覆盖共享文件。",
+    "Project changed outside Narrative Canvas and was reloaded.": "项目已在 Narrative Canvas 外部改动，现已重新加载。",
+    "Project changed outside Narrative Canvas. Reload before continuing; saving now will preserve local work as a conflict copy.": "项目已在 Narrative Canvas 外部改动。请先重新加载；此时保存会将本地工作保留为冲突副本。",
+    "Shared project changed. Local work was saved to a conflict copy: {path}": "共享项目已发生变化。本地工作已保存到冲突副本：{path}",
     "Spell check": "拼写检查",
     "Show the browser's spell-check underlines in Narrative Canvas text fields. Off by default.": "在 Narrative Canvas 的文本框中显示浏览器的拼写检查下划线。默认关闭。",
     "Narrative craft guidance": "叙事创作指导",
+    "OpenAI-compatible chat completions endpoint.": "OpenAI 兼容的聊天补全端点。",
     "Prime the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft. Off by default; it adds tokens to each request.": "为 AI 注入精简的叙事、人物与结构原则，使其建议更贴合成熟的叙事创作方法。默认关闭；开启会增加每次请求的 token 消耗。",
     "Choose the Narrative Canvas interface language. Auto follows Obsidian's interface language.": "选择 Narrative Canvas 界面语言。自动会跟随 Obsidian 界面语言。",
     "Content font": "正文字体",
@@ -63,6 +80,8 @@ const PLUGIN_TEXT = {
     "Follow Obsidian": "跟随 Obsidian",
     "Language": "语言",
     "New project file name": "新项目文件名",
+    "New project": "新建项目",
+    "Open Narrative Canvas project": "打开 Narrative Canvas 项目",
     "No project file selected. The ribbon button will create a new project with the default name.": "尚未选择项目文件。点击 ribbon 按钮时会按默认名称新建项目。",
     "Open sample": "打开示例",
     "Open Narrative Canvas": "打开 Narrative Canvas",
@@ -149,6 +168,54 @@ const CODEX_RESERVED_FRONTMATTER_KEYS = new Set([
   "narrative_canvas_codex", "id", "name", "category", "kind", "role", "voice",
   "tags", "notes", "images", "image", "image_preview", "hidden", "files", "canvas", "icon"
 ]);
+const CODEX_EXTRA_FIELD_TYPES = new Set(["string", "number", "boolean", "array", "object", "null"]);
+
+function inferCodexExtraFieldType(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "number" && Number.isFinite(value)) return "number";
+  if (typeof value === "boolean") return "boolean";
+  if (value && typeof value === "object") return "object";
+  return "string";
+}
+
+function normalizeCodexExtraFieldValue(value, type = inferCodexExtraFieldType(value)) {
+  if (type === "null") return null;
+  if (type === "number") {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  }
+  if (type === "boolean") {
+    if (typeof value === "string") return value.trim().toLowerCase() === "true";
+    return Boolean(value);
+  }
+  if (type === "array") {
+    if (Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(String(value || "[]"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+  if (type === "object") {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(String(value || "{}"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+  return String(value ?? "");
+}
+
+function serializeCodexFrontmatterValue(value) {
+  if (value === null) return "null";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return JSON.stringify(value);
+}
 
 function normalizeCodexMarkdownVaultFiles(value) {
   const source = Array.isArray(value) ? value : [];
@@ -173,7 +240,9 @@ function normalizeCodexMarkdownExtraFields(value) {
     if (!key || CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase()) || seen.has(key)) return;
     seen.add(key);
     const raw = entry?.value;
-    normalized.push({ key, value: raw == null ? "" : (typeof raw === "object" ? JSON.stringify(raw) : String(raw)) });
+    const requestedType = String(entry?.type || "").trim().toLowerCase();
+    const type = CODEX_EXTRA_FIELD_TYPES.has(requestedType) ? requestedType : inferCodexExtraFieldType(raw);
+    normalized.push({ key, type, value: normalizeCodexExtraFieldValue(raw, type) });
   });
   return normalized;
 }
@@ -216,7 +285,7 @@ function buildCodexMarkdown(entry) {
     `tags: ${JSON.stringify(tags)}`,
     `notes: ${JSON.stringify(entry.notes)}`,
     // Custom fields round-trip as plain frontmatter keys so they stay editable in Obsidian.
-    ...extraFields.map((field) => `${JSON.stringify(field.key)}: ${JSON.stringify(field.value)}`),
+    ...extraFields.map((field) => `${JSON.stringify(field.key)}: ${serializeCodexFrontmatterValue(field.value)}`),
     `files: ${JSON.stringify(normalizeCodexMarkdownVaultFiles(entry.vaultFiles))}`,
     `canvas: ${JSON.stringify(entry.canvasFile || "")}`,
     `icon: ${JSON.stringify(entry.icon || "")}`,
@@ -279,10 +348,35 @@ function stableCodexPathHash(value) {
   return (hash >>> 0).toString(36);
 }
 
+function getCodexStructuredFingerprint(entry) {
+  const normalized = normalizeCodexEntryForMarkdown(entry);
+  return stableCodexPathHash(JSON.stringify({
+    id: normalized.id,
+    name: normalized.name,
+    kind: normalized.kind,
+    role: normalized.role,
+    voice: normalized.voice,
+    tags: normalized.tags,
+    notes: normalized.notes,
+    extraFields: normalized.extraFields,
+    vaultFiles: normalized.vaultFiles,
+    canvasFile: normalized.canvasFile,
+    icon: normalized.icon,
+    hidden: normalized.hidden,
+    images: normalized.images,
+    imagePreview: normalized.imagePreview
+  }));
+}
+
 module.exports = class NarrativeCanvasPlugin extends Plugin {
   async onload() {
     this.codexReloadTimer = null;
     this.codexSyncSuppressUntil = 0;
+    this.codexFileCache = new Map();
+    this.projectFileValidationCache = new Map();
+    this.projectRevision = null;
+    this.projectWriteSuppressUntil = 0;
+    this.projectExternalChangeTimer = null;
     await this.loadPluginData();
     this.registerView(VIEW_TYPE, (leaf) => new NarrativeCanvasView(leaf, this));
     try {
@@ -321,21 +415,26 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     // for dedup; active-leaf-change keeps the singleton aligned with the visible tab.
 
     this.registerEvent(this.app.vault.on("delete", (file) => {
+      this.invalidateProjectFileIndex(file);
       this.scheduleCodexReloadForFile(file);
       this.handleVaultFileDelete(file).catch((error) => console.error(error));
     }));
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      this.invalidateProjectFileIndex(file, oldPath);
       this.scheduleCodexReloadForFile(file, oldPath);
       this.handleVaultFileRename(file, oldPath).catch((error) => console.error(error));
     }));
 
     this.registerEvent(this.app.vault.on("create", (file) => {
+      this.invalidateProjectFileIndex(file);
       this.scheduleCodexReloadForFile(file);
     }));
 
     this.registerEvent(this.app.vault.on("modify", (file) => {
+      this.invalidateProjectFileIndex(file);
       this.scheduleCodexReloadForFile(file);
+      this.scheduleProjectExternalChangeCheck(file);
     }));
 
     this.register(() => {
@@ -343,12 +442,15 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
       this.codexReloadTimer = null;
       if (this.codexCanvasRefreshTimer) window.clearTimeout(this.codexCanvasRefreshTimer);
       this.codexCanvasRefreshTimer = null;
+      if (this.projectExternalChangeTimer) window.clearTimeout(this.projectExternalChangeTimer);
+      this.projectExternalChangeTimer = null;
     });
 
     // When the user switches between Narrative Canvas tabs, the singleton canvas app may be
     // pointed at a different file. Reload to match the newly-active leaf so the visible
     // content corresponds to the tab the user just clicked on.
     this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+      this.dedupeProjectLeaves();
       if (!leaf || !this.isNarrativeCanvasLeaf(leaf)) return;
       const file = leaf.view?.file;
       if (!file) return;
@@ -357,6 +459,47 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
         .then(() => window.NarrativeCanvasApp?.loadVaultProject?.())
         .catch((error) => console.error(error));
     }));
+
+    // Central backstop for duplicate tabs: whenever the layout changes (a file opened
+    // in a new tab, a split, etc.), collapse any Narrative Canvas leaves that show the
+    // same project to a single tab and focus it. This catches races the per-view
+    // dedup in onOpen/setState can miss.
+    this.registerEvent(this.app.workspace.on("layout-change", () => this.dedupeProjectLeaves()));
+  }
+
+  dedupeProjectLeaves() {
+    const workspace = this.app?.workspace;
+    const leaves = workspace?.getLeavesOfType?.(VIEW_TYPE) || [];
+    if (leaves.length < 2) return;
+    const survivors = new Map();
+    const duplicates = [];
+    for (const leaf of leaves) {
+      const file = normalizeVaultPath(
+        leaf.view?.file
+        || leaf.getViewState?.()?.state?.file
+        || leaf.getViewState?.()?.state?.path
+      );
+      if (!file) continue;
+      if (survivors.has(file)) duplicates.push({ leaf, survivor: survivors.get(file) });
+      else survivors.set(file, leaf);
+    }
+    if (!duplicates.length) return;
+    const activeLeaf = workspace.activeLeaf;
+    for (const { leaf, survivor } of duplicates) {
+      // If the user is looking at the duplicate, keep it and drop the older sibling,
+      // then focus the kept one. Otherwise drop the duplicate silently — never steal
+      // focus away from whatever unrelated tab the user is currently on.
+      const dropActive = leaf === activeLeaf;
+      const keep = dropActive ? leaf : survivor;
+      const drop = dropActive ? survivor : leaf;
+      const file = normalizeVaultPath(keep.view?.file || keep.getViewState?.()?.state?.file);
+      if (file) survivors.set(file, keep);
+      if (dropActive || survivor === activeLeaf) {
+        workspace.setActiveLeaf?.(keep, { focus: true });
+        workspace.revealLeaf?.(keep);
+      }
+      drop?.detach?.();
+    }
   }
 
   registerCanvasCommands() {
@@ -498,10 +641,16 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
         ? [...files.filter((file) => normalizeVaultPath(file.path) === current), ...files.filter((file) => normalizeVaultPath(file.path) !== current)]
         : files;
       await new Promise((resolve) => {
-        const modal = new NarrativeCanvasProjectSuggestModal(this.app, ordered, async (file) => {
-          await this.openProjectFile(file.path);
-          resolve(file.path);
-        }, () => resolve(""));
+        const modal = new NarrativeCanvasProjectSuggestModal(this.app, ordered, async (project) => {
+          await this.openProjectFile(project.path);
+          resolve(project.path);
+        }, () => resolve(""), async () => {
+          await this.openNewProjectDialog();
+          resolve("__new__");
+        }, {
+          placeholder: pluginText(this, "Open Narrative Canvas project"),
+          newLabel: pluginText(this, "New project")
+        });
         modal.open();
       });
       return;
@@ -743,17 +892,198 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
 
   async loadProjectFile() {
     const path = await this.prepareProjectForOpen();
-    if (path && vaultFileExists(this.app, path)) return readVaultText(this.app, path);
-    if (vaultFileExists(this.app, LEGACY_PROJECT_FILE)) return readVaultText(this.app, LEGACY_PROJECT_FILE);
+    if (path && vaultFileExists(this.app, path)) {
+      const text = await readVaultText(this.app, path);
+      this.rememberProjectRevision(path, text);
+      return text;
+    }
+    if (vaultFileExists(this.app, LEGACY_PROJECT_FILE)) {
+      const text = await readVaultText(this.app, LEGACY_PROJECT_FILE);
+      this.rememberProjectRevision(LEGACY_PROJECT_FILE, text);
+      return text;
+    }
     return null;
   }
 
   async saveProjectFile(savedStateJson) {
     const path = await this.ensureWritableProjectPath(savedStateJson, { forceNew: false });
+    const conflictPath = await this.preserveConflictingProjectWrite(path, savedStateJson);
+    if (conflictPath) {
+      const message = pluginText(this, "Shared project changed. Local work was saved to a conflict copy: {path}").replace("{path}", conflictPath);
+      new Notice(message, 10000);
+      const error = new Error(message);
+      error.code = "NARRATIVE_CANVAS_PROJECT_CONFLICT";
+      error.conflictPath = conflictPath;
+      throw error;
+    }
+    if (this.skipNextAutomaticBackup) this.skipNextAutomaticBackup = false;
+    else await this.maybeCreateProjectBackup(path);
+    this.projectWriteSuppressUntil = Date.now() + 1500;
     await writeVaultText(this.app, path, savedStateJson);
+    this.rememberProjectRevision(path, savedStateJson);
     await this.syncCodexFiles(savedStateJson, path);
     await this.setCurrentProjectPath(path);
     return path;
+  }
+
+  rememberProjectRevision(path, text) {
+    const normalized = normalizeVaultPath(path);
+    this.projectRevision = normalized ? { path: normalized, text: String(text ?? "") } : null;
+  }
+
+  async preserveConflictingProjectWrite(path, savedStateJson) {
+    if (!this.settings.externalProjectChangeProtection) return "";
+    const normalized = normalizeVaultPath(path);
+    const baseline = this.projectRevision;
+    if (!normalized || !baseline || baseline.path !== normalized || !vaultFileExists(this.app, normalized)) return "";
+    const diskText = await readVaultText(this.app, normalized);
+    if (diskText === baseline.text || diskText === String(savedStateJson ?? "")) return "";
+    const folder = joinVaultPath(getVaultParentPath(normalized), "Conflicts");
+    await this.ensureFolder(folder);
+    const name = projectDisplayName(normalized).replace(/\.(ncanvas|narrativecanvas|json)$/i, "") || "Narrative Canvas";
+    const stamp = formatDateToken(new Date(), "YYYYMMDD-HHmmss");
+    const desired = joinVaultPath(folder, `${name}-local-${stamp}.ncanvas`);
+    const conflictPath = await this.uniqueProjectPath(desired);
+    await writeVaultText(this.app, conflictPath, String(savedStateJson ?? ""));
+    return conflictPath;
+  }
+
+  scheduleProjectExternalChangeCheck(file) {
+    if (!this.settings.externalProjectChangeProtection || !(file instanceof TFile)) return;
+    const path = normalizeVaultPath(file.path);
+    if (!path || path !== normalizeVaultPath(this.getCurrentProjectPath())) return;
+    if (!isProjectFileExtension(file.extension) || Date.now() < this.projectWriteSuppressUntil) return;
+    if (this.projectExternalChangeTimer) window.clearTimeout(this.projectExternalChangeTimer);
+    this.projectExternalChangeTimer = window.setTimeout(() => {
+      this.projectExternalChangeTimer = null;
+      this.handleProjectExternalChange(path).catch((error) => console.error(error));
+    }, 350);
+  }
+
+  async handleProjectExternalChange(path) {
+    const normalized = normalizeVaultPath(path);
+    if (!normalized || normalized !== normalizeVaultPath(this.getCurrentProjectPath()) || !vaultFileExists(this.app, normalized)) return;
+    const diskText = await readVaultText(this.app, normalized);
+    if (this.projectRevision?.path === normalized && this.projectRevision.text === diskText) return;
+    await window.NarrativeCanvasApp?.handleExternalProjectChange?.({ path: normalized });
+  }
+
+  getProjectBackupFolder(projectPath = this.getCurrentProjectPath()) {
+    const path = normalizeVaultPath(projectPath);
+    if (!path) return "";
+    return joinVaultPath(getVaultParentPath(path), PROJECT_BACKUP_FOLDER_NAME);
+  }
+
+  getProjectBackupPrefix(projectPath = this.getCurrentProjectPath()) {
+    return projectDisplayName(projectPath).replace(/\.(ncanvas|narrativecanvas|json)$/i, "") || "Narrative Canvas";
+  }
+
+  async findProjectBackups(projectPath = this.getCurrentProjectPath()) {
+    const path = normalizeVaultPath(projectPath);
+    const folder = getVaultFolder(this.app, this.getProjectBackupFolder(path));
+    if (!path || !folder) return [];
+    const prefix = `${this.getProjectBackupPrefix(path)}-`;
+    return (folder.children || [])
+      .filter((file) => file instanceof TFile)
+      .filter((file) => file.name.startsWith(prefix) && file.name.endsWith(".ncanvas.backup"))
+      .sort((a, b) => Number(b.stat?.mtime || 0) - Number(a.stat?.mtime || 0));
+  }
+
+  async maybeCreateProjectBackup(projectPath) {
+    if (!this.settings.backupEnabled) return "";
+    const intervalHours = normalizeBackupIntervalHours(this.settings.backupIntervalHours);
+    const path = normalizeVaultPath(projectPath);
+    if (!path || !vaultFileExists(this.app, path)) return "";
+    const lastCreated = Number(this.settings.backupLastCreatedByProject?.[path] || 0);
+    if (lastCreated && Date.now() - lastCreated < intervalHours * 60 * 60 * 1000) return "";
+    return this.createProjectBackup(path);
+  }
+
+  async createProjectBackup(projectPath = this.getCurrentProjectPath()) {
+    const path = normalizeVaultPath(projectPath);
+    if (!path || !vaultFileExists(this.app, path)) return "";
+    const backupFolder = this.getProjectBackupFolder(path);
+    await this.ensureFolder(backupFolder);
+    const stamp = formatDateToken(new Date(), "YYYYMMDD-HHmmss");
+    const desired = joinVaultPath(backupFolder, `${this.getProjectBackupPrefix(path)}-${stamp}.ncanvas.backup`);
+    const backupPath = await this.uniqueProjectPath(desired);
+    await writeVaultText(this.app, backupPath, await readVaultText(this.app, path));
+    this.settings.backupLastCreatedByProject = {
+      ...(this.settings.backupLastCreatedByProject || {}),
+      [path]: Date.now()
+    };
+    await this.pruneProjectBackups(path);
+    await this.savePluginData();
+    return backupPath;
+  }
+
+  async pruneProjectBackups(projectPath = this.getCurrentProjectPath()) {
+    const retention = normalizeBackupRetention(this.settings.backupRetention);
+    const backups = await this.findProjectBackups(projectPath);
+    for (const file of backups.slice(retention)) {
+      await this.app.vault.trash(file, false);
+    }
+  }
+
+  async createCurrentProjectBackup() {
+    const path = this.getCurrentProjectPath();
+    if (!path || !vaultFileExists(this.app, path)) {
+      new Notice(pluginText(this, "No current project is available to back up."));
+      return "";
+    }
+    try {
+      await this.saveCanvasWithoutAutomaticBackup();
+      const backup = await this.createProjectBackup(path);
+      new Notice(pluginText(this, backup ? "Project backup created." : "Project backup failed."));
+      return backup;
+    } catch (error) {
+      console.error(error);
+      new Notice(pluginText(this, "Project backup failed."));
+      return "";
+    }
+  }
+
+  async chooseProjectBackupToRestore() {
+    const projectPath = this.getCurrentProjectPath();
+    const backups = await this.findProjectBackups(projectPath);
+    if (!backups.length) {
+      new Notice(pluginText(this, "No project backups found."));
+      return "";
+    }
+    return new Promise((resolve) => {
+      const modal = new NarrativeCanvasBackupSuggestModal(this.app, backups, async (file) => {
+        await this.restoreProjectBackup(file.path, projectPath);
+        resolve(file.path);
+      }, () => resolve(""), pluginText(this, "Choose a project backup to restore"));
+      modal.open();
+    });
+  }
+
+  async restoreProjectBackup(backupPath, projectPath = this.getCurrentProjectPath()) {
+    const target = normalizeVaultPath(projectPath);
+    const source = normalizeVaultPath(backupPath);
+    if (!target || !source || !vaultFileExists(this.app, target) || !vaultFileExists(this.app, source)) return false;
+    const backupText = await readVaultText(this.app, source);
+    if (!isSavedStatePayload(JSON.parse(backupText))) throw new Error("The selected backup is not a valid Narrative Canvas project.");
+    await this.saveCanvasWithoutAutomaticBackup();
+    await this.createProjectBackup(target);
+    this.projectWriteSuppressUntil = Date.now() + 1500;
+    await writeVaultText(this.app, target, backupText);
+    this.rememberProjectRevision(target, backupText);
+    this.invalidateProjectFileIndex(getVaultFile(this.app, target));
+    await this.setCurrentProjectPath(target);
+    await window.NarrativeCanvasApp?.loadVaultProject?.();
+    new Notice(pluginText(this, "Project backup restored."));
+    return true;
+  }
+
+  async saveCanvasWithoutAutomaticBackup() {
+    this.skipNextAutomaticBackup = true;
+    try {
+      await window.NarrativeCanvasApp?.save?.({ silent: true });
+    } finally {
+      this.skipNextAutomaticBackup = false;
+    }
   }
 
   async ensureProjectFile(savedStateJson, options = {}) {
@@ -766,7 +1096,9 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
       const normalizedExisting = normalizeVaultPath(existing);
       if (!normalizedExisting || normalizedExisting === normalizedPreferred || isGeneratedSampleProjectPath(existing)) {
         if (!vaultFileExists(this.app, preferredPath)) {
+          this.projectWriteSuppressUntil = Date.now() + 1500;
           await writeVaultText(this.app, preferredPath, savedStateJson);
+          this.rememberProjectRevision(preferredPath, savedStateJson);
           await this.syncCodexFiles(savedStateJson, preferredPath);
           await this.setCurrentProjectPath(preferredPath);
           return preferredPath;
@@ -781,7 +1113,9 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
       return "";
     }
     const path = await this.ensureWritableProjectPath(savedStateJson, { ...options, forceNew: true });
+    this.projectWriteSuppressUntil = Date.now() + 1500;
     await writeVaultText(this.app, path, savedStateJson);
+    this.rememberProjectRevision(path, savedStateJson);
     await this.syncCodexFiles(savedStateJson, path);
     await this.setCurrentProjectPath(path);
     return path;
@@ -789,7 +1123,9 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
 
   async createProjectFile(savedStateJson, options = {}) {
     const path = await this.ensureWritableProjectPath(savedStateJson, { ...options, forceNew: true });
+    this.projectWriteSuppressUntil = Date.now() + 1500;
     await writeVaultText(this.app, path, savedStateJson);
+    this.rememberProjectRevision(path, savedStateJson);
     await this.syncCodexFiles(savedStateJson, path);
     await this.setCurrentProjectPath(path);
     return path;
@@ -809,12 +1145,30 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
       return "";
     }
     return new Promise((resolve) => {
-      const modal = new NarrativeCanvasProjectSuggestModal(this.app, files, async (file) => {
-        await this.openProjectFile(file.path);
-        resolve(file.path);
-      }, () => resolve(""));
+      const modal = new NarrativeCanvasProjectSuggestModal(this.app, files, async (project) => {
+        await this.openProjectFile(project.path);
+        resolve(project.path);
+      }, () => resolve(""), async () => {
+        await this.openNewProjectDialog();
+        resolve("__new__");
+      }, {
+        placeholder: pluginText(this, "Open Narrative Canvas project"),
+        newLabel: pluginText(this, "New project")
+      });
       modal.open();
     });
+  }
+
+  async openNewProjectDialog() {
+    await this.activateView(true);
+    let canvasApp = window.NarrativeCanvasApp;
+    if (!canvasApp?.executeCommand) {
+      await wait(600);
+      canvasApp = window.NarrativeCanvasApp;
+    }
+    if (!canvasApp?.executeCommand?.("new-project")) {
+      throw new Error("Canvas app did not expose new project creation.");
+    }
   }
 
   searchVaultFiles(query, limit = 40, options = {}) {
@@ -926,19 +1280,56 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     const folder = getVaultFolder(this.app, folderPath);
     if (!folder) return [];
     const entries = [];
+    const activePaths = new Set();
     for (const file of folder.children || []) {
       if (!(file instanceof TFile) || String(file.extension || "").toLowerCase() !== "md") continue;
       try {
+        const path = normalizeVaultPath(file.path);
+        const stamp = `${Number(file.stat?.mtime || 0)}:${Number(file.stat?.size || 0)}`;
+        activePaths.add(path);
+        const cached = this.codexFileCache.get(path);
+        if (cached?.stamp === stamp && cached.entry) {
+          entries.push(cached.entry);
+          continue;
+        }
         const text = typeof this.app.vault.cachedRead === "function"
           ? await this.app.vault.cachedRead(file)
           : await this.app.vault.read(file);
         const entry = parseCodexMarkdownFile(file.path, text);
-        if (entry) entries.push(entry);
+        if (entry) {
+          entries.push(entry);
+          this.codexFileCache.set(path, {
+            stamp,
+            fingerprint: getCodexStructuredFingerprint(entry),
+            markdownBody: entry.markdownBody || "",
+            entry,
+            text
+          });
+        } else {
+          this.codexFileCache.delete(path);
+        }
       } catch (error) {
         console.error(`Could not read Codex file ${file.path}.`, error);
       }
     }
+    [...this.codexFileCache.keys()].forEach((path) => {
+      if (path.startsWith(`${folderPath}/`) && !activePaths.has(path)) this.codexFileCache.delete(path);
+    });
     return entries.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async deleteCodexEntryFile(entry) {
+    const path = normalizeVaultPath(entry?.codexFile);
+    if (!path) return true;
+    const file = getVaultFile(this.app, path);
+    if (!(file instanceof TFile)) {
+      this.codexFileCache.delete(path);
+      return true;
+    }
+    this.codexSyncSuppressUntil = Date.now() + 1000;
+    await this.app.vault.trash(file, false);
+    this.codexFileCache.delete(path);
+    return true;
   }
 
   // The file currently being dragged from Obsidian's own UI (file explorer, search),
@@ -1017,32 +1408,101 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     const folderPath = this.getCodexFolderForProject(projectPath);
     if (!folderPath) return [];
     await ensureVaultFolder(this.app, folderPath);
-    const existingEntries = await this.loadCodexEntries(projectPath);
+    const folder = getVaultFolder(this.app, folderPath);
+    const hasManagedMarkdown = Boolean(folder?.children?.some((file) => file instanceof TFile && String(file.extension || "").toLowerCase() === "md"));
+    const hasCachedEntries = [...this.codexFileCache.keys()].some((path) => path.startsWith(`${folderPath}/`));
+    if (hasManagedMarkdown && !hasCachedEntries) await this.loadCodexEntries(projectPath);
+    const existingEntries = [...this.codexFileCache.values()]
+      .map((cached) => cached.entry)
+      .filter((entry) => normalizeVaultPath(entry?.codexFile).startsWith(`${folderPath}/`));
     const existingById = new Map(existingEntries.map((entry) => [String(entry.id || ""), entry]));
-    const targetIds = new Set(characters.map((entry, index) => normalizeCodexEntryForMarkdown(entry, index).id));
     const written = [];
+    let needsExternalReload = false;
+    let conflictCount = 0;
     this.codexSyncSuppressUntil = Date.now() + 1000;
     for (let index = 0; index < characters.length; index += 1) {
       const entry = normalizeCodexEntryForMarkdown(characters[index], index);
       const existing = existingById.get(entry.id);
-      let targetPath = normalizeVaultPath(existing?.codexFile);
+      let targetPath = normalizeVaultPath(entry.codexFile || existing?.codexFile);
       if (!targetPath || !targetPath.startsWith(`${folderPath}/`) || !vaultFileExists(this.app, targetPath)) {
         const fileName = `${sanitizeFileName(entry.name) || `Library Entry ${index + 1}`}.md`;
         targetPath = await this.uniqueProjectPath(joinVaultPath(folderPath, fileName));
       }
+      const fileBefore = getVaultFile(this.app, targetPath);
+      const stampBefore = fileBefore instanceof TFile
+        ? `${Number(fileBefore.stat?.mtime || 0)}:${Number(fileBefore.stat?.size || 0)}`
+        : "";
+      const baseline = this.codexFileCache.get(targetPath);
+      let diskEntry = baseline?.entry || existing || null;
+      let diskText = baseline?.text ?? null;
+      let diskParseFailed = false;
+      if (fileBefore instanceof TFile && (!baseline || baseline.stamp !== stampBefore)) {
+        diskText = await readVaultText(this.app, targetPath);
+        const parsedDiskEntry = parseCodexMarkdownFile(targetPath, diskText);
+        if (parsedDiskEntry) diskEntry = parsedDiskEntry;
+        else diskParseFailed = true;
+      }
+      const modelFingerprint = getCodexStructuredFingerprint(entry);
+      const baselineFingerprint = baseline?.fingerprint || "";
+      const diskFingerprint = diskEntry ? getCodexStructuredFingerprint(diskEntry) : "";
+      const modelChanged = Boolean(baselineFingerprint && modelFingerprint !== baselineFingerprint);
+      const diskChanged = Boolean(baselineFingerprint && diskFingerprint && diskFingerprint !== baselineFingerprint);
+      if (diskParseFailed && diskText != null) {
+        const conflictFolder = joinVaultPath(folderPath, "Conflicts");
+        await ensureVaultFolder(this.app, conflictFolder);
+        const conflictName = `${sanitizeFileName(entry.name) || `Library Entry ${index + 1}`}-unparsed-${formatDateToken(new Date(), "YYYYMMDD-HHmmss")}.md`;
+        const conflictPath = await this.uniqueProjectPath(joinVaultPath(conflictFolder, conflictName));
+        await writeVaultText(this.app, conflictPath, diskText);
+        conflictCount += 1;
+      }
+      if (diskChanged && !modelChanged) {
+        this.codexFileCache.set(targetPath, {
+          stamp: stampBefore,
+          fingerprint: diskFingerprint,
+          markdownBody: diskEntry?.markdownBody || "",
+          entry: { ...diskEntry, codexFile: targetPath },
+          text: diskText
+        });
+        written.push({ ...diskEntry, codexFile: targetPath });
+        needsExternalReload = true;
+        continue;
+      }
+      if (diskChanged && modelChanged && diskFingerprint !== modelFingerprint && diskText != null) {
+        const conflictFolder = joinVaultPath(folderPath, "Conflicts");
+        await ensureVaultFolder(this.app, conflictFolder);
+        const conflictName = `${sanitizeFileName(entry.name) || `Library Entry ${index + 1}`}-external-${formatDateToken(new Date(), "YYYYMMDD-HHmmss")}.md`;
+        const conflictPath = await this.uniqueProjectPath(joinVaultPath(conflictFolder, conflictName));
+        await writeVaultText(this.app, conflictPath, diskText);
+        conflictCount += 1;
+      }
       const markdown = buildCodexMarkdown({
         ...entry,
-        markdownBody: existing?.markdownBody || ""
+        markdownBody: diskEntry?.markdownBody || baseline?.markdownBody || ""
       });
-      const current = vaultFileExists(this.app, targetPath) ? await readVaultText(this.app, targetPath) : null;
-      if (current !== markdown) await writeVaultText(this.app, targetPath, markdown);
-      written.push({ ...entry, codexFile: targetPath });
-    }
-    for (const orphan of existingEntries.filter((entry) => !targetIds.has(entry.id))) {
-      const file = getVaultFile(this.app, orphan.codexFile);
-      if (file instanceof TFile) await this.app.vault.trash(file, false);
+      if (diskText !== markdown) await writeVaultText(this.app, targetPath, markdown);
+      const fileAfter = getVaultFile(this.app, targetPath);
+      const syncedEntry = { ...entry, codexFile: targetPath, markdownBody: diskEntry?.markdownBody || baseline?.markdownBody || "" };
+      this.codexFileCache.set(targetPath, {
+        stamp: fileAfter instanceof TFile
+          ? `${Number(fileAfter.stat?.mtime || 0)}:${Number(fileAfter.stat?.size || markdown.length)}`
+          : "",
+        fingerprint: modelFingerprint,
+        markdownBody: syncedEntry.markdownBody,
+        entry: syncedEntry,
+        text: markdown
+      });
+      written.push(syncedEntry);
     }
     this.codexSyncSuppressUntil = Date.now() + 1000;
+    if (conflictCount) {
+      new Notice(`${conflictCount} Narrative Canvas library conflict backup${conflictCount === 1 ? "" : "s"} created in ${folderPath}/Conflicts.`);
+    }
+    if (needsExternalReload) {
+      window.setTimeout(() => {
+        Promise.resolve(window.NarrativeCanvasApp?.reloadCodexFiles?.())
+          .catch((error) => console.error("Could not reload externally changed library files.", error));
+      }, 0);
+    }
     return written;
   }
 
@@ -1071,6 +1531,11 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     }, 250);
   }
 
+  invalidateProjectFileIndex(file, oldPath = "") {
+    const paths = [file?.path, oldPath].map(normalizeVaultPath).filter(Boolean);
+    paths.forEach((path) => this.projectFileValidationCache?.delete(path));
+  }
+
   async findNarrativeCanvasProjectFiles(options = {}) {
     const folder = options.anyFolder ? "" : normalizeSaveFolder(this.settings.saveFolder);
     const prefix = folder ? `${folder}/` : "";
@@ -1080,11 +1545,27 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
       .filter((file) => !normalizeVaultPath(file.path).startsWith(".obsidian/"))
       .filter((file) => !folder || normalizeVaultPath(file.path).startsWith(prefix))
       .sort((a, b) => a.path.localeCompare(b.path));
-    const checked = await Promise.all(candidates.map(async (file) => ({
-      file,
-      valid: await this.isNarrativeCanvasProjectFile(file.path)
-    })));
-    return checked.filter((item) => item.valid).map((item) => item.file);
+    const activePaths = new Set(candidates.map((file) => normalizeVaultPath(file.path)));
+    [...this.projectFileValidationCache.keys()].forEach((path) => {
+      if (!activePaths.has(path)) this.projectFileValidationCache.delete(path);
+    });
+    const checked = await Promise.all(candidates.map(async (file) => {
+      const path = normalizeVaultPath(file.path);
+      const stamp = `${Number(file.stat?.mtime || 0)}:${Number(file.stat?.size || 0)}`;
+      const cached = this.projectFileValidationCache.get(path);
+      if (cached?.stamp === stamp) return { file, valid: cached.valid, title: cached.title };
+      const descriptor = await this.readNarrativeCanvasProjectDescriptor(file.path);
+      this.projectFileValidationCache.set(path, { stamp, valid: descriptor.valid, title: descriptor.title });
+      return { file, ...descriptor };
+    }));
+    return checked
+      .filter((item) => item.valid)
+      .map((item) => ({
+        file: item.file,
+        path: normalizeVaultPath(item.file.path),
+        title: String(item.title || "").trim() || projectDisplayName(item.file.path).replace(/\.(ncanvas|narrativecanvas|json)$/i, "")
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title) || a.path.localeCompare(b.path));
   }
 
   async ensureWritableProjectPath(savedStateJson, options = {}) {
@@ -1129,14 +1610,6 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
     } finally {
       this.readingOpenViewPath = false;
     }
-    return "";
-  }
-
-  async findProjectFileForSessionState() {
-    if (!this.sessionState) return "";
-    const folder = normalizeSaveFolder(this.settings.saveFolder);
-    const expected = joinVaultPath(folder, this.renderProjectFilename(JSON.stringify(this.sessionState)));
-    if (expected && vaultFileExists(this.app, expected)) return expected;
     return "";
   }
 
@@ -1200,11 +1673,18 @@ module.exports = class NarrativeCanvasPlugin extends Plugin {
   }
 
   async isNarrativeCanvasProjectFile(path) {
+    return (await this.readNarrativeCanvasProjectDescriptor(path)).valid;
+  }
+
+  async readNarrativeCanvasProjectDescriptor(path) {
     try {
       const text = await readVaultText(this.app, path);
-      return isSavedStatePayload(JSON.parse(text));
+      const parsed = JSON.parse(text);
+      if (!isSavedStatePayload(parsed)) return { valid: false, title: "" };
+      const project = parsed.project && typeof parsed.project === "object" ? parsed.project : parsed;
+      return { valid: true, title: String(project.title || "").trim() };
     } catch (error) {
-      return false;
+      return { valid: false, title: "" };
     }
   }
 
@@ -1393,7 +1873,10 @@ class NarrativeCanvasView extends ItemView {
     this.file = file;
     await this.plugin.setCurrentProjectPath(file, { leaf: this.leaf, syncViewState: false });
     if (fileChanged) this.leaf.updateHeader?.();
-    if (!this.plugin.syncingProjectViewState && window.NarrativeCanvasApp?.loadVaultProject) {
+    // Re-clicking an already-open project in the file explorer calls setState again
+    // with the same file. Reloading the canvas in that case repaints the whole board
+    // and looks like a flash/flicker, so only reload when the file actually changed.
+    if (fileChanged && !this.plugin.syncingProjectViewState && window.NarrativeCanvasApp?.loadVaultProject) {
       await window.NarrativeCanvasApp.loadVaultProject();
     }
   }
@@ -1449,6 +1932,7 @@ class NarrativeCanvasView extends ItemView {
         getVaultResourceUrl: (reference) => this.plugin.getVaultResourceUrl(reference),
         importCodexImage: (file, entryName) => this.plugin.importCodexImage(file, entryName),
         loadCodexEntries: () => this.plugin.loadCodexEntries(),
+        deleteCodexEntryFile: (entry) => this.plugin.deleteCodexEntryFile(entry),
         createCodexCanvas: (entry) => this.plugin.createCodexCanvas(entry),
         getDraggedVaultFile: () => this.plugin.getDraggedVaultFile(),
         renderVaultMarkdown: (markdown, container, sourcePath) => this.renderVaultMarkdown(markdown, container, sourcePath),
@@ -1495,13 +1979,61 @@ class NarrativeCanvasView extends ItemView {
 }
 
 class NarrativeCanvasProjectSuggestModal extends SuggestModal {
-  constructor(app, files, onChoose, onCancel) {
+  constructor(app, projects, onChoose, onCancel, onNew, labels = {}) {
     super(app);
-    this.files = files;
+    this.projects = projects;
     this.onChooseProject = onChoose;
     this.onCancelProject = onCancel;
+    this.onNewProject = onNew;
     this.completed = false;
-    this.setPlaceholder("Open Narrative Canvas project");
+    this.newProjectLabel = labels.newLabel || "New project";
+    this.setPlaceholder(labels.placeholder || "Open Narrative Canvas project");
+  }
+
+  onOpen() {
+    super.onOpen();
+    const actions = this.modalEl.createDiv({ cls: "narrative-canvas-project-picker-actions" });
+    const button = actions.createEl("button", {
+      cls: "mod-cta narrative-canvas-project-picker-new",
+      text: this.newProjectLabel,
+      attr: { type: "button" }
+    });
+    button.addEventListener("click", () => {
+      this.completed = true;
+      this.close();
+      Promise.resolve(this.onNewProject?.()).catch((error) => console.error(error));
+    });
+  }
+
+  getSuggestions(query) {
+    const needle = String(query || "").trim().toLowerCase();
+    if (!needle) return this.projects;
+    return this.projects.filter((project) => `${project.title}\n${project.path}`.toLowerCase().includes(needle));
+  }
+
+  renderSuggestion(project, el) {
+    el.createEl("div", { cls: "narrative-canvas-project-suggestion-title", text: project.title });
+    el.createEl("small", { text: project.path });
+  }
+
+  async onChooseSuggestion(project) {
+    this.completed = true;
+    await this.onChooseProject?.(project);
+  }
+
+  onClose() {
+    if (!this.completed) this.onCancelProject?.();
+  }
+}
+
+class NarrativeCanvasBackupSuggestModal extends SuggestModal {
+  constructor(app, files, onChoose, onCancel, placeholder) {
+    super(app);
+    this.files = files;
+    this.onChooseBackup = onChoose;
+    this.onCancelBackup = onCancel;
+    this.completed = false;
+    this.setPlaceholder(placeholder || "Choose a project backup to restore");
   }
 
   getSuggestions(query) {
@@ -1511,17 +2043,21 @@ class NarrativeCanvasProjectSuggestModal extends SuggestModal {
   }
 
   renderSuggestion(file, el) {
-    el.createEl("div", { cls: "narrative-canvas-project-suggestion-title", text: projectDisplayName(file.path) });
+    const modified = Number(file.stat?.mtime || 0);
+    el.createEl("div", {
+      cls: "narrative-canvas-project-suggestion-title",
+      text: modified ? new Date(modified).toLocaleString() : file.name
+    });
     el.createEl("small", { text: file.path });
   }
 
   async onChooseSuggestion(file) {
     this.completed = true;
-    await this.onChooseProject?.(file);
+    await this.onChooseBackup?.(file);
   }
 
   onClose() {
-    if (!this.completed) this.onCancelProject?.();
+    if (!this.completed) this.onCancelBackup?.();
   }
 }
 
@@ -1695,6 +2231,71 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
           });
       });
 
+    containerEl.createEl("h3", { text: text("Project backups") });
+    new Setting(containerEl)
+      .setName(text("Enable automatic backups"))
+      .setDesc(text("Automatically create versioned snapshots before eligible project saves. Manual backup and restore remain available when disabled."))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(Boolean(this.plugin.settings.backupEnabled))
+          .onChange(async (value) => {
+            this.plugin.settings.backupEnabled = Boolean(value);
+            await this.plugin.savePluginData();
+            this.display();
+          });
+      });
+    new Setting(containerEl)
+      .setName(text("Automatic backup interval"))
+      .setDesc(text("Create a versioned copy before overwriting the project at this interval."))
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("12", text("Every 12 hours"))
+          .addOption("24", text("Every 24 hours"))
+          .setValue(String(normalizeBackupIntervalHours(this.plugin.settings.backupIntervalHours)))
+          .setDisabled(!this.plugin.settings.backupEnabled)
+          .onChange(async (value) => {
+            this.plugin.settings.backupIntervalHours = normalizeBackupIntervalHours(value);
+            await this.plugin.savePluginData();
+          });
+      });
+    new Setting(containerEl)
+      .setName(text("Backup versions to keep"))
+      .setDesc(text("Older versions beyond this limit are moved to the vault trash."))
+      .addText((input) => {
+        input.inputEl.type = "number";
+        input.inputEl.min = String(MIN_BACKUP_RETENTION);
+        input.inputEl.max = String(MAX_BACKUP_RETENTION);
+        input.inputEl.step = "1";
+        input
+          .setValue(String(normalizeBackupRetention(this.plugin.settings.backupRetention)))
+          .onChange(async (value) => {
+            this.plugin.settings.backupRetention = normalizeBackupRetention(value);
+            await this.plugin.savePluginData();
+          });
+      });
+    new Setting(containerEl)
+      .setName(text("Backup actions"))
+      .setDesc(text("Create a snapshot of the current project or restore an older version. Restore creates a safety snapshot first."))
+      .addButton((button) => button
+        .setButtonText(text("Create backup now"))
+        .onClick(() => void this.plugin.createCurrentProjectBackup()))
+      .addButton((button) => button
+        .setButtonText(text("Restore backup"))
+        .onClick(() => void this.plugin.chooseProjectBackupToRestore()));
+
+    containerEl.createEl("h3", { text: text("Team file protection") });
+    new Setting(containerEl)
+      .setName(text("External project change protection"))
+      .setDesc(text("Watch the open .ncanvas file for changes from sync tools or teammates. Clean projects reload automatically; unsaved local work is preserved as a conflict copy instead of overwriting the shared file."))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(Boolean(this.plugin.settings.externalProjectChangeProtection))
+          .onChange(async (value) => {
+            this.plugin.settings.externalProjectChangeProtection = Boolean(value);
+            await this.plugin.savePluginData();
+          });
+      });
+
     new Setting(containerEl)
       .setName(text("Current project"))
       .setDesc(this.plugin.getCurrentProjectPath() || text("No project file selected. The ribbon button will create a new project with the default name."))
@@ -1711,9 +2312,9 @@ class NarrativeCanvasSettingTab extends PluginSettingTab {
     // The AI launcher is hidden in the canvas until all three fields are set;
     // refresh it live so it appears/hides as the user edits these settings.
     const refreshLauncher = () => window.NarrativeCanvasApp?.refreshAiLauncher?.();
-    new Setting(containerEl).setName("API endpoint").setDesc("OpenAI-compatible chat completions endpoint. Gemini works via https://generativelanguage.googleapis.com/v1beta/openai/chat/completions.").addText((input) => input.setPlaceholder("https://api.example.com/v1/chat/completions").setValue(this.plugin.settings.aiEndpoint || "").onChange(async (value) => { this.plugin.settings.aiEndpoint = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
+    new Setting(containerEl).setName("API endpoint").setDesc(text("OpenAI-compatible chat completions endpoint.")).addText((input) => input.setPlaceholder("https://api.example.com/v1/chat/completions").setValue(this.plugin.settings.aiEndpoint || "").onChange(async (value) => { this.plugin.settings.aiEndpoint = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
     new Setting(containerEl).setName("API key").setDesc("Stored in this plugin's local data.json.").addText((input) => { input.inputEl.type = "password"; input.setValue(this.plugin.settings.aiApiKey || "").onChange(async (value) => { this.plugin.settings.aiApiKey = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }); });
-    new Setting(containerEl).setName("Model").setDesc("For Gemini, e.g. gemini-2.0-flash.").addText((input) => input.setPlaceholder("model-name").setValue(this.plugin.settings.aiModel || "").onChange(async (value) => { this.plugin.settings.aiModel = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
+    new Setting(containerEl).setName("Model").addText((input) => input.setPlaceholder("model-name").setValue(this.plugin.settings.aiModel || "").onChange(async (value) => { this.plugin.settings.aiModel = String(value || "").trim(); await this.plugin.savePluginData(); refreshLauncher(); }));
     new Setting(containerEl)
       .setName(text("Narrative craft guidance"))
       .setDesc(text("Prime the AI with condensed storytelling, character, and structure principles so its suggestions follow established narrative craft. Off by default; it adds tokens to each request."))
@@ -1738,6 +2339,11 @@ function normalizeSettings(rawSettings) {
     language: normalizeLanguageSetting(source.language),
     contentFont: normalizeContentFontSetting(source.contentFont),
     spellCheck: Boolean(source.spellCheck),
+    backupEnabled: Boolean(source.backupEnabled),
+    backupIntervalHours: normalizeBackupIntervalHours(source.backupIntervalHours),
+    backupRetention: normalizeBackupRetention(source.backupRetention),
+    backupLastCreatedByProject: normalizeBackupTimestampMap(source.backupLastCreatedByProject),
+    externalProjectChangeProtection: source.externalProjectChangeProtection !== false,
     aiNarrativeKnowledge: Boolean(source.aiNarrativeKnowledge),
     aiEndpoint: String(source.aiEndpoint || "").trim(),
     aiApiKey: String(source.aiApiKey || "").trim(),
@@ -1745,6 +2351,25 @@ function normalizeSettings(rawSettings) {
     currentProjectPath: normalizeVaultPath(source.currentProjectPath),
     lastProjectPath: normalizeVaultPath(source.lastProjectPath)
   };
+}
+
+function normalizeBackupIntervalHours(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_BACKUP_INTERVAL_HOURS;
+  const hours = Number(value);
+  return BACKUP_INTERVAL_OPTIONS.has(hours) ? hours : DEFAULT_BACKUP_INTERVAL_HOURS;
+}
+
+function normalizeBackupRetention(value) {
+  const count = Math.round(Number(value));
+  if (!Number.isFinite(count)) return DEFAULT_BACKUP_RETENTION;
+  return Math.max(MIN_BACKUP_RETENTION, Math.min(MAX_BACKUP_RETENTION, count));
+}
+
+function normalizeBackupTimestampMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .map(([path, timestamp]) => [normalizeVaultPath(path), Number(timestamp)])
+    .filter(([path, timestamp]) => path && Number.isFinite(timestamp) && timestamp > 0));
 }
 
 function normalizeLanguageSetting(value) {
@@ -1990,17 +2615,6 @@ function joinVaultPath(folder, fileName) {
   return normalizedFolder ? `${normalizedFolder}/${fileName}` : fileName;
 }
 
-function isVaultPathInProjectSaveFolder(path, saveFolder) {
-  const normalizedPath = normalizeVaultPath(path);
-  if (!normalizedPath) return false;
-  const folder = normalizeSaveFolder(saveFolder);
-  if (!folder) return !normalizedPath.includes("/");
-  const prefix = `${folder}/`;
-  if (!normalizedPath.startsWith(prefix)) return false;
-  const relativePath = normalizedPath.slice(prefix.length);
-  return Boolean(relativePath) && !relativePath.includes("/");
-}
-
 function getProjectNameFromSavedState(savedStateJson, fallback = "Untitled") {
   try {
     const payload = JSON.parse(savedStateJson || "{}");
@@ -2182,8 +2796,8 @@ const CANVAS_STYLE_CSS = [
   "  --workspace-bar-bg: #ededee;",
   "  --background-modifier-hover: #e1e1e4;",
   "  --background-modifier-active: #d8d7dc;",
-  "  --background-modifier-border: #d0d0d4;",
-  "  --background-modifier-border-hover: #aaaab2;",
+  "  --background-modifier-border: #c4c5ca;",
+  "  --background-modifier-border-hover: #989aa2;",
   "  --canvas-grid-small: rgba(40, 40, 45, 0.065);",
   "  --canvas-grid-large: rgba(40, 40, 45, 0.115);",
   "  --node-surface: rgba(255, 255, 255, 0.97);",
@@ -2204,12 +2818,12 @@ const CANVAS_STYLE_CSS = [
   "  --scrollbar-thumb-hover: rgba(35, 35, 40, 0.38);",
   "  --link-color: rgba(55, 55, 62, 0.62);",
   "  --text-normal: #202124;",
-  "  --text-muted: #5f6368;",
-  "  --text-faint: #85888d;",
+  "  --text-muted: #55585e;",
+  "  --text-faint: #686b72;",
   "  --text-on-accent: #ffffff;",
   "  --interactive-accent: #6f55d9;",
   "  --interactive-accent-hover: #5d43c2;",
-  "  --focus-accent: #7f6df2;",
+  "  --focus-accent: #6f55d9;",
   "  --graph-hover-color: #8f70ff;",
   "  --shadow-soft: 0 16px 36px rgba(30, 30, 36, 0.14);",
   "  color-scheme: light;",
@@ -3278,25 +3892,15 @@ const CANVAS_STYLE_CSS = [
   "  color: var(--text-on-accent);",
   "}",
   "",
-  ".preview-tab {",
-  "  cursor: pointer;",
-  "}",
-  "",
-  ".preview-tab:hover {",
-  "  background: var(--background-modifier-hover);",
-  "  color: var(--text-normal);",
-  "}",
-  "",
-  ".spacer {",
-  "  flex: 1;",
-  "  min-width: 6px;",
-  "}",
-  "",
   ".toolbar-button,",
   ".small-button {",
   "  display: inline-flex;",
   "  align-items: center;",
   "  justify-content: center;",
+  "  font-family: inherit;",
+  "  font-size: inherit;",
+  "  font-weight: inherit;",
+  "  line-height: inherit;",
   "  min-width: 28px;",
   "  flex: 0 0 auto;",
   "  height: 30px;",
@@ -3306,8 +3910,8 @@ const CANVAS_STYLE_CSS = [
   "  color: var(--text-muted);",
   "}",
   "",
-  ".compact-button {",
-  "  padding: 0 8px;",
+  ".toolbar-button {",
+  "  font-weight: 600;",
   "}",
   "",
   ".export-image-controls {",
@@ -3413,12 +4017,10 @@ const CANVAS_STYLE_CSS = [
   "  color: var(--text-on-accent);",
   "}",
   "",
-  ".toolbar-button.active,",
-  ".mode-toggle-button.active {",
+  ".toolbar-button.active {",
   "  border-color: var(--interactive-accent);",
-  "  background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary-alt));",
-  "  color: var(--text-normal);",
-  "  font-weight: 700;",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
   "}",
   "",
   ".zoom-readout {",
@@ -3711,6 +4313,25 @@ const CANVAS_STYLE_CSS = [
   "  color: var(--text-normal);",
   "}",
   "",
+  ".expand-format-button code {",
+  "  padding: 0;",
+  "  background: none;",
+  "  color: inherit;",
+  "  font-family: var(--font-monospace, ui-monospace, monospace);",
+  "  font-size: 11px;",
+  "}",
+  "",
+  ".expand-format-button mark {",
+  "  padding: 0 3px;",
+  "  border-radius: 2px;",
+  "  background: var(--text-highlight-bg, #ffd54f);",
+  "  color: #000;",
+  "}",
+  "",
+  ".expand-format-button u {",
+  "  text-underline-offset: 2px;",
+  "}",
+  "",
   ".expand-editor-header {",
   "  display: flex;",
   "  align-items: center;",
@@ -3725,19 +4346,46 @@ const CANVAS_STYLE_CSS = [
   "  font-size: 18px;",
   "}",
   "",
+  "/* Single-pane \"render by default, click to edit\" body. The rendered view and the",
+  "   source textarea occupy the same area; only one is shown at a time. */",
+  ".expand-editor-live {",
+  "  min-height: 0;",
+  "  height: 100%;",
+  "}",
+  "",
+  ".expand-editor-rendered,",
   ".expand-editor-input {",
   "  width: 100%;",
   "  height: 100%;",
+  "  min-height: 0;",
   "  margin: 0;",
   "  padding: 18px 20px;",
-  "  border: 0;",
-  "  border-radius: 0;",
   "  background: var(--background-primary);",
   "  color: var(--text-normal);",
   "  font-family: var(--nc-font-text);",
   "  font-size: 16px;",
   "  line-height: 1.7;",
+  "}",
+  "",
+  ".expand-editor-rendered {",
+  "  overflow-y: auto;",
+  "  cursor: text;",
+  "}",
+  "",
+  ".expand-editor-rendered[hidden],",
+  ".expand-editor-input[hidden] {",
+  "  display: none;",
+  "}",
+  "",
+  ".expand-editor-input {",
+  "  border: 0;",
+  "  border-radius: 0;",
   "  resize: none;",
+  "}",
+  "",
+  ".field-live-placeholder {",
+  "  color: var(--text-faint);",
+  "  font-style: italic;",
   "}",
   "",
   "/* Expand affordance on multi-line inspector fields. */",
@@ -3901,33 +4549,6 @@ const CANVAS_STYLE_CSS = [
   ".vault-file-suggestion small {",
   "  max-width: 160px;",
   "  color: var(--text-muted);",
-  "}",
-  "",
-  ".node-vault-file-actions {",
-  "  display: flex;",
-  "  flex-wrap: wrap;",
-  "  gap: 6px;",
-  "}",
-  "",
-  ".node-vault-file-actions .icon-button {",
-  "  width: 30px;",
-  "  min-width: 30px;",
-  "  padding-inline: 0;",
-  "}",
-  "",
-  ".node-vault-preview-setting {",
-  "  display: flex;",
-  "  align-items: center;",
-  "  justify-content: space-between;",
-  "  gap: 12px;",
-  "  min-height: 28px;",
-  "  padding: 7px 9px;",
-  "  border: 1px solid var(--background-modifier-border);",
-  "  border-radius: var(--radius-s);",
-  "  background: var(--background-secondary);",
-  "  color: var(--text-normal);",
-  "  font-size: 12px;",
-  "  font-weight: 650;",
   "}",
   "",
   ".node-vault-file-field small {",
@@ -4316,6 +4937,21 @@ const CANVAS_STYLE_CSS = [
   "  background: var(--background-secondary);",
   "}",
   "",
+  ".project-play-settings {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(0, 1fr) auto;",
+  "  gap: 10px;",
+  "  align-items: end;",
+  "}",
+  "",
+  ".project-play-settings .field {",
+  "  margin: 0;",
+  "}",
+  "",
+  ".project-play-settings .small-button {",
+  "  min-height: 36px;",
+  "}",
+  "",
   ".project-file-box-header {",
   "  display: flex;",
   "  flex-wrap: wrap;",
@@ -4365,13 +5001,6 @@ const CANVAS_STYLE_CSS = [
   ".project-control-group {",
   "  display: grid;",
   "  gap: 8px;",
-  "}",
-  "",
-  ".project-control-label {",
-  "  color: var(--text-muted);",
-  "  font-size: 12px;",
-  "  font-weight: 700;",
-  "  text-transform: uppercase;",
   "}",
   "",
   ".project-control-grid {",
@@ -4465,10 +5094,6 @@ const CANVAS_STYLE_CSS = [
   "  color: var(--text-muted);",
   "  font-size: 12px;",
   "  line-height: 1.2;",
-  "}",
-  "",
-  ".filter-chip.quiet {",
-  "  color: var(--text-faint);",
   "}",
   "",
   ".filter-chip button {",
@@ -4936,6 +5561,17 @@ const CANVAS_STYLE_CSS = [
   "  max-height: 4.35em;",
   "  margin-bottom: 8px;",
   "  -webkit-line-clamp: 3;",
+  "}",
+  "",
+  ".node.choice-node .node-text-summary,",
+  ".node.choice-node .node-choice-preview {",
+  "  flex: 1 1 0;",
+  "  min-height: 0;",
+  "}",
+  "",
+  ".node.choice-node .node-text-summary {",
+  "  max-height: none;",
+  "  overflow-y: auto;",
   "}",
   "",
   ".node-vault-links {",
@@ -6667,14 +7303,6 @@ const CANVAS_STYLE_CSS = [
   "    var(--background-primary);",
   "}",
   "",
-  ".codex-overview-avatar {",
-  "  width: 84px;",
-  "  height: 84px;",
-  "  border-radius: 50%;",
-  "  object-fit: cover;",
-  "  border: 2px solid color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));",
-  "}",
-  "",
   "/* Preview-image board snapshot as the card cover: images keep their board layout. */",
   ".codex-overview-board {",
   "  position: absolute;",
@@ -7174,9 +7802,26 @@ const CANVAS_STYLE_CSS = [
   "",
   ".codex-extra-field-row {",
   "  display: grid;",
-  "  grid-template-columns: minmax(90px, 180px) minmax(0, 1fr) auto;",
+  "  grid-template-columns: minmax(90px, 170px) minmax(92px, 120px) minmax(0, 1fr) auto;",
   "  gap: 8px;",
   "  align-items: center;",
+  "}",
+  "",
+  ".codex-extra-field-row \u003e input,",
+  ".codex-extra-field-row \u003e select {",
+  "  min-width: 0;",
+  "  width: 100%;",
+  "}",
+  "",
+  "@media (max-width: 720px) {",
+  "  .codex-extra-field-row {",
+  "    grid-template-columns: minmax(0, 1fr) minmax(92px, 120px) auto;",
+  "  }",
+  "",
+  "  .codex-extra-field-row \u003e input[data-character-extra-part=\"value\"] {",
+  "    grid-column: 1 / -1;",
+  "    grid-row: 2;",
+  "  }",
   "}",
   "",
   ".codex-extra-fields-empty {",
@@ -7740,12 +8385,6 @@ const CANVAS_STYLE_CSS = [
   "  content: none;",
   "}",
   "",
-  ".node-linked-vision-board {",
-  "  display: grid;",
-  "  gap: 8px;",
-  "  margin-top: 4px;",
-  "}",
-  "",
   ".vision-board-dialog {",
   "  width: min(1120px, calc(100vw - 40px));",
   "  max-width: none;",
@@ -7790,105 +8429,6 @@ const CANVAS_STYLE_CSS = [
   "  .vision-board-dialog {",
   "    width: calc(100vw - 16px);",
   "  }",
-  "}",
-  "",
-  ".codex-image-target {",
-  "  position: relative;",
-  "  display: grid;",
-  "  place-items: center;",
-  "  gap: 8px;",
-  "  width: 100%;",
-  "  height: clamp(180px, 28vw, 280px);",
-  "  min-width: 0;",
-  "  padding: 18px;",
-  "  overflow: hidden;",
-  "  appearance: none;",
-  "  -webkit-appearance: none;",
-  "  border: 1px dashed var(--background-modifier-border-hover);",
-  "  border-radius: var(--radius-m);",
-  "  background: var(--background-primary);",
-  "  box-shadow: none;",
-  "  color: var(--text-muted);",
-  "  text-align: center;",
-  "  cursor: pointer;",
-  "}",
-  "",
-  ".codex-image-target::before,",
-  ".codex-image-target::after {",
-  "  display: none;",
-  "  content: none;",
-  "}",
-  "",
-  ".codex-image-target:hover,",
-  ".codex-image-editor.drag-over .codex-image-target {",
-  "  border-color: var(--interactive-accent);",
-  "  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));",
-  "  color: var(--text-normal);",
-  "}",
-  "",
-  ".codex-image-placeholder-icon {",
-  "  display: grid;",
-  "  place-items: center;",
-  "  width: 48px;",
-  "  height: 48px;",
-  "  border-radius: 50%;",
-  "  background: var(--background-secondary-alt);",
-  "  color: var(--text-muted);",
-  "}",
-  "",
-  ".codex-image-placeholder-icon svg {",
-  "  width: 24px;",
-  "  height: 24px;",
-  "  fill: none;",
-  "  stroke: currentColor;",
-  "  stroke-linecap: round;",
-  "  stroke-linejoin: round;",
-  "  stroke-width: 1.5;",
-  "}",
-  "",
-  ".codex-image-target strong,",
-  ".codex-image-target small {",
-  "  display: block;",
-  "  max-width: 100%;",
-  "}",
-  "",
-  ".codex-image-target strong {",
-  "  color: var(--text-normal);",
-  "}",
-  "",
-  ".codex-image-target small {",
-  "  color: var(--text-faint);",
-  "}",
-  "",
-  ".codex-image-preview {",
-  "  position: absolute;",
-  "  inset: 0;",
-  "  display: block;",
-  "  width: 100%;",
-  "  height: 100%;",
-  "  object-fit: cover;",
-  "  background: var(--background-primary);",
-  "}",
-  "",
-  ".codex-image-hover-label {",
-  "  position: absolute;",
-  "  right: 10px;",
-  "  bottom: 10px;",
-  "  padding: 5px 9px;",
-  "  border-radius: 999px;",
-  "  background: rgba(0, 0, 0, 0.68);",
-  "  color: #fff;",
-  "  font-size: 12px;",
-  "  font-weight: 650;",
-  "  opacity: 0;",
-  "  transform: translateY(4px);",
-  "  transition: opacity 120ms ease, transform 120ms ease;",
-  "}",
-  "",
-  ".codex-image-target:hover .codex-image-hover-label,",
-  ".codex-image-target:focus-visible .codex-image-hover-label {",
-  "  opacity: 1;",
-  "  transform: translateY(0);",
   "}",
   "",
   ".codex-image-picker {",
@@ -7943,21 +8483,6 @@ const CANVAS_STYLE_CSS = [
   "",
   ".vault-file-suggestion.codex-image-suggestion small {",
   "  max-width: 100%;",
-  "}",
-  "",
-  ".codex-image-file-actions {",
-  "  display: flex;",
-  "  flex-wrap: wrap;",
-  "  gap: 6px;",
-  "}",
-  "",
-  ".codex-image-reference {",
-  "  display: block;",
-  "  overflow: hidden;",
-  "  color: var(--text-faint);",
-  "  font-size: 11px;",
-  "  text-overflow: ellipsis;",
-  "  white-space: nowrap;",
   "}",
   "",
   ".character-card textarea {",
@@ -8083,8 +8608,7 @@ const CANVAS_STYLE_CSS = [
   "}",
   "",
   ".character-backlink-main strong,",
-  ".character-backlink-main small,",
-  ".character-backlink-snippet {",
+  ".character-backlink-main small {",
   "  display: block;",
   "  min-width: 0;",
   "  overflow: hidden;",
@@ -8107,23 +8631,6 @@ const CANVAS_STYLE_CSS = [
   "  font-size: 11px;",
   "  line-height: 1.3;",
   "  white-space: nowrap;",
-  "}",
-  "",
-  ".linked-node-more {",
-  "  color: var(--text-normal);",
-  "  font-size: 12px;",
-  "  font-weight: 650;",
-  "  text-align: center;",
-  "}",
-  "",
-  ".character-backlink-snippet {",
-  "  color: var(--text-muted);",
-  "  font-size: 12px;",
-  "  line-height: 1.35;",
-  "  display: -webkit-box;",
-  "  -webkit-line-clamp: 2;",
-  "  -webkit-box-orient: vertical;",
-  "  white-space: normal;",
   "}",
   "",
   ".variable-table {",
@@ -8475,14 +8982,6 @@ const CANVAS_STYLE_CSS = [
   "  font-size: 12px;",
   "}",
   "",
-  ".playbook-gate-effects-head {",
-  "  display: flex;",
-  "  align-items: center;",
-  "  justify-content: space-between;",
-  "  gap: 6px;",
-  "  min-width: 0;",
-  "}",
-  "",
   ".playbook-gate-effects strong {",
   "  min-width: 0;",
   "  overflow: hidden;",
@@ -8524,27 +9023,6 @@ const CANVAS_STYLE_CSS = [
   ".playbook-gate-effects .icon-button {",
   "  justify-self: center;",
   "  align-self: center;",
-  "}",
-  "",
-  ".playbook-gate-effect-list {",
-  "  display: grid;",
-  "  gap: 6px;",
-  "  min-width: 0;",
-  "}",
-  "",
-  ".playbook-gate-effect-row {",
-  "  grid-template-columns: minmax(170px, 1.15fr) minmax(104px, 0.75fr) minmax(160px, 1fr);",
-  "  width: 100%;",
-  "  padding: 0;",
-  "  border: 0;",
-  "  background: transparent;",
-  "}",
-  "",
-  ".playbook-gate-effect-row \u003e input,",
-  ".playbook-gate-effect-row \u003e select {",
-  "  min-width: 0;",
-  "  width: 100%;",
-  "  max-width: 100%;",
   "}",
   "",
   ".playbook-action-table {",
@@ -8677,10 +9155,6 @@ const CANVAS_STYLE_CSS = [
   "  min-height: 56px;",
   "  min-width: 0;",
   "  resize: vertical;",
-  "}",
-  "",
-  ".script-node-row .condition-builder-list {",
-  "  align-content: start;",
   "}",
   "",
   ".script-node-row select,",
@@ -9225,95 +9699,6 @@ const CANVAS_STYLE_CSS = [
   "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) auto;",
   "}",
   "",
-  ".condition-builder-list {",
-  "  display: grid;",
-  "  gap: 6px;",
-  "  min-width: 0;",
-  "  width: 100%;",
-  "}",
-  "",
-  ".condition-builder-toolbar {",
-  "  display: flex;",
-  "  align-items: end;",
-  "  justify-content: space-between;",
-  "  gap: 8px;",
-  "  min-width: 0;",
-  "}",
-  "",
-  ".condition-builder-mode {",
-  "  display: grid;",
-  "  grid-template-columns: auto minmax(120px, 180px);",
-  "  align-items: center;",
-  "  gap: 6px;",
-  "  min-width: 0;",
-  "  color: var(--text-muted);",
-  "  font-size: 12px;",
-  "  font-weight: 650;",
-  "}",
-  "",
-  ".condition-builder-mode select {",
-  "  min-width: 0;",
-  "  width: 100%;",
-  "}",
-  "",
-  ".condition-builder-toolbar .small-button {",
-  "  flex: 0 0 auto;",
-  "}",
-  "",
-  ".condition-builder-row {",
-  "  display: grid;",
-  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr);",
-  "  gap: 6px;",
-  "  align-items: center;",
-  "  min-width: 0;",
-  "  width: 100%;",
-  "}",
-  "",
-  ".condition-builder-row.has-connector {",
-  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr);",
-  "}",
-  "",
-  ".condition-builder-row.has-delete {",
-  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr) 32px;",
-  "}",
-  "",
-  ".condition-builder-row.has-connector.has-delete {",
-  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(110px, 1fr) 32px;",
-  "}",
-  "",
-  ".condition-builder-row.no-condition-value {",
-  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr);",
-  "}",
-  "",
-  ".condition-builder-row.has-connector.no-condition-value {",
-  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr);",
-  "}",
-  "",
-  ".condition-builder-row.has-delete.no-condition-value {",
-  "  grid-template-columns: minmax(130px, 1fr) minmax(110px, 0.8fr) 32px;",
-  "}",
-  "",
-  ".condition-builder-row.has-connector.has-delete.no-condition-value {",
-  "  grid-template-columns: minmax(76px, 0.55fr) minmax(130px, 1fr) minmax(110px, 0.8fr) 32px;",
-  "}",
-  "",
-  ".condition-builder-row \u003e input,",
-  ".condition-builder-row \u003e select {",
-  "  min-width: 0;",
-  "  width: 100%;",
-  "}",
-  "",
-  ".condition-clause-delete {",
-  "  width: 32px;",
-  "  height: 30px;",
-  "  justify-self: center;",
-  "}",
-  "",
-  ".condition-custom-expression {",
-  "  margin-top: 6px;",
-  "  min-height: 66px;",
-  "}",
-  "",
   ".effect-draft-row {",
   "  grid-template-columns: minmax(88px, 0.75fr) minmax(120px, 1fr) minmax(92px, 0.8fr) minmax(110px, 1fr) auto;",
   "}",
@@ -9324,28 +9709,6 @@ const CANVAS_STYLE_CSS = [
   "",
   ".logic-draft-row \u003e input,",
   ".logic-draft-row \u003e select {",
-  "  min-width: 0;",
-  "  width: 100%;",
-  "}",
-  "",
-  ".node-effect-list {",
-  "  display: grid;",
-  "  gap: 6px;",
-  "}",
-  "",
-  ".node-effect-row {",
-  "  display: grid;",
-  "  grid-template-columns: minmax(88px, 0.75fr) minmax(92px, 0.8fr) minmax(120px, 1fr) minmax(110px, 1fr) auto;",
-  "  gap: 6px;",
-  "  align-items: center;",
-  "}",
-  "",
-  ".node-effect-row.no-trigger {",
-  "  grid-template-columns: minmax(120px, 1fr) minmax(92px, 0.8fr) minmax(110px, 1fr) auto;",
-  "}",
-  "",
-  ".node-effect-row \u003e input,",
-  ".node-effect-row \u003e select {",
   "  min-width: 0;",
   "  width: 100%;",
   "}",
@@ -9401,6 +9764,28 @@ const CANVAS_STYLE_CSS = [
   "  font-size: 11px;",
   "  color: var(--text-muted);",
   "  line-height: 1.4;",
+  "}",
+  "",
+  ".choice-timer-editor {",
+  "  display: grid;",
+  "  gap: 10px;",
+  "  padding: 10px 12px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary);",
+  "}",
+  "",
+  ".choice-timer-head {",
+  "  display: flex;",
+  "  align-items: center;",
+  "  justify-content: space-between;",
+  "  gap: 12px;",
+  "}",
+  "",
+  ".choice-timer-fields {",
+  "  display: grid;",
+  "  grid-template-columns: minmax(92px, 0.35fr) minmax(180px, 1fr);",
+  "  gap: 10px;",
   "}",
   "",
   "/* Add buttons sit at the bottom of the list so repeated adds never need scrolling up. */",
@@ -9606,41 +9991,12 @@ const CANVAS_STYLE_CSS = [
   "}",
   "",
   "@container (max-width: 430px) {",
-  "  .condition-builder-toolbar {",
-  "    display: grid;",
-  "    grid-template-columns: minmax(0, 1fr) auto;",
-  "    align-items: stretch;",
-  "  }",
-  "",
-  "  .condition-builder-mode {",
-  "    grid-template-columns: minmax(0, 1fr);",
-  "  }",
-  "",
-  "  .condition-builder-toolbar .small-button {",
-  "    width: auto;",
-  "  }",
-  "",
   "  .condition-draft-row,",
   "  .condition-draft-row.no-condition-value,",
   "  .effect-draft-row,",
   "  .effect-draft-row.no-trigger,",
-  "  .condition-builder-row,",
-  "  .condition-builder-row.has-connector,",
-  "  .condition-builder-row.has-delete,",
-  "  .condition-builder-row.has-connector.has-delete,",
-  "  .condition-builder-row.no-condition-value,",
-  "  .condition-builder-row.has-connector.no-condition-value,",
-  "  .condition-builder-row.has-delete.no-condition-value,",
-  "  .condition-builder-row.has-connector.has-delete.no-condition-value,",
-  "  .node-effect-row,",
-  "  .node-effect-row.no-trigger,",
   "  .node-routing-grid {",
   "    grid-template-columns: repeat(2, minmax(0, 1fr));",
-  "  }",
-  "",
-  "  .condition-clause-delete {",
-  "    justify-self: stretch;",
-  "    width: 100%;",
   "  }",
   "",
   "  .choice-option-head {",
@@ -9654,28 +10010,10 @@ const CANVAS_STYLE_CSS = [
   "}",
   "",
   "@container (max-width: 300px) {",
-  "  .condition-builder-toolbar {",
-  "    grid-template-columns: minmax(0, 1fr);",
-  "  }",
-  "",
-  "  .condition-builder-toolbar .small-button {",
-  "    width: 100%;",
-  "  }",
-  "",
   "  .condition-draft-row,",
   "  .condition-draft-row.no-condition-value,",
   "  .effect-draft-row,",
   "  .effect-draft-row.no-trigger,",
-  "  .condition-builder-row,",
-  "  .condition-builder-row.has-connector,",
-  "  .condition-builder-row.has-delete,",
-  "  .condition-builder-row.has-connector.has-delete,",
-  "  .condition-builder-row.no-condition-value,",
-  "  .condition-builder-row.has-connector.no-condition-value,",
-  "  .condition-builder-row.has-delete.no-condition-value,",
-  "  .condition-builder-row.has-connector.has-delete.no-condition-value,",
-  "  .node-effect-row,",
-  "  .node-effect-row.no-trigger,",
   "  .node-routing-grid {",
   "    grid-template-columns: minmax(0, 1fr);",
   "  }",
@@ -10284,40 +10622,6 @@ const CANVAS_STYLE_CSS = [
   "  min-width: 0;",
   "}",
   "",
-  ".event-fields {",
-  "  display: grid;",
-  "  gap: 12px;",
-  "  padding: 12px;",
-  "  border: 1px solid var(--background-modifier-border);",
-  "  border-radius: var(--radius-m);",
-  "  background: var(--subtle-button-bg);",
-  "}",
-  "",
-  ".event-fields h3 {",
-  "  margin: 0;",
-  "  color: var(--text-muted);",
-  "  font-size: 12px;",
-  "  font-weight: 650;",
-  "  text-transform: uppercase;",
-  "}",
-  "",
-  ".custom-fields {",
-  "  display: grid;",
-  "  gap: 12px;",
-  "  padding: 12px;",
-  "  border: 1px solid var(--background-modifier-border);",
-  "  border-radius: var(--radius-m);",
-  "  background: var(--background-secondary-alt);",
-  "}",
-  "",
-  ".custom-fields h3 {",
-  "  margin: 0;",
-  "  color: var(--text-muted);",
-  "  font-size: 12px;",
-  "  font-weight: 650;",
-  "  text-transform: uppercase;",
-  "}",
-  "",
   ".event-sheet-shell {",
   "  grid-template-rows: none;",
   "  grid-auto-rows: auto;",
@@ -10741,12 +11045,6 @@ const CANVAS_STYLE_CSS = [
   "",
   ".event-elements-collapsible[open] .event-elements-full {",
   "  display: block;",
-  "}",
-  "",
-  ".event-sheet-empty {",
-  "  min-height: 120px;",
-  "  color: var(--text-muted);",
-  "  text-align: center;",
   "}",
   "",
   ".play-dialog {",
@@ -11496,33 +11794,6 @@ const CANVAS_STYLE_CSS = [
   "  color: var(--text-normal);",
   "}",
   "",
-  ".playbook-help-grid {",
-  "  display: grid;",
-  "  grid-template-columns: repeat(2, minmax(0, 1fr));",
-  "  gap: 14px;",
-  "}",
-  "",
-  ".playbook-help-grid section {",
-  "  min-width: 0;",
-  "}",
-  "",
-  ".playbook-help-grid h3 {",
-  "  margin: 0 0 8px;",
-  "  font-size: 13px;",
-  "  color: var(--text-normal);",
-  "}",
-  "",
-  ".playbook-help-grid ul {",
-  "  display: grid;",
-  "  gap: 6px;",
-  "  margin: 0;",
-  "  padding-left: 18px;",
-  "  color: var(--text-muted);",
-  "  font-size: 13px;",
-  "  line-height: 1.45;",
-  "}",
-  "",
-  ".playbook-help-grid code,",
   ".playbook-example {",
   "  font-family: monospace;",
   "}",
@@ -11841,6 +12112,127 @@ const CANVAS_STYLE_CSS = [
   "  margin: 2px 0;",
   "}",
   "",
+  ".play-body-text h3 {",
+  "  margin: 0.4em 0 0.3em;",
+  "  font-family: var(--nc-font-interface);",
+  "  font-size: 19px;",
+  "}",
+  "",
+  ".play-body-text ol {",
+  "  margin: 0 0 0.6em;",
+  "  padding-left: 22px;",
+  "}",
+  "",
+  ".play-body-text code {",
+  "  padding: 0.1em 0.35em;",
+  "  border-radius: 4px;",
+  "  background: var(--background-modifier-border);",
+  "  font-family: var(--font-monospace, ui-monospace, monospace);",
+  "  font-size: 0.9em;",
+  "}",
+  "",
+  ".play-body-text pre {",
+  "  margin: 0 0 0.6em;",
+  "  padding: 10px 12px;",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-secondary-alt);",
+  "  overflow-x: auto;",
+  "}",
+  "",
+  ".play-body-text pre code {",
+  "  padding: 0;",
+  "  border-radius: 0;",
+  "  background: none;",
+  "  white-space: pre;",
+  "}",
+  "",
+  ".play-body-text mark {",
+  "  padding: 0 0.15em;",
+  "  border-radius: 3px;",
+  "  background: var(--text-highlight-bg, #ffd54f);",
+  "  color: inherit;",
+  "}",
+  "",
+  ".play-body-text a {",
+  "  color: var(--text-accent, var(--interactive-accent));",
+  "  text-decoration: underline;",
+  "}",
+  "",
+  ".play-body-text hr {",
+  "  margin: 0.7em 0;",
+  "  border: 0;",
+  "  border-top: 1px solid var(--background-modifier-border);",
+  "}",
+  "",
+  ".play-body-text .nc-md-task {",
+  "  list-style: none;",
+  "  margin-left: -18px;",
+  "}",
+  "",
+  ".play-body-text .nc-md-task input {",
+  "  margin-right: 6px;",
+  "  vertical-align: middle;",
+  "}",
+  "",
+  "/* Rendered Markdown on the canvas node card. The card has a fixed height, so we",
+  "   drop the -webkit-box line clamp (which only clamps inline text) and let the",
+  "   block-level rendered content clip against the card's overflow instead, kept",
+  "   compact so a preview still fits several lines. */",
+  ".node-text.node-text-rendered {",
+  "  display: block;",
+  "  -webkit-line-clamp: initial;",
+  "  -webkit-box-orient: initial;",
+  "  white-space: normal;",
+  "}",
+  "",
+  ".node-text-rendered \u003e :first-child {",
+  "  margin-top: 0;",
+  "}",
+  "",
+  ".node-text-rendered \u003e :last-child {",
+  "  margin-bottom: 0;",
+  "}",
+  "",
+  ".node-text-rendered.play-body-text p,",
+  ".node-text-rendered.play-body-text blockquote,",
+  ".node-text-rendered.play-body-text ul {",
+  "  margin-bottom: 0.35em;",
+  "}",
+  "",
+  ".node-text-rendered.play-body-text h4 {",
+  "  margin: 0.25em 0 0.2em;",
+  "  font-size: 1.05em;",
+  "}",
+  "",
+  ".node-text-rendered.play-body-text h5 {",
+  "  margin: 0.25em 0 0.2em;",
+  "  font-size: 1em;",
+  "}",
+  "",
+  "/* Inspector body field: rendered by default, click to edit the source. Both the",
+  "   rendered view and the textarea share the field-with-expand box styling. */",
+  ".field-live-rendered {",
+  "  min-height: 64px;",
+  "  padding: 8px 34px 8px 10px;",
+  "  border: 1px solid var(--background-modifier-border);",
+  "  border-radius: var(--radius-s);",
+  "  background: var(--background-primary);",
+  "  color: var(--text-normal);",
+  "  font-family: var(--nc-font-text);",
+  "  font-size: 14px;",
+  "  line-height: 1.6;",
+  "  cursor: text;",
+  "  overflow-wrap: anywhere;",
+  "}",
+  "",
+  ".field-live-rendered:hover {",
+  "  border-color: var(--background-modifier-border-hover);",
+  "}",
+  "",
+  ".field-live-rendered[hidden] {",
+  "  display: none;",
+  "}",
+  "",
   ".play-fields {",
   "  display: grid;",
   "  gap: 8px;",
@@ -11904,6 +12296,14 @@ const CANVAS_STYLE_CSS = [
   "/* Each choice option takes a full row of its own. */",
   ".play-actions .play-choice-action {",
   "  flex: 1 1 100%;",
+  "}",
+  "",
+  ".play-choice-countdown {",
+  "  flex: 1 0 100%;",
+  "  color: var(--text-accent);",
+  "  font-size: 12px;",
+  "  font-weight: 700;",
+  "  text-align: right;",
   "}",
   "",
   ".play-action {",
@@ -11999,10 +12399,6 @@ const CANVAS_STYLE_CSS = [
   "",
   "  .document-header {",
   "    display: grid;",
-  "  }",
-  "",
-  "  .playbook-help-grid {",
-  "    grid-template-columns: 1fr;",
   "  }",
   "",
   "  .playbook-help-footer {",
@@ -12230,7 +12626,6 @@ const CANVAS_STYLE_CSS = [
   "    min-height: 0;",
   "  }",
   "",
-  "  .playbook-help-grid,",
   "  .playbook-help-footer,",
   "  .playbook-rule-options button,",
   "  .export-report-map div {",
@@ -12250,7 +12645,6 @@ const CANVAS_STYLE_CSS = [
   "    height: min(760px, calc(100% - 104px));",
   "  }",
   "",
-  "  .ai-composer-actions,",
   "  .ai-context {",
   "    flex-wrap: wrap;",
   "  }",
@@ -12355,22 +12749,46 @@ const CANVAS_STYLE_CSS = [
   "  background: rgba(220, 130, 0, 0.22);",
   "}",
   "",
-  ":host([data-theme=\"light\"]) .small-button:not(.primary):not(.danger-button),",
-  ".app-shell[data-theme=\"light\"] .small-button:not(.primary):not(.danger-button),",
-  ":host([data-theme=\"light\"]) .toolbar-button:not(.primary):not(.danger-button),",
-  ".app-shell[data-theme=\"light\"] .toolbar-button:not(.primary):not(.danger-button) {",
+  ":host([data-theme=\"light\"]) .small-button:not(.primary):not(.danger-button):not(.active),",
+  ".app-shell[data-theme=\"light\"] .small-button:not(.primary):not(.danger-button):not(.active),",
+  ":host([data-theme=\"light\"]) .toolbar-button:not(.primary):not(.danger-button):not(.active),",
+  ".app-shell[data-theme=\"light\"] .toolbar-button:not(.primary):not(.danger-button):not(.active) {",
   "  border-color: rgba(35, 31, 27, 0.3);",
   "  background: rgba(35, 31, 27, 0.045);",
   "  color: var(--text-normal);",
   "  box-shadow: inset 0 -1px 0 rgba(35, 31, 27, 0.06);",
   "}",
   "",
-  ":host([data-theme=\"light\"]) .small-button:not(.primary):not(.danger-button):hover,",
-  ".app-shell[data-theme=\"light\"] .small-button:not(.primary):not(.danger-button):hover,",
-  ":host([data-theme=\"light\"]) .toolbar-button:not(.primary):not(.danger-button):hover,",
-  ".app-shell[data-theme=\"light\"] .toolbar-button:not(.primary):not(.danger-button):hover {",
+  ":host([data-theme=\"light\"]) .small-button:not(.primary):not(.danger-button):not(.active):hover,",
+  ".app-shell[data-theme=\"light\"] .small-button:not(.primary):not(.danger-button):not(.active):hover,",
+  ":host([data-theme=\"light\"]) .toolbar-button:not(.primary):not(.danger-button):not(.active):hover,",
+  ".app-shell[data-theme=\"light\"] .toolbar-button:not(.primary):not(.danger-button):not(.active):hover {",
   "  border-color: rgba(35, 31, 27, 0.42);",
   "  background: rgba(35, 31, 27, 0.085);",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .toolbar-button.active,",
+  ".app-shell[data-theme=\"light\"] .toolbar-button.active {",
+  "  border-color: var(--interactive-accent);",
+  "  background: var(--interactive-accent);",
+  "  color: var(--text-on-accent);",
+  "  box-shadow: none;",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .toolbar-button.active:hover,",
+  ".app-shell[data-theme=\"light\"] .toolbar-button.active:hover {",
+  "  border-color: var(--interactive-accent-hover);",
+  "  background: var(--interactive-accent-hover);",
+  "  color: var(--text-on-accent);",
+  "}",
+  "",
+  ":host([data-theme=\"light\"]) .nc-file-item.active,",
+  ".app-shell[data-theme=\"light\"] .nc-file-item.active,",
+  ":host([data-theme=\"light\"]) .inspector-tab.active,",
+  ".app-shell[data-theme=\"light\"] .inspector-tab.active {",
+  "  border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));",
+  "  background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-primary));",
+  "  color: var(--text-normal);",
   "}",
   "",
   ":host([data-theme=\"light\"]) .theme-toggle-button,",
@@ -12442,11 +12860,6 @@ const CANVAS_STYLE_CSS = [
   ".ai-composer textarea:focus { box-shadow:none; outline:none; }",
   ".ai-composer-toolbar { display:flex; align-items:center; gap:6px; min-width:0; }",
   ".ai-composer-toolbar .ai-actions { margin-left:auto; }",
-  ".ai-tool-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:32px; padding:5px 8px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--text-muted); font:inherit; font-size:12px; cursor:pointer; }",
-  ".ai-tool-button:hover:not(:disabled), .ai-tool-button.active { border-color:var(--background-modifier-border); background:var(--background-modifier-hover); color:var(--text-normal); }",
-  ".ai-tool-button.active { color:var(--interactive-accent); }",
-  ".ai-tool-button svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }",
-  "",
   ".ai-actions { display:flex; gap:8px; flex-wrap:wrap; }",
   "/* Theme-aware action buttons (were unstyled browser defaults). */",
   ".ai-actions button {",
@@ -12570,7 +12983,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003clink rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"./assets/icons/favicon-32x32.png\"\u003e",
   "    \u003clink rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"./assets/icons/apple-touch-icon.png\"\u003e",
   "    \u003clink rel=\"manifest\" href=\"./site.webmanifest\"\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.3.3-f394f8c7\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.4.0-beta.1-9725bafd\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\" spellcheck=\"false\"\u003e",
@@ -12680,6 +13093,7 @@ const CANVAS_INDEX_HTML = [
   "            \u003cspan id=\"zoomReadout\" class=\"zoom-readout\" data-files=\"adventure\"\u003e100%\u003c/span\u003e",
   "            \u003cbutton class=\"toolbar-button\" data-action=\"zoom-in\" data-files=\"adventure\" title=\"Zoom in\"\u003e+\u003c/button\u003e",
   "            \u003cbutton class=\"toolbar-button\" data-action=\"center-view\" data-files=\"adventure\" title=\"Center canvas\"\u003eCenter\u003c/button\u003e",
+  "            \u003cbutton id=\"snapGridButton\" class=\"toolbar-button\" data-action=\"toggle-snap-grid\" data-files=\"adventure\" type=\"button\" title=\"Snap nodes to grid\" aria-label=\"Snap nodes to grid\" aria-pressed=\"false\"\u003eSnap\u003c/button\u003e",
   "            \u003cbutton class=\"toolbar-button primary\" data-action=\"play\" data-files=\"adventure\" title=\"Play from entry\"\u003ePlay\u003c/button\u003e",
   "          \u003c/div\u003e",
   "          \u003cdiv id=\"frameCanvasScope\" class=\"frame-canvas-scope\" hidden\u003e",
@@ -12994,13 +13408,26 @@ const CANVAS_INDEX_HTML = [
   "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"bold\" title=\"Bold\" aria-label=\"Bold\"\u003e\u003cb\u003eB\u003c/b\u003e\u003c/button\u003e",
   "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"italic\" title=\"Italic\" aria-label=\"Italic\"\u003e\u003ci\u003eI\u003c/i\u003e\u003c/button\u003e",
   "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"strike\" title=\"Strikethrough\" aria-label=\"Strikethrough\"\u003e\u003cs\u003eS\u003c/s\u003e\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"code\" title=\"Inline code\" aria-label=\"Inline code\"\u003e\u003ccode\u003e\u0026lt;/\u0026gt;\u003c/code\u003e\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"highlight\" title=\"Highlight\" aria-label=\"Highlight\"\u003e\u003cmark\u003eH\u003c/mark\u003e\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"link\" title=\"Link\" aria-label=\"Link\"\u003e\u003cu\u003eA\u003c/u\u003e\u003c/button\u003e",
   "          \u003cspan class=\"expand-editor-toolbar-sep\" aria-hidden=\"true\"\u003e\u003c/span\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"h1\" title=\"Heading 1\" aria-label=\"Heading 1\"\u003eH1\u003c/button\u003e",
   "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"h2\" title=\"Heading 2\" aria-label=\"Heading 2\"\u003eH2\u003c/button\u003e",
   "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"h3\" title=\"Heading 3\" aria-label=\"Heading 3\"\u003eH3\u003c/button\u003e",
+  "          \u003cspan class=\"expand-editor-toolbar-sep\" aria-hidden=\"true\"\u003e\u003c/span\u003e",
   "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"quote\" title=\"Quote\" aria-label=\"Quote\"\u003e\u0026gt;\u003c/button\u003e",
   "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"list\" title=\"Bullet list\" aria-label=\"Bullet list\"\u003e•\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"ordered\" title=\"Numbered list\" aria-label=\"Numbered list\"\u003e1.\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"task\" title=\"Task list\" aria-label=\"Task list\"\u003e☑\u003c/button\u003e",
+  "          \u003cspan class=\"expand-editor-toolbar-sep\" aria-hidden=\"true\"\u003e\u003c/span\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"codeblock\" title=\"Code block\" aria-label=\"Code block\"\u003e{ }\u003c/button\u003e",
+  "          \u003cbutton class=\"expand-format-button\" type=\"button\" data-action=\"expand-editor-format\" data-format=\"divider\" title=\"Divider\" aria-label=\"Divider\"\u003e—\u003c/button\u003e",
   "        \u003c/div\u003e",
-  "        \u003ctextarea id=\"expandEditorInput\" class=\"expand-editor-input\" spellcheck=\"false\" aria-label=\"Expanded text editor\"\u003e\u003c/textarea\u003e",
+  "        \u003cdiv class=\"expand-editor-live\" data-live-field\u003e",
+  "          \u003cdiv class=\"expand-editor-rendered play-body-text\" data-live-rendered role=\"textbox\" tabindex=\"0\" aria-label=\"Formatted text, click to edit\"\u003e\u003c/div\u003e",
+  "          \u003ctextarea id=\"expandEditorInput\" class=\"expand-editor-input\" data-live-source spellcheck=\"false\" aria-label=\"Expanded text editor\" hidden\u003e\u003c/textarea\u003e",
+  "        \u003c/div\u003e",
   "      \u003c/div\u003e",
   "    \u003c/dialog\u003e",
   "",
@@ -13146,7 +13573,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=1.3.3-f394f8c7\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=1.4.0-beta.1-9725bafd\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -13165,7 +13592,10 @@ function installNarrativeCanvasApp() {
   const NODE_INLINE_EDIT_CLICK_INTERVAL_MS = 500;
   const CANVAS_MIN_AUTO_SCALE = CANVAS_MIN_ZOOM;
   const CANVAS_MAX_AUTO_SCALE = 1;
+  const CANVAS_GRID_SIZE = 16;
   const HISTORY_LIMIT = 80;
+  const DEFAULT_PLAY_HISTORY_LIMIT = 30;
+  const PLAY_HISTORY_LIMIT_OPTIONS = [10, 30, 50, 100];
   const APP_SHORTCUT_CONTEXT_MS = 30000;
   const EVENT_LAYER_BASE = 0;
   const REGULAR_LAYER_BASE = 1000000;
@@ -13261,11 +13691,6 @@ function installNarrativeCanvasApp() {
     "export-blocked": "Export risk",
     "invalid-expression": "Invalid expression"
   };
-  const PLAYBOOK_CHOICE_DISPLAY_OPTIONS = [
-    { value: "hideUnavailable", label: "Hide unavailable choices" },
-    { value: "disableUnavailable", label: "Show unavailable choices disabled" },
-    { value: "showAll", label: "Show all choices" }
-  ];
   const NODE_ROUTING_MODES = [
     { value: "continue", label: "Continue by link" },
     { value: "end", label: "End route" },
@@ -13300,7 +13725,6 @@ function installNarrativeCanvasApp() {
   const EXPORT_IMAGE_MAX_PIXELS = 150000000;
   const EXPORT_IMAGE_MIN_SCALE = 0.0001;
   const EVENT_ELEMENTS_COLUMN_KEY = "eventElements";
-  const STORY_ROW_GAP = 132;
   const STORY_FRAME_PADDING = 32;
   const AUTO_LAYOUT_NODE_GAP = 72;
   const AUTO_LAYOUT_RANK_GAP = 180;
@@ -14313,6 +14737,10 @@ function installNarrativeCanvasApp() {
       "Tag suggestions": "标签建议",
       "Center": "居中",
       "Center canvas": "画布居中",
+      "Snap": "吸附",
+      "Snap nodes to grid": "将节点吸附到网格",
+      "Grid snapping enabled.": "已启用网格吸附。",
+      "Grid snapping disabled.": "已关闭网格吸附。",
       "Characters": "角色",
       "Characters Markdown exported.": "角色 Markdown 已导出。",
       "Characters JSON exported.": "角色 JSON 已导出。",
@@ -14356,6 +14784,7 @@ function installNarrativeCanvasApp() {
       "Show all entries": "显示全部条目",
       "No matching entries.": "没有匹配的条目。",
       "Choice: {label}": "选择：{label}",
+      "Branch {number}": "分支 {number}",
       "Focus source Choice node: {label}": "聚焦来源选择节点：{label}",
       "Focus next node: {title}": "聚焦下一个节点：{title}",
       "No linked next node": "未连接下一个节点",
@@ -14577,6 +15006,10 @@ function installNarrativeCanvasApp() {
       "Find nodes": "查找节点",
       "Find in Playbook": "在演示设置中查找",
       "Focus": "聚焦",
+      "Canvas focus": "画布聚焦",
+      "Document focus": "文档聚焦",
+      "Focused {title} in Document.": "已在文档中定位并高亮“{title}”。",
+      "Could not find this node in Document.": "未在文档中找到该节点。",
       "Frame": "框架",
       "Frame canvas": "框架画布",
       "Frame canvas closed.": "已退出框架画布。",
@@ -14679,6 +15112,12 @@ function installNarrativeCanvasApp() {
       "On choose": "选择时",
       "Selected choice": "选择选项",
       "Choice effect": "选项效果",
+      "Timed choice": "限时选择",
+      "Enable timer": "启用倒计时",
+      "Seconds": "秒数",
+      "Fallback passage": "超时后前往",
+      "Choose a fallback passage": "选择超时后前往的段落",
+      "Time remaining: {seconds}s": "剩余时间：{seconds} 秒",
       "Open": "打开",
       "Open frame canvas": "打开框架画布",
       "Optional: split this Dialog into multiple turns so a single node carries a back-and-forth exchange.": "可选：将该 Dialog 拆成多轮，让单个节点承载来回对话。",
@@ -14725,6 +15164,8 @@ function installNarrativeCanvasApp() {
       "Run": "运行",
       "Save": "保存",
       "Save failed": "保存失败",
+      "Project changed outside Narrative Canvas and was reloaded.": "项目已在 Narrative Canvas 外部改动，现已重新加载。",
+      "Project changed outside Narrative Canvas. Reload before continuing; saving now will preserve local work as a conflict copy.": "项目已在 Narrative Canvas 外部改动。请先重新加载；此时保存会将本地工作保留为冲突副本。",
       "Save project state": "保存项目状态",
       "Save or create a project file in the vault.": "保存或在库中创建项目文件。",
       "Saved": "已保存",
@@ -14934,6 +15375,7 @@ function installNarrativeCanvasApp() {
       "Effects": "效果",
       "Effect added.": "已添加效果。",
       "Effect lines": "效果语句",
+      "Conditional effect syntax: if variable1 > variable2 then set variable3 = variable1 else set variable3 = variable2": "条件效果语法：if variable1 > variable2 then set variable3 = variable1 else set variable3 = variable2",
       "Condition expression": "条件表达式",
       "Each option is available when its condition is met; selecting it runs its Effects. Empty Requires = always available.": "条件成立时选项可用；选择后执行该选项的效果。条件要求为空表示始终可用。",
       "Event Column": "事件列",
@@ -15412,7 +15854,26 @@ function installNarrativeCanvasApp() {
       "Add or delete choices in the node inspector; Document edits existing choices.": "请在节点检查器中新增或删除选项；文档仅编辑现有选项。",
       "Add or delete routes on the canvas; Document edits existing routes.": "请在画布中新增或删除路线；文档仅编辑现有路线。",
       "Document changes synced to project.": "文档修改已同步到项目。",
-      "Fix the Document source error before exporting.": "请先修正文档源错误，再执行导出。"
+      "Fix the Document source error before exporting.": "请先修正文档源错误，再执行导出。",
+      "Field type": "字段类型",
+      "List": "列表",
+      "Empty": "空值",
+      "Field name {key} already exists.": "字段名 {key} 已存在。",
+      "Field value is invalid for type {type}.": "字段值不符合 {type} 类型。",
+      "The library entry and its managed Markdown file will be moved to the vault trash. Linked images and referenced files are kept.": "资料条目及其受管理的 Markdown 文件将移入库废纸篓；关联图片和引用文件会保留。",
+      "The library entry will be removed from this project. Linked images and referenced files are kept.": "资料条目将从项目中移除；关联图片和引用文件会保留。",
+      "Could not move the library Markdown file to trash. The entry was kept.": "无法把资料库 Markdown 文件移入废纸篓，条目已保留。",
+      "Play history": "游玩历史",
+      "{count} cards": "{count} 张卡片",
+      "Export playthrough": "导出游玩记录",
+      "No playthrough is available to export.": "当前没有可导出的游玩记录。",
+      "Playthrough": "游玩记录",
+      "Captured": "记录时间",
+      "Cards": "卡片",
+      "Earlier cards omitted": "已省略的早期卡片",
+      "Operations": "操作记录",
+      "Final state": "最终状态",
+      "Playthrough exported.": "游玩记录已导出。"
     }
   };
 
@@ -15477,6 +15938,7 @@ function installNarrativeCanvasApp() {
     language: "en",
     theme: "dark",
     exportImageScale: 1,
+    snapToGrid: false,
     view: { x: 0, y: 0, scale: DEFAULT_CANVAS_ZOOM },
     connectingFrom: null,
     draggingNode: null,
@@ -15523,6 +15985,7 @@ function installNarrativeCanvasApp() {
     hasUnsavedChanges: false,
     isSaving: false,
     saveError: false,
+    externalProjectChangePending: false,
     statusOverride: false,
     statusTimer: null,
     dirtyVersion: 0,
@@ -15572,6 +16035,8 @@ function installNarrativeCanvasApp() {
     playPath: [],
     playStepIndex: 0,
     playSteps: [],
+    playTrimmedCount: 0,
+    lastPlaySession: null,
     playTurnIndex: 0,
     playVariables: null,
     playVisitedNodeIds: new Set(),
@@ -15579,6 +16044,7 @@ function installNarrativeCanvasApp() {
     playManualActionRunIds: new Set(),
     playDebugOpen: true,
     playRefreshTimer: null,
+    playChoiceTimer: null,
     immersiveFullscreen: false,
     nodePanelPointerDown: false,
     floatingInspectorPanel: "",
@@ -15612,7 +16078,7 @@ function installNarrativeCanvasApp() {
     mention: null,
     vaultFileSuggestions: null,
     vaultFileSuggestionRequestId: 0,
-    vaultFileSuggestionSuppressFocusOnce: false,
+    vaultFileSuggestionSuppressedTargets: new WeakSet(),
     vaultFilePreviewCache: new Map(),
     characterRenderContext: null,
     characterIndex: null,
@@ -15659,6 +16125,7 @@ function installNarrativeCanvasApp() {
     createSampleProjectFile,
     ensureVaultFile: ensureVaultProjectFile,
     loadVaultProject: loadCurrentVaultProject,
+    handleExternalProjectChange,
     reloadCodexFiles,
     refreshCodexCanvasPreviews,
     refreshAiLauncher,
@@ -15816,6 +16283,7 @@ function installNarrativeCanvasApp() {
     dom.themeToggle = dom.scope.querySelector("#themeToggle");
     dom.languageToggle = dom.scope.querySelector("#languageToggle");
     dom.exportImageScale = dom.scope.querySelector("#exportImageScale");
+    dom.snapGridButton = dom.scope.querySelector("#snapGridButton");
     dom.vaultProjectTitle = dom.scope.querySelector("#vaultProjectTitle");
     dom.projectFileName = dom.scope.querySelector("#projectFileName");
     dom.projectFilePath = dom.scope.querySelector("#projectFilePath");
@@ -16230,6 +16698,7 @@ function installNarrativeCanvasApp() {
       window.clearTimeout(state.playRefreshTimer);
       state.playRefreshTimer = null;
     }
+    clearPlayChoiceTimer();
     clearAutoSaveTimer();
     clearStatusTimer();
     clearStoryPanelRenderTimer();
@@ -17260,6 +17729,7 @@ function installNarrativeCanvasApp() {
       "commit-playbook-choice-effect-draft",
       "commit-playbook-action-draft",
       "delete-node-effect",
+      "toggle-choice-timer",
       "add-variable",
       "delete-playbook-choice-effect",
       "migrate-legacy-gate",
@@ -17406,6 +17876,10 @@ function installNarrativeCanvasApp() {
     if (dom.exportImageScale) {
       dom.exportImageScale.value = getExportImageScalePreset().value;
     }
+    if (dom.snapGridButton) {
+      dom.snapGridButton.classList.toggle("active", state.snapToGrid);
+      dom.snapGridButton.setAttribute("aria-pressed", String(state.snapToGrid));
+    }
     if (dom.vaultProjectTitle) {
       dom.vaultProjectTitle.textContent = state.project.title || t("Untitled Story");
     }
@@ -17497,6 +17971,7 @@ function installNarrativeCanvasApp() {
       ["[data-action='zoom-out']", "-"],
       ["[data-action='zoom-in']", "+"],
       ["[data-action='center-view']", "Center"],
+      ["[data-action='toggle-snap-grid']", "Snap"],
       ["[data-action='play']", "Play"],
       [".frame-canvas-label", "Frame canvas"],
       ["#frameCanvasExitButton", "Exit"],
@@ -17530,6 +18005,8 @@ function installNarrativeCanvasApp() {
       ["[data-action='zoom-out']", "title", "Zoom out"],
       ["[data-action='zoom-in']", "title", "Zoom in"],
       ["[data-action='center-view']", "title", "Center canvas"],
+      ["[data-action='toggle-snap-grid']", "title", "Snap nodes to grid"],
+      ["[data-action='toggle-snap-grid']", "aria-label", "Snap nodes to grid"],
       ["[data-action='play']", "title", "Play from entry"],
       ["[data-action='export-json']", "title", "Export editable project file (.json)"],
       ["[data-action='export-story-md']", "title", "Export readable story text (.md)"],
@@ -18257,7 +18734,7 @@ function installNarrativeCanvasApp() {
 
   function scheduleAutoSave() {
     clearAutoSaveTimer();
-    if (!initialized || !state.hasUnsavedChanges || state.isSaving) return;
+    if (!initialized || !state.hasUnsavedChanges || state.isSaving || state.externalProjectChangePending) return;
     const interval = getAutoSaveIntervalMs();
     if (!interval) return;
     state.autoSaveTimer = window.setTimeout(() => {
@@ -19301,7 +19778,7 @@ function installNarrativeCanvasApp() {
 
   function buildCharacterSearchText(character) {
     const extraFieldText = normalizeCodexExtraFields(character.extraFields)
-      .map((field) => `${field.key} ${field.value}`);
+      .map((field) => `${field.key} ${formatCodexExtraFieldValue(field.value, field.type)}`);
     return [character.name, character.kind, character.role, character.voice, character.tags, character.notes, ...extraFieldText, ...normalizeCodexVaultFiles(character.vaultFiles)]
       .filter(Boolean)
       .map(String)
@@ -19642,7 +20119,17 @@ function installNarrativeCanvasApp() {
         ${fields.length ? fields.map((field, index) => `
           <div class="codex-extra-field-row">
             <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="key" value="${escapeAttr(field.key)}" placeholder="${escapeAttr(t("Field name"))}" spellcheck="false">
-            <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="value" value="${escapeAttr(field.value)}" placeholder="${escapeAttr(t("Field value"))}">
+            <select data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="type" aria-label="${escapeAttr(t("Field type"))}">
+              ${[
+                ["string", "Text"],
+                ["number", "Number"],
+                ["boolean", "Boolean"],
+                ["array", "List"],
+                ["object", "Object"],
+                ["null", "Empty"]
+              ].map(([value, label]) => `<option value="${value}" ${field.type === value ? "selected" : ""}>${escapeHtml(t(label))}</option>`).join("")}
+            </select>
+            <input data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" data-character-extra-part="value" value="${escapeAttr(formatCodexExtraFieldValue(field.value, field.type))}" placeholder="${escapeAttr(t("Field value"))}" ${field.type === "null" ? "disabled" : ""}>
             <button class="icon-button danger-button" type="button" data-action="remove-codex-extra-field" data-character-id="${escapeAttr(character.id)}" data-character-extra-index="${index}" title="${escapeAttr(t("Remove field"))}" aria-label="${escapeAttr(t("Remove field"))}">×</button>
           </div>
         `).join("") : `<div class="codex-extra-fields-empty">${t("No custom fields yet. Fields sync to the entry's markdown frontmatter.")}</div>`}
@@ -20378,50 +20865,6 @@ function installNarrativeCanvasApp() {
     `;
   }
 
-  function renderPlaybookChoiceEffectDraft(row) {
-    return renderEffectDraftRow({
-      action: "commit-playbook-choice-effect-draft",
-      defaultTrigger: "onChoose",
-      includeTrigger: false,
-      effectId: row.id
-    });
-  }
-
-  function renderPlaybookGateEffectRow(effect, row, effectIndex) {
-    return `
-      <div class="node-effect-row no-trigger playbook-gate-effect-row">
-        ${renderStateKeySelect({
-          attributes: `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="key"`,
-          selected: effect.key || "",
-          placeholder: "State key"
-        })}
-        ${renderStateEffectOperationControl(effect, `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="op"`)}
-        ${renderStateEffectValueControl(effect, `data-gate-effect-id="${escapeAttr(row.id)}" data-gate-effect-index="${effectIndex}" data-gate-effect-field="value"`)}
-      </div>
-    `;
-  }
-
-  function renderPlaybookGateConditionControl(row) {
-    if (row.kind === "legacy") {
-      return `<input value="${escapeAttr(row.condition)}" readonly spellcheck="false">`;
-    }
-    return renderConditionBuilderControl({
-      expression: row.condition,
-      mode: row.conditionMode,
-      className: "gate-condition-builder",
-      keyAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="key"`,
-      opAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="op"`,
-      valueAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="value"`,
-      connectorAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="connector"`,
-      modeAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-condition-field="mode"`,
-      customAttributes: `data-gate-id="${escapeAttr(row.id)}" data-gate-field="condition"`
-    });
-  }
-
-  function getGateConditionStatus(row) {
-    return getConditionEvaluationStatus(row?.condition, state.project.variables);
-  }
-
   function getConditionEvaluationStatus(source, variables = state.project.variables) {
     const text = String(source || "").trim();
     if (!text) return { status: "always" };
@@ -20511,45 +20954,82 @@ function installNarrativeCanvasApp() {
     const triggerMatch = line.match(/^\[(onVisit|onChoose|manual)\]\s*(.+)$/i);
     const trigger = forceTrigger || (triggerMatch ? normalizePlaybookActionTrigger(triggerMatch[1]) : normalizePlaybookActionTrigger(defaultTrigger));
     const body = triggerMatch ? triggerMatch[2].trim() : line;
-    const match = body.match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([^\s=]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
-    if (!match) {
+    const conditional = parseConditionalEffectBody(body, trigger);
+    if (conditional) {
+      const conditionStatus = getConditionEvaluationStatus(conditional.condition, state.project.variables);
+      if (conditionStatus.status === "invalid") {
+        return { effect: null, status: { status: "invalid", message: conditionStatus.message || t("Invalid condition syntax") } };
+      }
+      for (const branch of [conditional.thenEffect, conditional.elseEffect]) {
+        const validation = validateParsedStateEffect(branch);
+        if (validation) return { effect: null, status: validation };
+      }
+      return { effect: conditional, status: { status: "ok" } };
+    }
+    const effect = parseStateEffectBody(body, trigger);
+    if (!effect) {
       return { effect: null, status: { status: "invalid", message: t("Invalid effect syntax") } };
     }
-    const op = normalizePlaybookEffectTextOperation(match[1]);
-    const key = normalizeOptionalString(match[2]).trim();
-    if (!key) return { effect: null, status: { status: "invalid", message: t("Effect key is required.") } };
-    const effect = {
-      trigger,
-      op,
-      key,
-      value: normalizeOptionalString(match[3] ?? match[4] ?? "")
-    };
-    const info = getVariableInfoForStateEffect(effect);
-    if (!info.hasVariable) {
-      return { effect: null, status: { status: "unknown", key, message: t("Unknown variable: {key}", { key }) } };
-    }
-    const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
-    if (!allowed.some((option) => option.value === op)) {
-      return { effect: null, status: { status: "invalid", message: t("Operation not available for this variable type.") } };
-    }
+    const validation = validateParsedStateEffect(effect);
+    if (validation) return { effect: null, status: validation };
     return {
       effect: normalizeStateEffectForVariableSchema(effect, { coerceValue: false }),
       status: { status: "ok" }
     };
   }
 
+  function validateParsedStateEffect(effect) {
+    const key = normalizeOptionalString(effect?.key).trim();
+    if (!key) return { status: "invalid", message: t("Effect key is required.") };
+    const info = getVariableInfoForStateEffect(effect);
+    if (!info.hasVariable) {
+      return { status: "unknown", key, message: t("Unknown variable: {key}", { key }) };
+    }
+    const allowed = getAllowedPlaybookActionOperationsForVariableInfo(info);
+    if (!allowed.some((option) => option.value === effect.op)) {
+      return { status: "invalid", message: t("Operation not available for this variable type.") };
+    }
+    return null;
+  }
+
+  function parseStateEffectBody(body, trigger = "onVisit") {
+    const match = normalizeOptionalString(body).trim().match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([^\s=]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
+    if (!match) return null;
+    const value = normalizeOptionalString(match[3] ?? match[4] ?? "").trim();
+    return {
+      trigger: normalizePlaybookActionTrigger(trigger),
+      op: normalizePlaybookEffectTextOperation(match[1]),
+      key: normalizeOptionalString(match[2]).trim(),
+      value,
+      valueMode: getStateEffectValueMode(value)
+    };
+  }
+
+  function parseConditionalEffectBody(body, trigger = "onVisit") {
+    const match = normalizeOptionalString(body).trim().match(/^if\s+(.+?)\s+then\s+(.+?)\s+else\s+(.+)$/i);
+    if (!match) return null;
+    const thenEffect = parseStateEffectBody(match[2], trigger);
+    const elseEffect = parseStateEffectBody(match[3], trigger);
+    if (!thenEffect || !elseEffect) return null;
+    return {
+      trigger: normalizePlaybookActionTrigger(trigger),
+      op: "ifElse",
+      condition: match[1].trim(),
+      thenEffect,
+      elseEffect
+    };
+  }
+
+  function getStateEffectValueMode(value) {
+    const key = normalizeExpressionVariableTerm(value);
+    if (!key) return "literal";
+    return resolveRuntimeStatePath(key, state.project.variables).found ? "variable" : "literal";
+  }
+
   function normalizePlaybookEffectTextOperation(value) {
     const op = normalizeOptionalString(value).trim().toLowerCase();
     if (op === "invert") return "toggle";
     return normalizePlaybookActionOperation(op);
-  }
-
-  function formatPlaybookEffectSummary(effect) {
-    const operation = PLAYBOOK_ACTION_OPERATIONS.find((option) => option.value === effect?.op)?.label || effect?.op || "Set";
-    const key = normalizeOptionalString(effect?.key).trim();
-    const value = normalizeOptionalString(effect?.value).trim();
-    const valueSuffix = value && effect?.op !== "toggle" && effect?.op !== "clear" ? ` = ${value}` : "";
-    return `${t(operation)} ${key}${valueSuffix}`.trim();
   }
 
   function formatLegacyGateCondition(action) {
@@ -20956,9 +21436,16 @@ function installNarrativeCanvasApp() {
     const scanEffectValue = (effect, node, ref) => {
       if (!effect || effect.op === "clear") return;
       scanTemplateReferences(effect.value, node, { ...ref, label: `${ref?.label || "Effect"} value` }, addInterpolation, addStatus);
+      if (effect.valueMode === "variable") addRead(normalizeExpressionVariableTerm(effect.value), { ...ref, label: `${ref?.label || "Effect"} value` });
     };
     const scanStateEffect = (effect, node, ref) => {
       if (!effect) return;
+      if (effect.op === "ifElse") {
+        scanExpression(effect.condition, node, { ...ref, label: `${ref?.label || "Effect"} condition` });
+        scanStateEffect(effect.thenEffect, node, { ...ref, label: `${ref?.label || "Effect"} then` });
+        scanStateEffect(effect.elseEffect, node, { ...ref, label: `${ref?.label || "Effect"} else` });
+        return;
+      }
       const key = normalizeStateReportKey(effect.key);
       if (key) {
         addWrite(key, ref);
@@ -21157,7 +21644,7 @@ function installNarrativeCanvasApp() {
   }
 
   function isRuntimeOnlyEffectOperation(op) {
-    return !["set", "add", "subtract", "toggle"].includes(op || "set");
+    return !["set", "add", "subtract", "toggle", "ifElse"].includes(op || "set");
   }
 
   function isPlaybookActionRuntimeOnlyForPortableExport(action) {
@@ -21262,23 +21749,6 @@ function installNarrativeCanvasApp() {
     const issueB = b.statuses.some((status) => status !== "ok") ? 0 : 1;
     if (issueA !== issueB) return issueA - issueB;
     return a.key.localeCompare(b.key);
-  }
-
-  function getPlaybookCategoryDisplayLabel(category) {
-    const labels = {
-      Quest: "Quest State",
-      "Quest Entry": "Quest Entry State",
-      Variable: "Variable State",
-      Actor: "Actor State",
-      Item: "Item State",
-      Location: "Location State",
-      "Sim Status": "Sim State",
-      Alert: "Alert State",
-      Misc: "Misc State",
-      Custom: "Custom State",
-      "Manual Enter": "Manual Key"
-    };
-    return labels[category] || category;
   }
 
   function getVariableDefinitionFilterOptions(entries) {
@@ -21471,55 +21941,6 @@ function installNarrativeCanvasApp() {
     return renderPlaybookOptionList(allowedOperations, op);
   }
 
-  function renderStateEffectOperationControl(effect, attributes) {
-    const op = normalizePlaybookActionOperation(effect?.op || "set");
-    if (!PLAYBOOK_ACTION_OPERATIONS.some((option) => option.value === op)) {
-      return `
-        <div class="playbook-action-fixed-op" title="${escapeAttr(t("This old action is kept for compatibility. New actions should use state operations."))}">
-          <strong>${escapeHtml(t("Legacy runtime-only action"))}</strong>
-          <small>${escapeHtml(op)}</small>
-        </div>
-      `;
-    }
-    const variableInfo = getVariableInfoForStateEffect(effect);
-    const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
-    if (!allowedOperations.length) {
-      return `
-        <div class="playbook-action-fixed-op" title="${escapeAttr(t("Define this key in Variables before this action can run."))}">
-          <strong>${escapeHtml(t("Missing variable"))}</strong>
-          <small>${escapeHtml(t("Operation"))}</small>
-        </div>
-      `;
-    }
-    if (!allowedOperations.some((option) => option.value === op)) {
-      return `
-        <div class="playbook-action-fixed-op" title="${escapeAttr(t("Operation not available for this variable type."))}">
-          <strong>${escapeHtml(t("Operation not available for this variable type."))}</strong>
-          <small>${escapeHtml(op)}</small>
-        </div>
-      `;
-    }
-    return `
-      <select ${attributes}>
-        ${renderPlaybookOptionList(allowedOperations, op)}
-      </select>
-    `;
-  }
-
-  function renderStateEffectValueControl(effect, attributes) {
-    const variableInfo = getVariableInfoForStateEffect(effect);
-    const allowedOperations = getAllowedPlaybookActionOperationsForVariableInfo(variableInfo);
-    const op = normalizePlaybookActionOperation(effect?.op || "set");
-    const operationAllowed = allowedOperations.some((option) => option.value === op);
-    return renderPlaybookActionValueField({
-      attributes,
-      value: effect?.value || "",
-      variableInfo,
-      op,
-      disabled: !operationAllowed
-    });
-  }
-
   function normalizeStateEffectForVariableSchema(effect, options = {}) {
     const action = {
       id: "effect",
@@ -21576,20 +21997,6 @@ function installNarrativeCanvasApp() {
         ${renderPlaybookJsonButton(getPlaybookJsonPairToken("rowId", `node:${node.id}`))}
       </div>
     `;
-  }
-
-  function renderScriptNodeConditionControl(node, logic) {
-    return renderConditionBuilderControl({
-      expression: logic.requirements,
-      mode: logic.requirementsMode,
-      className: "script-condition-builder",
-      keyAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="key"`,
-      opAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="op"`,
-      valueAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="value"`,
-      connectorAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="connector"`,
-      modeAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-condition-field="mode"`,
-      customAttributes: `data-script-node-id="${escapeAttr(node.id)}" data-script-node-field="requirements"`
-    });
   }
 
   function renderPlaybookConditionCodeCell({ value = "", attributes = "", readonly = false } = {}) {
@@ -21952,16 +22359,6 @@ function installNarrativeCanvasApp() {
     return [...keys].filter(Boolean).sort((a, b) => a.localeCompare(b));
   }
 
-  function getPlaybookTargetSuggestions() {
-    const targets = new Set();
-    getProjectNodeTypes().forEach((typeDef) => targets.add(typeDef.type));
-    state.project.nodes.forEach((node) => {
-      if (node.id) targets.add(node.id);
-      if (node.title) targets.add(node.title);
-    });
-    return [...targets].filter(Boolean).sort((a, b) => a.localeCompare(b));
-  }
-
   // Richer datalist entries that disambiguate duplicate titles by appending the node id.
   // Used by the renderer in Phase 4 to fix the "two scenes both called Hesitation" silent-fail mode.
   function getPlaybookTargetEntries() {
@@ -22039,13 +22436,6 @@ function installNarrativeCanvasApp() {
         ${card.body}
       </article>
     `;
-  }
-
-  function formatPlaybookRuleKindLabel(kind) {
-    return String(kind || "")
-      .split(" + ")
-      .map((part) => t(part))
-      .join(" + ");
   }
 
   function getPlaybookRuleCards() {
@@ -22133,11 +22523,6 @@ function installNarrativeCanvasApp() {
       help: (helpById[id] || []).map((item) => t(item)).join(" "),
       body: bodyById[id] || `<p>${escapeHtml(String(rule.value ?? ""))}</p>`
     };
-  }
-
-  function formatPlaybookChoicesSummary(value) {
-    if (Array.isArray(value)) return value.join(" / ");
-    return String(value || "choices");
   }
 
   function getPlaybookJsonRows(value) {
@@ -23349,6 +23734,7 @@ function installNarrativeCanvasApp() {
     const nodeClasses = [
       "node",
       isFrame ? `frame ${frameClass}` : "",
+      isChoiceNode(node) ? "choice-node" : "",
       isFrameCollapsed(node) ? "collapsed" : "",
       isSelected ? "selected" : "",
       isMultiSelected ? "multi-selected" : "",
@@ -23437,7 +23823,10 @@ function installNarrativeCanvasApp() {
     if (inlineEditField && inlineEditField !== "title") {
       return `<textarea class="node-inline-editor node-inline-text" data-inline-node-field="${escapeAttr(inlineEditField)}" data-node-id="${escapeAttr(node.id)}" data-no-drag="true" aria-label="Edit node content">${escapeHtml(getInlineNodeFieldValue(node, inlineEditField))}</textarea>`;
     }
-    return `<div class="node-text">${escapeHtml(displayBody(node))}</div>`;
+    const body = displayBody(node);
+    // Non-edit cards render the Markdown so bold/italic/heading/quote/list show as
+    // formatted text; the raw markers only appear once you click in to edit.
+    return `<div class="node-text node-text-rendered play-body-text">${renderNarrativeMarkdown(body)}</div>`;
   }
 
   function renderNodeCardContent(node, inlineEditField) {
@@ -24330,7 +24719,7 @@ function installNarrativeCanvasApp() {
     const patch = state.aiPendingPatch;
     const operations = Array.isArray(patch?.operations) ? patch.operations : [];
     const proposal = patch ? `<section class="ai-proposal"><h3>${escapeHtml(patch.summary || t("Canvas change proposal"))}</h3><ol>${operations.map((op) => `<li><code>${escapeHtml(op.op || "")}</code> ${escapeHtml(op.node?.title || op.id || op.from || "")}</li>`).join("")}</ol><div class="ai-actions"><button data-action="ai-apply-patch" type="button">${t("Apply to canvas")}</button><button data-action="ai-reject-patch" type="button">${t("Reject")}</button></div></section>` : "";
-    const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><label class="ai-config-check"><input type="checkbox" data-ai-config="narrativeKnowledge"${isAiNarrativeKnowledgeEnabled() ? " checked" : ""}>${t("Narrative craft guidance")}</label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
+      const webConfig = window.NarrativeCanvasHost ? "" : `<details class="ai-config"><summary>${t("Connection settings")}</summary><label>Endpoint<input data-ai-config="endpoint" value="${escapeAttr(config.endpoint || "")}" placeholder="https://api.example.com/v1/chat/completions"></label><label>API key<input data-ai-config="apiKey" type="password" value="${escapeAttr(config.apiKey || "")}"></label><label>Model<input data-ai-config="model" value="${escapeAttr(config.model || "")}" placeholder="model-name"></label><label class="ai-config-check"><input type="checkbox" data-ai-config="narrativeKnowledge"${isAiNarrativeKnowledgeEnabled() ? " checked" : ""}>${t("Narrative craft guidance")}</label><button data-action="ai-save-config" type="button">${t("Save settings")}</button></details>`;
     const composerLocked = state.aiBusy;
     dom.aiPanel.innerHTML = `<div class="ai-workbench">${webConfig}<div class="ai-context"><span>${t("Context")}: ${selected.length ? selected.map((id) => `#${escapeHtml(id)}`).join(", ") : t("Entire canvas")}</span>${state.aiMessages.length ? `<button class="ai-copy-button" data-action="ai-copy-conversation" type="button" title="${escapeAttr(t("Copy conversation"))}" aria-label="${escapeAttr(t("Copy conversation"))}">${aiCopyIcon()}<span>${escapeHtml(t("Copy conversation"))}</span></button>` : ""}</div><div class="ai-messages" aria-live="polite">${messages || `<p class="muted">${t("Discuss the story, then ask AI to propose canvas changes.")}</p>`}</div>${proposal}${state.aiError ? `<p class="ai-error">${escapeHtml(state.aiError)}</p>` : ""}<div class="ai-composer"><textarea data-ai-prompt rows="5" placeholder="${escapeAttr(t("Ask about the story or request a canvas change. Enter to send; Shift+Enter for a new line."))}" ${composerLocked ? "disabled" : ""}>${escapeHtml(state.aiPromptDraft)}</textarea><div class="ai-composer-toolbar"><div class="ai-actions"><button data-action="ai-send" type="button" ${state.aiBusy ? "disabled" : ""}>${state.aiBusy ? t("Responding...") : t("Send")}</button>${state.aiBusy ? `<button data-action="ai-stop" type="button">${t("Stop")}</button>` : ""}<button data-action="ai-clear" type="button">${t("Clear")}</button></div></div></div></div>`;
     dom.aiPanel.querySelector(".ai-messages")?.scrollTo?.({ top: 999999 });
@@ -24381,16 +24770,48 @@ function installNarrativeCanvasApp() {
       dom.expandEditorInput.dataset.nodeField = field;
       dom.expandEditorInput.dataset.nodeId = nodeId;
     }
+    // Open in rendered ("what you see") mode; a click switches to the source editor.
+    const wrap = dom.expandEditorInput?.closest("[data-live-field]");
+    if (wrap) renderLiveField(wrap);
     dom.expandEditorDialog.showModal();
-    runAfterRender(() => {
-      dom.expandEditorInput?.focus?.();
-      const length = dom.expandEditorInput?.value.length || 0;
-      dom.expandEditorInput?.setSelectionRange?.(length, length);
-    });
   }
 
   function closeExpandEditor() {
-    if (dom.expandEditorDialog?.open) dom.expandEditorDialog.close();
+    if (!dom.expandEditorDialog?.open) return;
+    dom.expandEditorDialog.close();
+    // Do not rely on the browser's close-event scheduling to refresh the inspector.
+    // The close handler remains registered for Escape and other native dialog exits.
+    handleExpandEditorClose();
+  }
+
+  // "Render by default, click to edit" fields. A `[data-live-field]` holds a rendered
+  // Markdown view (`[data-live-rendered]`) and a source textarea (`[data-live-source]`).
+  // The rendered view is shown until the user clicks in; while the source is focused
+  // the raw **/##/> markers are visible so they can be edited, and on blur (unless the
+  // field is `[data-live-persist]`, like the large modal) it renders again.
+  function renderLiveField(wrap) {
+    const source = wrap?.querySelector("[data-live-source]");
+    const rendered = wrap?.querySelector("[data-live-rendered]");
+    if (!source || !rendered) return;
+    const value = source.value || "";
+    rendered.innerHTML = value.trim()
+      ? renderNarrativeMarkdown(value)
+      : `<span class="field-live-placeholder">${escapeHtml(t("Click to edit"))}</span>`;
+    rendered.hidden = false;
+    source.hidden = true;
+    wrap.classList.remove("live-editing");
+  }
+
+  function enterLiveFieldEdit(wrap) {
+    const source = wrap?.querySelector("[data-live-source]");
+    const rendered = wrap?.querySelector("[data-live-rendered]");
+    if (!source || !rendered || !source.hidden) return;
+    rendered.hidden = true;
+    source.hidden = false;
+    wrap.classList.add("live-editing");
+    source.focus({ preventScroll: true });
+    const length = source.value.length;
+    source.setSelectionRange?.(length, length);
   }
 
   // Lightweight Markdown formatting for the expanded text editor. Inline styles wrap
@@ -24398,11 +24819,15 @@ function installNarrativeCanvasApp() {
   function applyExpandEditorFormat(action) {
     const input = dom.expandEditorInput;
     if (!input) return;
+    // The toolbar only makes sense on the source; switch out of rendered mode first.
+    const wrap = input.closest("[data-live-field]");
+    if (wrap && input.hidden) enterLiveFieldEdit(wrap);
     const value = input.value;
     const start = input.selectionStart ?? value.length;
     const end = input.selectionEnd ?? start;
     const selected = value.slice(start, end);
-    const inlineWrap = { bold: "**", italic: "*", strike: "~~" }[action];
+    const inlineWrap = { bold: "**", italic: "*", strike: "~~", code: "`", highlight: "==" }[action];
+    const prefix = { h1: "# ", h2: "## ", h3: "### ", quote: "> ", list: "- ", ordered: "1. ", task: "- [ ] " }[action];
 
     let nextValue;
     let nextStart;
@@ -24412,9 +24837,28 @@ function installNarrativeCanvasApp() {
       nextValue = `${value.slice(0, start)}${inlineWrap}${inner}${inlineWrap}${value.slice(end)}`;
       nextStart = start + inlineWrap.length;
       nextEnd = nextStart + inner.length;
-    } else {
-      const prefix = { h2: "## ", h3: "### ", quote: "> ", list: "- " }[action];
-      if (!prefix) return;
+    } else if (action === "link") {
+      const label = selected || t("text");
+      const url = "https://";
+      nextValue = `${value.slice(0, start)}[${label}](${url})${value.slice(end)}`;
+      // Select the URL placeholder so it is ready to overwrite.
+      nextStart = start + label.length + 3;
+      nextEnd = nextStart + url.length;
+    } else if (action === "codeblock") {
+      const inner = selected || t("code");
+      const before = value.slice(0, start);
+      const lead = before && !before.endsWith("\n") ? "\n" : "";
+      const block = `${lead}\`\`\`\n${inner}\n\`\`\`\n`;
+      nextValue = `${before}${block}${value.slice(end)}`;
+      nextStart = start + lead.length + 4;
+      nextEnd = nextStart + inner.length;
+    } else if (action === "divider") {
+      const before = value.slice(0, start);
+      const lead = before && !before.endsWith("\n") ? "\n" : "";
+      const insert = `${lead}---\n`;
+      nextValue = `${before}${insert}${value.slice(end)}`;
+      nextStart = nextEnd = start + insert.length;
+    } else if (prefix) {
       // Expand the range to whole lines, then toggle the prefix on each.
       const lineStart = value.lastIndexOf("\n", start - 1) + 1;
       let lineEnd = value.indexOf("\n", end);
@@ -24427,6 +24871,8 @@ function installNarrativeCanvasApp() {
       nextValue = `${value.slice(0, lineStart)}${nextBlock}${value.slice(lineEnd)}`;
       nextStart = lineStart;
       nextEnd = lineStart + nextBlock.length;
+    } else {
+      return;
     }
 
     input.value = nextValue;
@@ -24437,6 +24883,7 @@ function installNarrativeCanvasApp() {
   }
 
   function handleExpandEditorClose() {
+    if (!state.expandEditor && !dom.expandEditorInput?.dataset.nodeField) return;
     state.expandEditor = null;
     // Clear the routing attributes so the closed modal's textarea is not a stray
     // duplicate of the inspector field.
@@ -24523,6 +24970,8 @@ function installNarrativeCanvasApp() {
   - Character: drive people by concrete wants (external goal) and needs (internal lack). Reveal character through choices under pressure. Give antagonists their own coherent logic. Track arcs of change.
   - Conflict & stakes: keep dramatic tension via opposing forces and meaningful consequences; raise stakes as the story proceeds.
   - Scene craft: enter late, leave early; ground exposition in action and subtext; let dialogue carry conflict and voice rather than plain information.
+  - Cinematic storytelling: express dramatic beats through staging, composition, point of view, shot scale, and motivated camera movement. Preserve screen direction and spatial continuity unless a deliberate break serves the scene.
+  - Editing & sound: cut on decisions, revelations, movement, or changes in power; vary shot duration with tension; use sound, silence, and off-screen space to carry story information that dialogue or imagery should not repeat.
   - Branching: make choices reflect values and produce consequences that matter; avoid false choices; keep routes thematically coherent.
   Use these as guidance, not rigid rules; respect the author's intent and existing material.`;
 
@@ -24821,6 +25270,15 @@ function installNarrativeCanvasApp() {
           <span>${t("Project notes")}</span>
           <textarea data-project-field="notes" spellcheck="false" placeholder="${escapeAttr(t("Project notes"))}">${escapeHtml(state.project.notes || "")}</textarea>
         </label>
+        <section class="project-play-settings">
+          <label class="field">
+            <span>${t("Play history")}</span>
+            <select data-project-field="playHistoryLimit">
+              ${PLAY_HISTORY_LIMIT_OPTIONS.map((limit) => `<option value="${limit}" ${normalizePlayHistoryLimit(state.project.playHistoryLimit) === limit ? "selected" : ""}>${escapeHtml(t("{count} cards", { count: limit }))}</option>`).join("")}
+            </select>
+          </label>
+          <button class="small-button" type="button" data-action="export-play-session" ${state.lastPlaySession || state.playPath.length ? "" : "disabled"}>${t("Export playthrough")}</button>
+        </section>
         <section class="project-file-box">
           <div class="project-file-box-header">
             <div class="project-file-box-title">
@@ -24883,8 +25341,9 @@ function installNarrativeCanvasApp() {
         <div class="button-row">
           ${isFrameNode(node) ? `<button class="small-button" data-action="open-frame-canvas" data-node-id="${escapeAttr(node.id)}">${t("Open frame canvas")}</button>` : ""}
           <button class="small-button" data-action="duplicate-node">${t("Duplicate")}</button>
+          <button class="small-button" data-action="focus-node">${t("Canvas focus")}</button>
+          ${!isFrameNode(node) ? `<button class="small-button" data-action="focus-node-document">${t("Document focus")}</button>` : ""}
           <button class="small-button danger-button" data-action="delete-node">${t("Delete node")}</button>
-          <button class="small-button" data-action="focus-node">${t("Focus")}</button>
         </div>
       </div>
     `;
@@ -24964,11 +25423,16 @@ function installNarrativeCanvasApp() {
   }
 
   function renderNodeBodyField(node) {
+    const raw = node.body || "";
+    const rendered = raw.trim()
+      ? renderNarrativeMarkdown(raw)
+      : `<span class="field-live-placeholder">${escapeHtml(t("Click to edit"))}</span>`;
     return `
       <label class="field field-with-expand">
         <span>${escapeHtml(getNodeBodyLabel(node))}</span>
-        <div class="field-expand-wrap">
-          <textarea data-node-field="body">${escapeHtml(node.body || "")}</textarea>
+        <div class="field-expand-wrap field-live" data-live-field>
+          <div class="field-live-rendered play-body-text" data-live-rendered role="textbox" tabindex="0" aria-label="${escapeAttr(getNodeBodyLabel(node))}, ${escapeAttr(t("Click to edit"))}">${rendered}</div>
+          <textarea data-node-field="body" data-live-source hidden>${escapeHtml(raw)}</textarea>
           <button class="icon-button field-expand-button" type="button" data-action="expand-node-field" data-node-id="${escapeAttr(node.id)}" data-expand-field="body" data-expand-title="${escapeAttr(getNodeBodyLabel(node))}" title="${escapeAttr(t("Open large editor"))}" aria-label="${escapeAttr(t("Open large editor"))}">⤢</button>
         </div>
       </label>
@@ -25114,6 +25578,7 @@ function installNarrativeCanvasApp() {
           </div>
           ${renderNodeEffectDraft(node)}
           <textarea data-node-logic-field="effects" spellcheck="false" placeholder="${escapeAttr(t("Effect lines"))}">${escapeHtml(formatNodeEffectsText(node))}</textarea>
+          <small>${escapeHtml(t("Conditional effect syntax: if variable1 > variable2 then set variable3 = variable1 else set variable3 = variable2"))}</small>
         </div>
         <div class="node-routing-grid">
           <label class="field">
@@ -25216,65 +25681,6 @@ function installNarrativeCanvasApp() {
     `;
   }
 
-  function renderConditionBuilderControl({
-    expression = "",
-    mode = "",
-    keyAttributes = "",
-    opAttributes = "",
-    valueAttributes = "",
-    connectorAttributes = "",
-    modeAttributes = "",
-    customAttributes = "",
-    className = "",
-    addAction = "",
-    addAttributes = "",
-    deleteAction = "",
-    deleteAttributes = ""
-  } = {}) {
-    const model = parseConditionBuilderExpression(expression);
-    const custom = model.custom && normalizeOptionalString(expression).trim();
-    const groupMode = getConditionGroupModeForExpression(expression, mode);
-    const canAdd = Boolean(getDefaultConditionKey()) && !custom;
-    const canDelete = Boolean(deleteAction) && model.clauses.length > 1 && !custom;
-    return `
-      <div class="condition-builder-list ${className}">
-        <div class="condition-builder-toolbar">
-          <label class="condition-builder-mode">
-            <span>${t("Condition relation")}</span>
-            <select ${modeAttributes} ${custom ? "disabled" : ""}>
-              ${renderConditionGroupModeOptions(groupMode)}
-            </select>
-          </label>
-          ${addAction ? `<button class="small-button" type="button" data-action="${escapeAttr(addAction)}" ${addAttributes} ${canAdd ? "" : "disabled"}>${t("Add condition")}</button>` : ""}
-        </div>
-        ${model.clauses.map((clause, index) => {
-          const hasValue = Boolean(clause.key && conditionOperatorNeedsValue(clause.op));
-          const hasDelete = canDelete;
-          return `
-          <div class="condition-builder-row condition-clause-row${index ? " has-connector" : ""}${hasValue ? "" : " no-condition-value"}${hasDelete ? " has-delete" : ""}">
-            ${index ? `
-              <select ${connectorAttributes} data-condition-index="${index}">
-                ${renderPlaybookOptionList(CONDITION_CONNECTORS, normalizeConditionConnector(clause.connector))}
-              </select>
-            ` : ""}
-            ${renderConditionBuilderFields({
-              keyAttributes: `${keyAttributes} data-condition-index="${index}"`,
-              opAttributes: `${opAttributes} data-condition-index="${index}"`,
-              valueAttributes: `${valueAttributes} data-condition-index="${index}"`,
-              selectedKey: clause.key,
-              selectedOp: clause.op,
-              selectedValue: clause.value
-            })}
-            ${hasDelete ? `<button class="icon-button danger-button condition-clause-delete" type="button" title="${escapeAttr(t("Delete condition"))}" data-action="${escapeAttr(deleteAction)}" ${deleteAttributes} data-condition-index="${index}">x</button>` : ""}
-          </div>
-        `; }).join("")}
-      </div>
-      ${custom ? `
-        <textarea class="condition-custom-expression" ${customAttributes} spellcheck="false" placeholder="${escapeAttr(t("Condition expression"))}">${escapeHtml(expression)}</textarea>
-      ` : ""}
-    `;
-  }
-
   function getDefaultConditionKey() {
     const variables = normalizeVariablesObject(state.project.variables);
     return Object.keys(variables).sort((a, b) => a.localeCompare(b))[0] || "";
@@ -25340,10 +25746,6 @@ function installNarrativeCanvasApp() {
 
   function getConditionConnectorForMode(mode) {
     return normalizeStoredConditionGroupMode(mode) === "any" ? "||" : "&&";
-  }
-
-  function getConditionModeForConnector(connector) {
-    return normalizeConditionConnector(connector) === "||" ? "any" : "all";
   }
 
   function renderConditionGroupModeOptions(selectedMode) {
@@ -25546,26 +25948,6 @@ function installNarrativeCanvasApp() {
       <div class="field node-routing-hint">
         <span>${t("Next")}</span>
         <p class="nc-routing-hint-body">${escapeHtml(hint)}</p>
-      </div>
-    `;
-  }
-
-  function renderNodeEffectRow(effect, index) {
-    const trigger = normalizePlaybookActionTrigger(effect.trigger || "onVisit");
-    return `
-      <div class="node-effect-row">
-        <div class="playbook-action-fixed-op node-effect-fixed-trigger" title="${escapeAttr(trigger === "onChoose" ? t("Move this into a Choice option effect.") : t("On visit"))}">
-          <strong>${escapeHtml(t(trigger === "onChoose" ? "Legacy node choose trigger" : "On visit"))}</strong>
-          <small>${escapeHtml(t(trigger === "onChoose" ? "Use Choice Effects" : "Node effects"))}</small>
-        </div>
-        ${renderStateKeySelect({
-          attributes: `data-node-effect-index="${index}" data-node-effect-field="key"`,
-          selected: effect.key,
-          placeholder: "State key"
-        })}
-        ${renderStateEffectOperationControl(effect, `data-node-effect-index="${index}" data-node-effect-field="op"`)}
-        ${renderStateEffectValueControl(effect, `data-node-effect-index="${index}" data-node-effect-field="value"`)}
-        <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete effect"))}" data-action="delete-node-effect" data-node-effect-index="${index}">x</button>
       </div>
     `;
   }
@@ -25851,6 +26233,7 @@ function installNarrativeCanvasApp() {
             ${renderPlaybookOptionList(CHOICE_REVEAL_MODES, revealMode)}
           </select>
         </label>
+        ${renderChoiceTimerEditor(node)}
         <div class="choice-options-hint">${escapeHtml(t("Each option is available when its condition is met; selecting it runs its Effects. Empty Requires = always available."))}</div>
         <div class="choice-options-list">
           ${options.length === 0 ? `<div class="nc-empty-state">${t("No choices yet.")}</div>` : options.map((opt, index) => renderChoiceOptionCard(opt, index)).join("")}
@@ -25858,6 +26241,42 @@ function installNarrativeCanvasApp() {
         <div class="choice-options-footer">
           <button class="small-button" type="button" data-action="add-choice-option">${t("Add choice")}</button>
         </div>
+        ` : ""}
+      </section>
+    `;
+  }
+
+  function renderChoiceTimerEditor(node) {
+    const timer = normalizeChoiceTimer(node?.choiceTimer);
+    const links = getChoiceOrderedLinks(getOutgoing(node?.id));
+    const entries = getRuntimeChoiceEntries(node, getNodeRuntimeScript(node));
+    return `
+      <section class="choice-timer-editor${timer.enabled ? " is-enabled" : ""}">
+        <div class="choice-timer-head">
+          <strong>${escapeHtml(t("Timed choice"))}</strong>
+          <button class="vault-preview-toggle${timer.enabled ? " is-enabled" : ""}" type="button" role="switch" aria-checked="${timer.enabled ? "true" : "false"}" aria-label="${escapeAttr(t("Enable timer"))}" title="${escapeAttr(t("Enable timer"))}" data-action="toggle-choice-timer">
+            <span class="vault-preview-toggle-track" aria-hidden="true"><span class="vault-preview-toggle-thumb"></span></span>
+          </button>
+        </div>
+        ${timer.enabled ? `
+          <div class="choice-timer-fields">
+            <label class="field">
+              <span>${escapeHtml(t("Seconds"))}</span>
+              <input type="number" min="1" max="3600" step="1" data-choice-timer-field="seconds" value="${timer.seconds}">
+            </label>
+            <label class="field">
+              <span>${escapeHtml(t("Fallback passage"))}</span>
+              <select data-choice-timer-field="fallbackLinkId">
+                <option value="">${escapeHtml(t("Choose a fallback passage"))}</option>
+                ${links.map((link, index) => {
+                  const label = getChoiceBranchButtonLabel(link, node.choices || [], index, entries);
+                  const target = getNode(link.to);
+                  const text = target?.title ? `${label} → ${target.title}` : label;
+                  return `<option value="${escapeAttr(link.id)}"${link.id === timer.fallbackLinkId ? " selected" : ""}>${escapeHtml(text)}</option>`;
+                }).join("")}
+              </select>
+            </label>
+          </div>
         ` : ""}
       </section>
     `;
@@ -26001,21 +26420,6 @@ function installNarrativeCanvasApp() {
       includeTrigger: false,
       effectId: optionId
     });
-  }
-
-  function renderChoiceOptionEffectRow(effect, optionId, effectIndex) {
-    return `
-      <div class="node-effect-row no-trigger">
-        ${renderStateKeySelect({
-          attributes: `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="key"`,
-          selected: effect.key || "",
-          placeholder: "State key"
-        })}
-        ${renderStateEffectOperationControl(effect, `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="op"`)}
-        ${renderStateEffectValueControl(effect, `data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}" data-choice-option-effect-field="value"`)}
-        <button class="icon-button danger-button" type="button" title="${escapeAttr(t("Delete effect"))}" data-action="delete-choice-option-effect" data-choice-option-id="${escapeAttr(optionId)}" data-choice-option-effect-index="${effectIndex}">x</button>
-      </div>
-    `;
   }
 
   function renderCustomFields(node) {
@@ -26369,6 +26773,13 @@ function installNarrativeCanvasApp() {
       && !target.closest?.("[data-vault-file-suggestions]")) {
       hideVaultFileSuggestions();
     }
+    const liveRendered = target.closest("[data-live-rendered]");
+    if (liveRendered && !liveRendered.hidden) {
+      enterLiveFieldEdit(liveRendered.closest("[data-live-field]"));
+      event.preventDefault();
+      return true;
+    }
+
     if (getFormControlTarget(target)) return false;
 
     const layerTarget = target.closest("[data-layer-action]");
@@ -26890,6 +27301,7 @@ function installNarrativeCanvasApp() {
     if (action === "add-node-effect") addNodeEffect();
     if (action === "delete-node-effect") deleteNodeEffect(Number(target.dataset.nodeEffectIndex));
     if (action === "add-choice-option") addChoiceOption();
+    if (action === "toggle-choice-timer") toggleChoiceTimer();
     if (action === "delete-choice-option") deleteChoiceOption(target.dataset.choiceOptionId);
     if (action === "move-choice-option-up") moveChoiceOption(target.dataset.choiceOptionId, -1);
     if (action === "move-choice-option-down") moveChoiceOption(target.dataset.choiceOptionId, 1);
@@ -26940,10 +27352,12 @@ function installNarrativeCanvasApp() {
     if (action === "auto-layout") autoLayoutCanvas(target.dataset.layoutOrientation);
     if (action === "zoom-in") setZoom(state.view.scale + 0.1);
     if (action === "zoom-out") setZoom(state.view.scale - 0.1);
+    if (action === "toggle-snap-grid") toggleSnapToGrid();
     if (action === "toggle-theme") toggleTheme();
     if (action === "toggle-language") toggleLanguage();
     if (action === "center-view") centerView();
     if (action === "export-all") exportAll();
+    if (action === "export-play-session") exportPlaySession();
     if (action === "export-json") exportJson();
     if (action === "export-story-md") exportStoryMarkdown();
     if (action === "export-current-document") exportCurrentDocument();
@@ -26988,6 +27402,7 @@ function installNarrativeCanvasApp() {
     if (action === "reconnect-link-to") startLinkReconnect("to");
     if (action === "assign-choice-link") assignChoiceLink(target.dataset.linkId, target.dataset.choiceIndex);
     if (action === "focus-node") focusSelectedNode();
+    if (action === "focus-node-document") focusSelectedNodeInDocument();
     if (action === "focus-canvas-node") focusCanvasNode(target.dataset.nodeId);
     if (action === "focus-choice-source") focusCanvasNode(target.dataset.choiceSourceNodeId);
     if (action === "select-node") selectNode(target.dataset.nodeId);
@@ -27097,6 +27512,28 @@ function installNarrativeCanvasApp() {
     const hasWebState = Boolean(loadWebState());
     const restored = await loadSavedState(true);
     if (restored === false && !hasWebState) setStatus("No saved project to reload.");
+  }
+
+  async function handleExternalProjectChange(detail = {}) {
+    if (!initialized || state.isSaving) return { reloaded: false, dirty: state.hasUnsavedChanges };
+    const path = String(detail?.path || getCurrentProjectFilePath() || "");
+    if (state.hasUnsavedChanges) {
+      state.externalProjectChangePending = true;
+      clearAutoSaveTimer();
+      state.saveError = true;
+      renderProjectFileStatus();
+      const message = t("Project changed outside Narrative Canvas. Reload before continuing; saving now will preserve local work as a conflict copy.");
+      setStatus(message);
+      window.NarrativeCanvasHost?.showNotice?.(message);
+      return { reloaded: false, dirty: true, path };
+    }
+    const loaded = await loadCurrentVaultProject();
+    if (loaded) {
+      const message = t("Project changed outside Narrative Canvas and was reloaded.");
+      setStatus(message);
+      window.NarrativeCanvasHost?.showNotice?.(message);
+    }
+    return { reloaded: Boolean(loaded), dirty: false, path };
   }
 
   async function clearBrowserStorageFromUi() {
@@ -27666,7 +28103,7 @@ function installNarrativeCanvasApp() {
     if (!target?.dataset) return "";
     if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
     const parts = [];
-    ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+    ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceTimerField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
       if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
     });
     ["nodeId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
@@ -27685,7 +28122,9 @@ function installNarrativeCanvasApp() {
     beginNodeTitleReferenceEdit(event.target);
     if (event.target?.dataset?.nodeVaultSizeSlider == null
       && (event.target?.dataset?.nodeVaultFileIndex != null || event.target?.dataset?.characterImageFile || event.target?.dataset?.characterImagePickerInput || event.target?.dataset?.characterVaultFileInput != null || event.target?.dataset?.characterIconInput != null)) {
-      if (state.vaultFileSuggestionSuppressFocusOnce) state.vaultFileSuggestionSuppressFocusOnce = false;
+      if (state.vaultFileSuggestionSuppressedTargets?.has(event.target)) {
+        state.vaultFileSuggestionSuppressedTargets.delete(event.target);
+      }
       // Force so an empty input lists every file on focus — the browse buttons are gone,
       // the search input is the single entry point.
       else void updateVaultFileSuggestions(event.target, { force: true });
@@ -27700,6 +28139,16 @@ function installNarrativeCanvasApp() {
 
   function handleEditFocusOut(event) {
     const target = event.target;
+    // "Render by default" fields drop back to the rendered view when the source
+    // textarea loses focus — including clicking the modal chrome or the sidebar.
+    // Clicking a formatting-toolbar button is exempt: it re-enters edit itself, so
+    // rendering there would just flash the view.
+    const liveWrap = target?.dataset?.liveSource !== undefined ? target.closest("[data-live-field]") : null;
+    if (liveWrap
+      && !liveWrap.contains(event.relatedTarget)
+      && !event.relatedTarget?.closest?.(".expand-editor-toolbar")) {
+      renderLiveField(liveWrap);
+    }
     if (target?.hasAttribute?.("data-character-tag-input")) {
       const editor = target.closest("[data-character-tag-editor]");
       if (!editor?.contains(event.relatedTarget)) hideCodexTagSuggestions(target);
@@ -27874,6 +28323,11 @@ function installNarrativeCanvasApp() {
     }
 
     if (target.dataset.characterExtraPart) {
+      if (target.dataset.characterExtraPart === "value") {
+        const character = getCharacters().find((item) => item.id === target.dataset.characterId);
+        const field = normalizeCodexExtraFields(character?.extraFields)[Number(target.dataset.characterExtraIndex)];
+        if (field && field.type !== "string") return;
+      }
       setCharacterExtraField(target.dataset.characterId, Number(target.dataset.characterExtraIndex), target.dataset.characterExtraPart, target.value, false);
       return;
     }
@@ -27926,6 +28380,10 @@ function installNarrativeCanvasApp() {
     }
     if (target.dataset.nodeEffectField) {
       setNodeEffectField(Number(target.dataset.nodeEffectIndex), target.dataset.nodeEffectField, target.value, false);
+      return;
+    }
+    if (target.dataset.choiceTimerField) {
+      setChoiceTimerField(target.dataset.choiceTimerField, target.value, false);
       return;
     }
     if (target.dataset.choiceOptionField) {
@@ -28114,6 +28572,11 @@ function installNarrativeCanvasApp() {
     }
     if (target.dataset.nodeEffectField) {
       setNodeEffectField(Number(target.dataset.nodeEffectIndex), target.dataset.nodeEffectField, target.value, true);
+      commitFocusedEdit(target);
+      return;
+    }
+    if (target.dataset.choiceTimerField) {
+      setChoiceTimerField(target.dataset.choiceTimerField, target.value, true);
       commitFocusedEdit(target);
       return;
     }
@@ -28832,7 +29295,7 @@ function installNarrativeCanvasApp() {
     const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
     if (distance < 5 && !drag.active) return;
     drag.active = true;
-    const placement = getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex);
+    const placement = getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex, event.target);
     clearNodeVaultFileDropMarkers();
     if (placement) {
       const row = dom.nodePanel?.querySelector(`[data-node-vault-row-index="${placement.targetIndex}"]`);
@@ -28845,7 +29308,7 @@ function installNarrativeCanvasApp() {
     const drag = state.nodeVaultFileDrag;
     if (!drag) return;
     const placement = drag.active && event.type !== "pointercancel"
-      ? getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex)
+      ? getNodeVaultFileDropPlacement(event.clientX, event.clientY, drag.fromIndex, event.target)
       : null;
     state.nodeVaultFileDrag = null;
     clearNodeVaultFileDropMarkers();
@@ -28922,10 +29385,13 @@ function installNarrativeCanvasApp() {
     return true;
   }
 
-  function getNodeVaultFileDropPlacement(x, y, fromIndex) {
-    const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
-    const target = root.elementFromPoint(x, y);
-    const row = target?.closest?.("[data-node-vault-row-index]");
+  function getNodeVaultFileDropPlacement(x, y, fromIndex, eventTarget = null) {
+    let row = eventTarget?.closest?.("[data-node-vault-row-index]") || null;
+    if (!row || !dom.nodePanel?.contains(row)) {
+      const root = typeof dom.scope?.elementFromPoint === "function" ? dom.scope : document;
+      const target = root.elementFromPoint(x, y);
+      row = target?.closest?.("[data-node-vault-row-index]") || null;
+    }
     if (!row || !dom.nodePanel?.contains(row)) return null;
     const targetIndex = Number(row.dataset.nodeVaultRowIndex);
     if (!Number.isInteger(targetIndex)) return null;
@@ -29431,14 +29897,6 @@ function installNarrativeCanvasApp() {
     return true;
   }
 
-  function getFrameCaptureCandidates(frame, candidateIds = null) {
-    const nodes = Array.isArray(candidateIds) ? candidateIds.map(getNode).filter(Boolean) : state.project.nodes;
-    return nodes.filter((node) => {
-      if (!canCaptureNodeInFrame(frame, node)) return false;
-      return frameContainsNodeCenter(frame, node);
-    });
-  }
-
   function getFrameEnteredCaptureCandidates(frame, enteredIds) {
     return enteredIds
       .map(getNode)
@@ -29711,18 +30169,18 @@ function installNarrativeCanvasApp() {
       if (!node) return;
       const handle = state.resizingNode.handle;
       if (handle.includes("e")) {
-        node.width = Math.round(clamp(
+        node.width = clamp(snapCanvasValue(clamp(
           state.resizingNode.width + (event.clientX - state.resizingNode.startX) / state.view.scale,
           minNodeWidth(node),
           maxNodeWidth(node)
-        ));
+        ), { enabled: state.snapToGrid }), minNodeWidth(node), maxNodeWidth(node));
       }
       if (handle.includes("s")) {
-        node.height = Math.round(clamp(
+        node.height = clamp(snapCanvasValue(clamp(
           state.resizingNode.height + (event.clientY - state.resizingNode.startY) / state.view.scale,
           minNodeHeight(node),
           maxNodeHeight(node)
-        ));
+        ), { enabled: state.snapToGrid }), minNodeHeight(node), maxNodeHeight(node));
       }
       // Patch only this node + its links in place; full resync runs on pointer-up.
       if (patchNodeElementGeometry(node, state.resizingNode.element, state.resizingNode.ports)) {
@@ -29743,11 +30201,18 @@ function installNarrativeCanvasApp() {
       const deltaX = moveX / state.view.scale;
       const deltaY = moveY / state.view.scale;
       const positions = state.draggingNode.nodePositions || [];
+      const anchorPosition = positions.find((position) => position.id === state.draggingNode.id) || positions[0];
+      const snappedDeltaX = anchorPosition && state.snapToGrid
+        ? snapCanvasValue(anchorPosition.x + deltaX) - anchorPosition.x
+        : deltaX;
+      const snappedDeltaY = anchorPosition && state.snapToGrid
+        ? snapCanvasValue(anchorPosition.y + deltaY) - anchorPosition.y
+        : deltaY;
       positions.forEach((position) => {
         const item = getNode(position.id);
         if (!item) return;
-        item.x = Math.round(position.x + deltaX);
-        item.y = Math.round(position.y + deltaY);
+        item.x = Math.round(position.x + snappedDeltaX);
+        item.y = Math.round(position.y + snappedDeltaY);
       });
       const node = getNode(state.draggingNode.id);
       if (!node) return;
@@ -29993,11 +30458,11 @@ function installNarrativeCanvasApp() {
       title: type === "Entry" ? "Start" : getNodeTypeLabel(type),
       body: defaultBody(type),
       x: 0,
-      y: Math.round(center.y - 70)
+      y: snapCanvasValue(center.y - 70, { enabled: state.snapToGrid })
     };
     if (getNodeTypeTemplate(type) === "choice") node.choices = ["Continue", "Turn back"];
     applyNodeTypeDefaults(node);
-    node.x = Math.round(center.x - nodeLayoutSize(node).width / 2);
+    node.x = snapCanvasValue(center.x - nodeLayoutSize(node).width / 2, { enabled: state.snapToGrid });
     const activeFrame = getActiveFrameCanvas();
     const dropFrame = getCanvasDropFrameForNode(node);
     node.frameId = activeFrame
@@ -30266,6 +30731,35 @@ function installNarrativeCanvasApp() {
   function deleteCharacter(id) {
     const characters = getCharacters();
     const character = characters.find((item) => item.id === id);
+    if (!character) return;
+    showGenericConfirm({
+      kicker: "Narrative Library",
+      title: t('Delete "{name}"?', { name: character.name }),
+      message: character.codexFile
+        ? t("The library entry and its managed Markdown file will be moved to the vault trash. Linked images and referenced files are kept.")
+        : t("The library entry will be removed from this project. Linked images and referenced files are kept."),
+      confirmLabel: "Delete entry",
+      danger: true,
+      recordHistory: false,
+      onConfirm: async () => {
+        const historyBefore = getHistorySnapshot();
+        const host = window.NarrativeCanvasHost;
+        try {
+          if (host?.deleteCodexEntryFile) await host.deleteCodexEntryFile(character);
+        } catch (error) {
+          console.error(error);
+          setStatus(t("Could not move the library Markdown file to trash. The entry was kept."));
+          return;
+        }
+        performDeleteCharacter(id);
+        commitHistoryFromSnapshot(historyBefore);
+      }
+    });
+  }
+
+  function performDeleteCharacter(id) {
+    const characters = getCharacters();
+    const character = characters.find((item) => item.id === id);
     state.project.characters = characters.filter((item) => item.id !== id);
     if (state.codexSelectedEntryId === id) state.codexSelectedEntryId = "";
     invalidateCharacterRenderContext();
@@ -30401,9 +30895,26 @@ function installNarrativeCanvasApp() {
         if (rerender) renderWorkspaceFile();
         return;
       }
+      if (nextKey && fields.some((field, fieldIndex) => fieldIndex !== index && field.key.toLowerCase() === nextKey.toLowerCase())) {
+        setStatus(t("Field name {key} already exists.", { key: nextKey }));
+        if (rerender) renderWorkspaceFile();
+        return;
+      }
       fields[index].key = nextKey;
+    } else if (part === "type") {
+      const type = CODEX_EXTRA_FIELD_TYPES.has(String(value || "").toLowerCase()) ? String(value).toLowerCase() : "string";
+      const formatted = formatCodexExtraFieldValue(fields[index].value, fields[index].type);
+      const parsed = parseCodexExtraFieldInput(formatted, type);
+      fields[index].type = type;
+      fields[index].value = parsed.valid ? parsed.value : normalizeCodexExtraFieldValue(undefined, type);
     } else {
-      fields[index].value = String(value ?? "");
+      const parsed = parseCodexExtraFieldInput(value, fields[index].type);
+      if (!parsed.valid) {
+        setStatus(t("Field value is invalid for type {type}.", { type: t(fields[index].type) }));
+        if (rerender) renderWorkspaceFile();
+        return;
+      }
+      fields[index].value = parsed.value;
     }
     character.extraFields = fields;
     invalidateCharacterRenderContext();
@@ -30415,7 +30926,7 @@ function installNarrativeCanvasApp() {
     const character = getCharacters().find((item) => item.id === id);
     if (!character) return;
     const fields = normalizeCodexExtraFields(character.extraFields);
-    fields.push({ key: "", value: "" });
+    fields.push({ key: "", type: "string", value: "" });
     character.extraFields = fields;
     invalidateCharacterRenderContext();
     setProjectDirty(true);
@@ -31159,7 +31670,7 @@ function installNarrativeCanvasApp() {
 
   function cleanupNodeStateLogic(node) {
     const logic = normalizeNodeStateLogic(node.stateLogic);
-    logic.effects = logic.effects.filter((effect) => effect.key || effect.op === "clear");
+    logic.effects = logic.effects.filter((effect) => effect.op === "ifElse" || effect.key || effect.op === "clear");
     if (logic.requirements || logic.effects.length) node.stateLogic = logic;
     else delete node.stateLogic;
   }
@@ -31169,6 +31680,32 @@ function installNarrativeCanvasApp() {
   function getSelectedChoiceNode() {
     const node = getNode(state.selectedNodeId);
     return node && isChoiceNode(node) ? node : null;
+  }
+
+  function toggleChoiceTimer() {
+    const node = getSelectedChoiceNode();
+    if (!node) return;
+    const timer = normalizeChoiceTimer(node.choiceTimer);
+    timer.enabled = !timer.enabled;
+    if (timer.enabled && !timer.fallbackLinkId) {
+      timer.fallbackLinkId = getChoiceOrderedLinks(getOutgoing(node.id))[0]?.id || "";
+    }
+    node.choiceTimer = timer;
+    setProjectDirty(true);
+    renderNodePanel(node);
+    scheduleOpenPreviewRefresh();
+  }
+
+  function setChoiceTimerField(field, value, rerender = false) {
+    const node = getSelectedChoiceNode();
+    if (!node) return;
+    const timer = normalizeChoiceTimer(node.choiceTimer);
+    if (field === "seconds") timer.seconds = normalizeChoiceTimerSeconds(value);
+    if (field === "fallbackLinkId") timer.fallbackLinkId = normalizeOptionalString(value).trim();
+    node.choiceTimer = timer;
+    setProjectDirty(true);
+    if (rerender) renderNodePanel(node);
+    scheduleOpenPreviewRefresh();
   }
 
   function ensureChoiceOptionsArray(node) {
@@ -32109,16 +32646,11 @@ function installNarrativeCanvasApp() {
         const triggerMatch = line.match(/^\[(onVisit|onChoose)\]\s*(.+)$/i);
         const trigger = triggerMatch ? normalizePlaybookActionTrigger(triggerMatch[1]) : "onVisit";
         const body = triggerMatch ? triggerMatch[2].trim() : line;
-        const match = body.match(/^(set|add|subtract|append|remove|toggle|invert|clear)\s+([A-Za-z0-9_.-]+)(?:\s*=\s*(.*)|\s+(.+))?$/i);
-        if (!match) return { trigger, op: "set", key: body, value: "true" };
-        return {
-          trigger,
-          op: normalizePlaybookEffectTextOperation(match[1]),
-          key: normalizeOptionalString(match[2]).trim(),
-          value: normalizeOptionalString(match[3] ?? match[4] ?? "")
-        };
+        return parseConditionalEffectBody(body, trigger)
+          || parseStateEffectBody(body, trigger)
+          || { trigger, op: "set", key: body, value: "true", valueMode: "literal" };
       })
-      .filter((effect) => effect.key || effect.op === "clear");
+      .filter((effect) => effect.op === "ifElse" || effect.key || effect.op === "clear");
   }
 
   function formatStateEffectsText(effects, { defaultTrigger = "onVisit" } = {}) {
@@ -32128,6 +32660,12 @@ function installNarrativeCanvasApp() {
         if (!effect || typeof effect !== "object" || Array.isArray(effect)) return "";
         const trigger = normalizePlaybookActionTrigger(effect.trigger || fallbackTrigger);
         const prefix = trigger && trigger !== fallbackTrigger ? `[${trigger}] ` : "";
+        if (effect.op === "ifElse") {
+          const thenText = formatStateEffectBody(effect.thenEffect);
+          const elseText = formatStateEffectBody(effect.elseEffect);
+          const condition = normalizeOptionalString(effect.condition).trim();
+          return condition && thenText && elseText ? `${prefix}if ${condition} then ${thenText} else ${elseText}` : "";
+        }
         const op = normalizePlaybookActionOperation(effect.op || "set");
         const key = normalizeOptionalString(effect.key || effect.variable || effect.name).trim();
         const value = normalizeOptionalString(effect.value);
@@ -32135,6 +32673,13 @@ function installNarrativeCanvasApp() {
       })
       .filter(Boolean)
       .join("\n");
+  }
+
+  function formatStateEffectBody(effect) {
+    const op = normalizePlaybookActionOperation(effect?.op || "set");
+    const key = normalizeOptionalString(effect?.key || effect?.variable || effect?.name).trim();
+    const value = normalizeOptionalString(effect?.value);
+    return key || op === "clear" ? `${op} ${key}${value ? ` = ${value}` : ""}`.trim() : "";
   }
 
   function formatNodeEffectsText(node) {
@@ -32252,16 +32797,6 @@ function installNarrativeCanvasApp() {
     renderPlaybookSurfaces();
   }
 
-  function scrollPlaybookToTop() {
-    if (!dom.variablesPanel) return;
-    try {
-      dom.variablesPanel.scrollTo({ top: 0, behavior: "auto" });
-    } catch (error) {
-      // Fallback for embedded WebViews with partial Element.scrollTo support.
-    }
-    dom.variablesPanel.scrollTop = 0;
-  }
-
   function togglePlaybookRuleHelp(ruleId) {
     if (!ruleId) return;
     if (state.playbookRuleHelpOpenIds.has(ruleId)) state.playbookRuleHelpOpenIds.delete(ruleId);
@@ -32325,24 +32860,6 @@ function installNarrativeCanvasApp() {
     setStatus(`${getRunnerRuleTitle(ruleKind)} enabled.`);
   }
 
-  function addSelectedNodePlaybookRule() {
-    const node = getNode(state.selectedNodeId);
-    if (!node) {
-      setStatus("Select a node first.");
-      return;
-    }
-    const ruleKind = inferPlaybookRuleKindFromNode(node);
-    const target = node.type || node.id;
-    const scripts = getScriptNodeTypes();
-    scripts[target] = applyPlaybookRulePreset(ruleKind, scripts[target]);
-    state.project.script = normalizeScriptConfig({ ...state.project.script, nodeTypes: scripts });
-    state.activeFileId = "variables";
-    state.playbookTab = "rules";
-    renderPlaybookSurfaces();
-    updateStatus();
-    setStatus(`${target} rule added from selected node.`);
-  }
-
   function normalizePlaybookRuleKind(kind) {
     return ["startNode", "endCondition", "visitTracking", "debugMode"].includes(kind) ? kind : "endCondition";
   }
@@ -32355,45 +32872,6 @@ function installNarrativeCanvasApp() {
       debugMode: "Debug Mode"
     };
     return labels[kind] || "Play rule";
-  }
-
-  function getPlaybookRuleKindLabel(kind) {
-    const labels = {
-      text: "text rule",
-      choices: "choice behavior"
-    };
-    return labels[kind] || "rule";
-  }
-
-  function getDefaultPlaybookRuleTargetForKind(kind, scripts) {
-    if (kind === "choices") return "Choice";
-    return getDefaultPlaybookRuleTarget(scripts);
-  }
-
-  function applyPlaybookRulePreset(kind, existing = {}) {
-    const script = { ...(existing || {}) };
-    if (kind === "text") {
-      script.title = script.title || "{title}";
-      script.body = script.body || "{body}";
-    }
-    if (kind === "choices") {
-      script.title = script.title || "{title}";
-      script.body = script.body || "{body}";
-      script.choices = script.choices || "choices";
-    }
-    return script;
-  }
-
-  function inferPlaybookRuleKindFromNode(node) {
-    if (hasNodeChoices(node)) return "choices";
-    return "text";
-  }
-
-  function getDefaultPlaybookRuleTarget(scripts) {
-    const selectedNode = getNode(state.selectedNodeId);
-    if (selectedNode?.type && !scripts[selectedNode.type]) return selectedNode.type;
-    const unusedType = getProjectNodeTypes().find((typeDef) => !scripts[typeDef.type]);
-    return unusedType?.type || selectedNode?.type || "Content";
   }
 
   function deleteVariable(key) {
@@ -33245,12 +33723,15 @@ function installNarrativeCanvasApp() {
         setStatus("Playbook JSON is invalid.");
         return;
       }
+    } else if (field === "playHistoryLimit") {
+      state.project.playHistoryLimit = normalizePlayHistoryLimit(value);
+      trimPreviewHistory();
     } else {
       state.project[field] = value;
     }
     setProjectDirty(true);
 
-    if (field === "title" || field === "notes") {
+    if (field === "title" || field === "notes" || field === "playHistoryLimit") {
       renderShellState();
       renderStoryPanel();
       renderWorkspaceFile();
@@ -33532,11 +34013,11 @@ function installNarrativeCanvasApp() {
     setNodeVaultFile(index, reference);
     commitFocusedEdit(target);
     hideVaultFileSuggestions();
-    state.vaultFileSuggestionSuppressFocusOnce = true;
     renderInspector();
     runAfterRender(() => {
       const input = dom.nodePanel?.querySelector?.(`[data-node-vault-file-index="${Math.min(index, getNodeVaultFiles(getNode(state.selectedNodeId)).length)}"]`);
       if (!input) return;
+      state.vaultFileSuggestionSuppressedTargets?.add(input);
       input.focus({ preventScroll: true });
       input.setSelectionRange?.(input.value.length, input.value.length);
     });
@@ -33956,12 +34437,6 @@ function installNarrativeCanvasApp() {
       }
     }
     return "";
-  }
-
-  function toggleCodexImagePreview(characterId) {
-    const character = getCharacters().find((entry) => entry.id === characterId);
-    if (!character?.imageFile) return;
-    setCharacterField(characterId, "imagePreview", !character.imagePreview, true);
   }
 
   async function openNodeVaultFile(nodeId = state.selectedNodeId, index = 0) {
@@ -34395,6 +34870,107 @@ function installNarrativeCanvasApp() {
     setStatus(`${node.title || getNodeDisplayId(node)} focused.`);
   }
 
+  function focusSelectedNodeInDocument() {
+    const node = getNode(state.selectedNodeId);
+    if (!node || isFrameNode(node)) return;
+    selectFile("document");
+    const editor = dom.documentPanel?.querySelector("[data-document-source]");
+    const range = editor
+      ? findDocumentNodeTitleRange(editor.value, state.documentFormat, node.id)
+      : null;
+    if (!editor || !range) {
+      setStatus(t("Could not find this node in Document."));
+      return;
+    }
+    focusDocumentSourceRange(editor, range);
+    setStatus(t("Focused {title} in Document.", { title: node.title || getNodeDisplayId(node) }));
+  }
+
+  function findDocumentNodeTitleRange(source, format, nodeId) {
+    const lines = getDocumentSourceLines(source);
+    const id = String(nodeId || "").trim();
+    if (!id) return null;
+    const normalizedFormat = normalizeDocumentFormat(format);
+    if (normalizedFormat === "plain") {
+      const idIndex = lines.findIndex((line) => line.text.match(/^<!--\s*id:\s*(.*?)\s*-->$/)?.[1]?.trim() === id);
+      if (idIndex < 1) return null;
+      return getDocumentCapturedRange(lines[idIndex - 1], /^(##\s+)(.*?)(\s*)$/, 2);
+    }
+    if (normalizedFormat === "yarn") {
+      const idIndex = lines.findIndex((line) => line.text.match(/^narrativeCanvasId:\s*(.*?)\s*$/)?.[1]?.trim() === id);
+      if (idIndex < 0) return null;
+      for (let index = idIndex + 1; index < lines.length && !/^---\s*$/.test(lines[index].text); index += 1) {
+        const range = getDocumentCapturedRange(lines[index], /^(nodeTitle:\s*)(.*?)(\s*)$/, 2);
+        if (range) return trimDocumentLiteralQuotes(source, range);
+      }
+      return null;
+    }
+    if (normalizedFormat === "ink") {
+      const idIndex = lines.findIndex((line) => line.text.match(/^\/\/\s*narrativeCanvasId:\s*(.*?)\s*$/)?.[1]?.trim() === id);
+      if (idIndex < 0) return null;
+      for (let index = idIndex + 1; index < lines.length && !/^===\s+/.test(lines[index].text); index += 1) {
+        const range = getDocumentCapturedRange(lines[index], /^(\/\/\s*nodeTitle:\s*)(.*?)(\s*)$/, 2);
+        if (range) return trimDocumentLiteralQuotes(source, range);
+      }
+      return null;
+    }
+    const idIndex = lines.findIndex((line) => line.text.match(/^<!--\s*narrativeCanvasId:\s*(.*?)\s*-->$/)?.[1]?.trim() === id);
+    if (idIndex < 0) return null;
+    for (let index = idIndex + 1; index < lines.length && !/^::\s+/.test(lines[index].text); index += 1) {
+      const range = getDocumentCapturedRange(lines[index], /^(<!--\s*narrativeCanvasTitle:\s*)(.*?)(\s*-->)$/, 2);
+      if (range) return range;
+    }
+    return null;
+  }
+
+  function getDocumentSourceLines(source) {
+    const text = String(source || "");
+    const lines = [];
+    let start = 0;
+    text.split("\n").forEach((line) => {
+      lines.push({ text: line, start, end: start + line.length });
+      start += line.length + 1;
+    });
+    return lines;
+  }
+
+  function getDocumentCapturedRange(line, pattern, groupIndex) {
+    const match = line?.text?.match(pattern);
+    const value = match?.[groupIndex];
+    if (value == null) return null;
+    const relativeStart = match[0].indexOf(value, (match[1] || "").length);
+    if (relativeStart < 0) return null;
+    return {
+      start: line.start + relativeStart,
+      end: line.start + relativeStart + value.length
+    };
+  }
+
+  function trimDocumentLiteralQuotes(source, range) {
+    if (!range || range.end - range.start < 2) return range;
+    const text = String(source || "");
+    return text[range.start] === '"' && text[range.end - 1] === '"'
+      ? { start: range.start + 1, end: range.end - 1 }
+      : range;
+  }
+
+  function focusDocumentSourceRange(editor, range) {
+    const start = Math.max(0, Math.min(editor.value.length, Number(range?.start) || 0));
+    const end = Math.max(start, Math.min(editor.value.length, Number(range?.end) || start));
+    const lineHeight = getDocumentEditorLineHeight(editor);
+    const lineIndex = editor.value.slice(0, start).split("\n").length - 1;
+    editor.scrollTop = Math.max(0, lineIndex * lineHeight - editor.clientHeight / 2);
+    editor.scrollLeft = 0;
+    try {
+      editor.focus({ preventScroll: true });
+      editor.setSelectionRange(start, end);
+    } catch (_error) {
+      // no-op for embedded WebViews without selection support
+    }
+    syncDocumentEditorGutter(editor);
+    syncDocumentOverlayScroll(editor);
+  }
+
   function centerCanvasOnNode(node, scale = state.view.scale, options = {}) {
     const size = nodeSize(node);
     centerCanvasOnBoardPoint(node.x + size.width / 2, node.y + size.height / 2, scale, options);
@@ -34672,6 +35248,19 @@ function installNarrativeCanvasApp() {
     updateGridPosition();
   }
 
+  function snapCanvasValue(value, options = {}) {
+    const enabled = options.enabled ?? state.snapToGrid;
+    if (!enabled) return Math.round(value);
+    return Math.round(Number(value || 0) / CANVAS_GRID_SIZE) * CANVAS_GRID_SIZE;
+  }
+
+  function toggleSnapToGrid() {
+    state.snapToGrid = !state.snapToGrid;
+    renderShellState();
+    setProjectDirty(true);
+    setStatus(t(state.snapToGrid ? "Grid snapping enabled." : "Grid snapping disabled."));
+  }
+
   function toggleLanguage() {
     setLanguage(state.language === "zh" ? "en" : "zh");
   }
@@ -34863,9 +35452,10 @@ function installNarrativeCanvasApp() {
       console.error(error);
       state.isSaving = false;
       state.saveError = true;
+      if (error?.code === "NARRATIVE_CANVAS_PROJECT_CONFLICT") state.externalProjectChangePending = true;
       renderProjectFileStatus();
-      scheduleAutoSave();
-      if (!silent) setStatus("Project save failed.");
+      if (!state.externalProjectChangePending) scheduleAutoSave();
+      if (!silent) setStatus(error?.code === "NARRATIVE_CANVAS_PROJECT_CONFLICT" ? error.message : "Project save failed.");
       return false;
     }
   }
@@ -35045,6 +35635,7 @@ function installNarrativeCanvasApp() {
       activeFileId: state.activeFileId,
       theme: state.theme,
       exportImageScale: state.exportImageScale,
+      snapToGrid: state.snapToGrid,
       view: { ...state.view },
       sidebar: getSavedSidebarState(),
       aiButtonPos: state.aiButtonPos ? { ...state.aiButtonPos } : null,
@@ -35072,6 +35663,7 @@ function installNarrativeCanvasApp() {
         activeFileId: "adventure",
         theme: state.theme,
         exportImageScale: state.exportImageScale,
+        snapToGrid: false,
         view: { x: 0, y: 0, scale: DEFAULT_CANVAS_ZOOM },
         sidebar: getSavedSidebarState(),
         aiButtonPos: null,
@@ -35103,6 +35695,7 @@ function installNarrativeCanvasApp() {
     state.activeFileId = fileViews[ui.activeFileId] ? ui.activeFileId : "adventure";
     state.theme = ui.theme === "light" ? "light" : "dark";
     state.exportImageScale = normalizeExportImageScale(ui.exportImageScale);
+    state.snapToGrid = Boolean(ui.snapToGrid);
     applySavedSidebarState(ui.sidebar);
     state.aiButtonPos = ui.aiButtonPos && Number.isFinite(ui.aiButtonPos.left) && Number.isFinite(ui.aiButtonPos.top)
       ? { left: ui.aiButtonPos.left, top: ui.aiButtonPos.top }
@@ -35195,6 +35788,7 @@ function installNarrativeCanvasApp() {
       if (!payload) throw new Error("Vault project JSON could not be parsed.");
       const restoredView = applySavedState(payload);
       if (!state.selectedNodeId) state.selectedNodeId = state.project.nodes[0]?.id || null;
+      state.externalProjectChangePending = false;
       setProjectDirty(false);
       await reloadCodexFiles({ render: false, silent: true });
       if (announce) setStatus(`Loaded ${getHostProjectFileLabel()}.`);
@@ -35236,6 +35830,40 @@ function installNarrativeCanvasApp() {
     const blob = new Blob([buildProjectJson()], { type: "application/json" });
     downloadBlob(blob, `${slugify(state.project.title || "narrative-canvas")}.json`);
     setStatus("JSON exported.");
+  }
+
+  function exportPlaySession() {
+    const session = state.playPath.length ? capturePlaySessionSnapshot() : state.lastPlaySession;
+    if (!session?.steps?.length) {
+      setStatus(t("No playthrough is available to export."));
+      return;
+    }
+    const lines = [
+      `# ${session.projectTitle || "Narrative Canvas"} — ${t("Playthrough")}`,
+      "",
+      `- ${t("Captured")}: ${session.capturedAt}`,
+      `- ${t("Cards")}: ${session.steps.length}`,
+      `- ${t("Earlier cards omitted")}: ${session.trimmedCount || 0}`,
+      ""
+    ];
+    session.steps.forEach((step, index) => {
+      lines.push(`## ${index + 1}. ${step.title || step.displayId || step.nodeId}`);
+      lines.push("");
+      lines.push(`- ${t("Type")}: ${step.type || ""}`);
+      lines.push(`- ID: ${step.displayId || step.nodeId}`);
+      if (step.body) lines.push("", step.body);
+      if (step.operations?.length) {
+        lines.push("", `### ${t("Operations")}`, "", ...step.operations.map((operation) => `- ${operation}`));
+      }
+      lines.push("");
+    });
+    const finalVariables = session.steps[session.steps.length - 1]?.variables;
+    if (finalVariables) {
+      lines.push(`## ${t("Final state")}`, "", "```json", JSON.stringify(finalVariables, null, 2), "```", "");
+    }
+    const slug = slugify(session.projectTitle || "narrative-canvas");
+    downloadBlob(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" }), `${slug}-playthrough.md`);
+    setStatus(t("Playthrough exported."));
   }
 
   function exportRuntimeJson() {
@@ -35715,6 +36343,7 @@ function installNarrativeCanvasApp() {
       requirements: transformExportExpression(requirementsSource, model, warnings, { nodeId: node.id }),
       effects: getRuntimeExportNodeEffects(node, model, warnings),
       choices,
+      timer: buildRuntimeExportChoiceTimer(node, outgoing, model),
       next: choices.length ? [] : getExportNextTransitions(node, outgoing, routing, model, warnings),
       routing: {
         mode: routing.mode,
@@ -35723,6 +36352,20 @@ function installNarrativeCanvasApp() {
       },
       cast: getRuntimeExportCast(node),
       customFields: getRuntimeExportCustomFields(node, model)
+    };
+  }
+
+  function buildRuntimeExportChoiceTimer(node, outgoing, model) {
+    const timer = normalizeChoiceTimer(node?.choiceTimer);
+    if (!timer.enabled || !timer.fallbackLinkId) return null;
+    const link = (outgoing || []).find((item) => item.id === timer.fallbackLinkId);
+    if (!link) return null;
+    return {
+      seconds: timer.seconds,
+      fallbackLinkId: link.id,
+      fallbackChoiceOptionId: link.choiceOptionId || "",
+      targetId: link.to || "",
+      target: model.nodeNameMap[link.to] || ""
     };
   }
 
@@ -35935,9 +36578,23 @@ function installNarrativeCanvasApp() {
   }
 
   function buildRuntimeExportEffect(effect, model, warnings, ref) {
+    if (effect?.op === "ifElse") {
+      return {
+        trigger: effect.trigger || "onVisit",
+        op: "ifElse",
+        condition: transformExportExpression(effect.condition, model, warnings, ref),
+        thenEffect: buildRuntimeExportEffect(effect.thenEffect, model, warnings, ref),
+        elseEffect: buildRuntimeExportEffect(effect.elseEffect, model, warnings, ref)
+      };
+    }
     const sourceKey = normalizeOptionalString(effect?.key).trim();
     const key = sourceKey ? getOrCreateExportVariableName(sourceKey, model, warnings, ref) : "";
     const op = effect?.op || "set";
+    const valueMode = effect?.valueMode === "variable" ? "variable" : "literal";
+    const rawValueSource = normalizeOptionalString(effect?.value);
+    const valueSource = valueMode === "variable"
+      ? getOrCreateExportVariableName(normalizeExpressionVariableTerm(rawValueSource), model, warnings, ref)
+      : rawValueSource;
     if (!["set", "add", "subtract", "toggle"].includes(op)) {
       pushExportWarning(warnings, "effect-op-runtime-only", `Effect "${op}" on "${sourceKey || "(no key)"}" is kept in runtime JSON but commented in Yarn and Ink.`, ref);
     }
@@ -35947,7 +36604,8 @@ function installNarrativeCanvasApp() {
       sourceKey,
       key,
       value: coerceValue(effect?.value ?? ""),
-      valueSource: normalizeOptionalString(effect?.value)
+      valueSource,
+      valueMode
     };
   }
 
@@ -36693,7 +37351,7 @@ function installNarrativeCanvasApp() {
         const condition = formatRuntimeExpressionForFormat(choice.condition, "yarn", context);
         const suffix = condition ? ` <<if ${condition}>>` : "";
         lines.push(`-> ${formatYarnOptionLabel(convertRuntimeTextForFormat(choice.label, document, "yarn"))}${suffix}`);
-        choice.effects.forEach((effect) => lines.push(`    ${formatYarnEffect(effect)}`));
+        choice.effects.forEach((effect) => lines.push(indentEffectText(formatYarnEffect(effect), "    ")));
         appendYarnJump(lines, choice.targetId, nodeMap, "    ");
       });
       return;
@@ -36724,7 +37382,7 @@ function installNarrativeCanvasApp() {
         const condition = formatRuntimeExpressionForFormat(choice.condition, "ink", context);
         const conditionPrefix = condition ? `{${condition}} ` : "";
         lines.push(`+ ${conditionPrefix}[${formatInkOptionLabel(convertRuntimeTextForFormat(choice.label, document, "ink"))}]`);
-        choice.effects.forEach((effect) => lines.push(`    ${formatInkEffect(effect)}`));
+        choice.effects.forEach((effect) => lines.push(indentEffectText(formatInkEffect(effect), "    ")));
         appendInkDivert(lines, choice.targetId, nodeMap, "    ");
       });
       return;
@@ -36810,32 +37468,67 @@ function installNarrativeCanvasApp() {
       lines.push(`${indent}${text}`);
       return;
     }
+    const entries = Array.isArray(effects) ? effects : [];
+    if (!entries.length) {
+      lines.push(`${indent}[[${formatTweeWikiLinkText(text)}->${formatTweeWikiLinkText(target.slug)}]]`);
+      return;
+    }
     lines.push(`${indent}<<link ${formatSugarCubeString(text)} ${formatSugarCubeString(target.slug)}>>`);
-    (Array.isArray(effects) ? effects : []).forEach((effect) => lines.push(`${indent}  ${formatTweeEffect(effect)}`));
+    entries.forEach((effect) => lines.push(indentEffectText(formatTweeEffect(effect), `${indent}  `)));
     lines.push(`${indent}<</link>>`);
   }
 
   function formatYarnEffect(effect) {
+    if (effect?.op === "ifElse") {
+      const condition = formatRuntimeExpressionForFormat(effect.condition, "yarn");
+      return [
+        `<<if ${condition}>>`,
+        indentEffectText(formatYarnEffect(effect.thenEffect), "    "),
+        "<<else>>",
+        indentEffectText(formatYarnEffect(effect.elseEffect), "    "),
+        "<<endif>>"
+      ].join("\n");
+    }
     if (!effect?.key) return "// Skipped effect without a state key.";
-    if (effect.op === "set") return `<<set $${effect.key} to ${formatExportEffectValue(effect)}>>`;
-    if (effect.op === "add") return `<<set $${effect.key} to $${effect.key} + ${formatExportEffectValue(effect)}>>`;
-    if (effect.op === "subtract") return `<<set $${effect.key} to $${effect.key} - ${formatExportEffectValue(effect)}>>`;
+    if (effect.op === "set") return `<<set $${effect.key} to ${formatExportEffectValue(effect, "yarn")}>>`;
+    if (effect.op === "add") return `<<set $${effect.key} to $${effect.key} + ${formatExportEffectValue(effect, "yarn")}>>`;
+    if (effect.op === "subtract") return `<<set $${effect.key} to $${effect.key} - ${formatExportEffectValue(effect, "yarn")}>>`;
     if (effect.op === "toggle") return `<<set $${effect.key} to not $${effect.key}>>`;
     return `// Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key}`;
   }
 
   function formatInkEffect(effect) {
+    if (effect?.op === "ifElse") {
+      const condition = formatRuntimeExpressionForFormat(effect.condition, "ink");
+      return [
+        `{ ${condition}:`,
+        indentEffectText(formatInkEffect(effect.thenEffect), "    "),
+        "- else:",
+        indentEffectText(formatInkEffect(effect.elseEffect), "    "),
+        "}"
+      ].join("\n");
+    }
     if (!effect?.key) return "// Skipped effect without a state key.";
-    if (effect.op === "set") return `~ ${effect.key} = ${formatExportEffectValue(effect)}`;
-    if (effect.op === "add") return `~ ${effect.key} = ${effect.key} + ${formatExportEffectValue(effect)}`;
-    if (effect.op === "subtract") return `~ ${effect.key} = ${effect.key} - ${formatExportEffectValue(effect)}`;
+    if (effect.op === "set") return `~ ${effect.key} = ${formatExportEffectValue(effect, "ink")}`;
+    if (effect.op === "add") return `~ ${effect.key} = ${effect.key} + ${formatExportEffectValue(effect, "ink")}`;
+    if (effect.op === "subtract") return `~ ${effect.key} = ${effect.key} - ${formatExportEffectValue(effect, "ink")}`;
     if (effect.op === "toggle") return `~ ${effect.key} = not ${effect.key}`;
     return `// Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key}`;
   }
 
   function formatTweeEffect(effect) {
+    if (effect?.op === "ifElse") {
+      const condition = formatRuntimeExpressionForFormat(effect.condition, "twee");
+      return [
+        `<<if ${condition}>>`,
+        indentEffectText(formatTweeEffect(effect.thenEffect), "  "),
+        "<<else>>",
+        indentEffectText(formatTweeEffect(effect.elseEffect), "  "),
+        "<</if>>"
+      ].join("\n");
+    }
     if (!effect?.key) return "/* Skipped effect without a state key. */";
-    const value = formatSugarCubeLiteral(coerceValue(effect?.valueSource ?? effect?.value ?? ""));
+    const value = formatExportEffectValue(effect, "twee");
     if (effect.op === "set") return `<<set $${effect.key} = ${value}>>`;
     if (effect.op === "add") return `<<set $${effect.key} += ${value}>>`;
     if (effect.op === "subtract") return `<<set $${effect.key} -= ${value}>>`;
@@ -36843,8 +37536,20 @@ function installNarrativeCanvasApp() {
     return `/* Runtime-only effect: ${effect.op} ${effect.sourceKey || effect.key} */`;
   }
 
-  function formatExportEffectValue(effect) {
-    return formatExportLiteral(coerceValue(effect?.valueSource ?? effect?.value ?? ""));
+  function indentEffectText(text, indent) {
+    return String(text || "").split("\n").map((line) => `${indent}${line}`).join("\n");
+  }
+
+  function formatExportEffectValue(effect, format = "plain") {
+    const source = normalizeOptionalString(effect?.valueSource ?? effect?.value).trim();
+    if (effect?.valueMode === "variable" && source) {
+      if (format === "yarn") return `$${source}`;
+      if (format === "twee") return `$${source}`;
+      return source;
+    }
+    return format === "twee"
+      ? formatSugarCubeLiteral(coerceValue(source))
+      : formatExportLiteral(coerceValue(source));
   }
 
   function formatExportLiteral(value) {
@@ -36972,6 +37677,10 @@ function installNarrativeCanvasApp() {
 
   function formatTweeLinkText(value) {
     return String(value || "Continue").replace(/\r?\n+/g, " ").replace(/\s+/g, " ").trim() || "Continue";
+  }
+
+  function formatTweeWikiLinkText(value) {
+    return String(value || "").replace(/\]/g, "&#93;");
   }
 
   function buildDeterministicIfid(document) {
@@ -37243,6 +37952,9 @@ function installNarrativeCanvasApp() {
   }
 
   function formatStoryMarkdownEffect(effect) {
+    if (effect?.op === "ifElse") {
+      return `if ${formatMarkdownInline(effect.condition)} then ${formatStateEffectBody(effect.thenEffect)} else ${formatStateEffectBody(effect.elseEffect)}`;
+    }
     const parts = [
       effect?.trigger || "onVisit",
       effect?.op || "set",
@@ -37282,7 +37994,7 @@ function installNarrativeCanvasApp() {
       if (character.voice) lines.push(`- Voice: ${character.voice}`);
       normalizeCodexExtraFields(character.extraFields)
         .filter((field) => field.key)
-        .forEach((field) => lines.push(`- ${field.key}: ${field.value}`));
+        .forEach((field) => lines.push(`- ${field.key}: ${formatCodexExtraFieldValue(field.value, field.type)}`));
       if (character.notes) lines.push("", character.notes);
       getCharacterBacklinkGroups(character, backlinkIndex)
         .filter((group) => group.items.length)
@@ -38137,8 +38849,10 @@ function installNarrativeCanvasApp() {
       const link = parseTweeDocumentLink(trimmed);
       if (link) {
         const commands = [];
-        for (index += 1; index < lines.length && lines[index].trim() !== "<</link>>"; index += 1) {
-          commands.push(lines[index]);
+        if (link.macro) {
+          for (index += 1; index < lines.length && lines[index].trim() !== "<</link>>"; index += 1) {
+            commands.push(lines[index]);
+          }
         }
         const effects = commands.map((command) => parseTweeDocumentEffect(command.trim())).filter(Boolean);
         if (type.toLowerCase() === "choice") {
@@ -38166,8 +38880,22 @@ function installNarrativeCanvasApp() {
   }
 
   function parseTweeDocumentLink(source) {
-    const match = String(source || "").match(/^<<link\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s*>>$/);
-    return match ? { label: parseTweeDocumentString(match[1]), target: parseTweeDocumentString(match[2]) } : null;
+    const text = String(source || "").trim();
+    const macro = text.match(/^<<link\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s+((?:"(?:\\.|[^"])*")|(?:'(?:\\.|[^'])*'))\s*>>$/);
+    if (macro) return { label: parseTweeDocumentString(macro[1]), target: parseTweeDocumentString(macro[2]), macro: true };
+    const wiki = text.match(/^\[\[([\s\S]*?)\]\]$/);
+    if (!wiki) return null;
+    const content = wiki[1];
+    const forward = content.match(/^([\s\S]*?)(?:->|\|)([\s\S]+)$/);
+    if (forward) return { label: parseTweeWikiLinkText(forward[1]), target: parseTweeWikiLinkText(forward[2]), macro: false };
+    const backward = content.match(/^([\s\S]+)<-([\s\S]*?)$/);
+    if (backward) return { label: parseTweeWikiLinkText(backward[2]), target: parseTweeWikiLinkText(backward[1]), macro: false };
+    const target = parseTweeWikiLinkText(content);
+    return { label: target, target, macro: false };
+  }
+
+  function parseTweeWikiLinkText(value) {
+    return String(value || "").trim().replace(/&#93;/gi, "]");
   }
 
   function parseTweeDocumentGoto(source) {
@@ -39113,6 +39841,11 @@ function installNarrativeCanvasApp() {
     return variables;
   }
 
+  function normalizePlayHistoryLimit(value) {
+    const number = Number(value);
+    return PLAY_HISTORY_LIMIT_OPTIONS.includes(number) ? number : DEFAULT_PLAY_HISTORY_LIMIT;
+  }
+
   function normalizeProject(project) {
     const nodeTypesList = normalizeProjectNodeTypes(project.nodeTypes, project.customNodeTypes);
     const nodeTypeTemplates = new Map(nodeTypesList.map((typeDef) => [typeDef.type, getNodeTypeTemplate(typeDef)]));
@@ -39122,6 +39855,7 @@ function installNarrativeCanvasApp() {
       title: project.title || "Sample",
       workflowMode: normalizeWorkflowMode(project.workflowMode || project.sourceMode || project.mode),
       notes: project.notes || "",
+      playHistoryLimit: normalizePlayHistoryLimit(project.playHistoryLimit),
       variables: normalizeVariablesObject(project.variables),
       script: normalizeScriptConfig(project.script),
       eventSheet,
@@ -39366,12 +40100,6 @@ function installNarrativeCanvasApp() {
     const cellX = Math.floor(cx / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
     const cellY = Math.floor(cy / FRAME_CONTAINMENT_INDEX_CELL_SIZE);
     return source.cells.get(`${cellX}:${cellY}`) || [];
-  }
-
-  function frameArea(frame) {
-    const width = Number(frame?.width) || 0;
-    const height = Number(frame?.height) || 0;
-    return Math.max(0, width) * Math.max(0, height);
   }
 
   function frameContainsNodeCenter(frame, node) {
@@ -39773,6 +40501,8 @@ function installNarrativeCanvasApp() {
     }
     delete normalized.revealMode;
     normalized.choiceOptions = normalizeChoiceOptions(normalized);
+    normalized.choiceTimer = normalizeChoiceTimer(normalized.choiceTimer);
+    if (!normalized.choiceTimer.enabled && !normalized.choiceTimer.fallbackLinkId) delete normalized.choiceTimer;
     if (normalized.choiceOptions.length) {
       // Mirror option labels into the legacy choices[] field so existing runtime paths and
       // story/preview UI that read `node.choices` see the same list as `choiceOptions`.
@@ -39785,6 +40515,20 @@ function installNarrativeCanvasApp() {
 
   function normalizeChoiceRevealMode(value) {
     return value === "disabled" || value === "disableUnavailable" ? "disabled" : "hide";
+  }
+
+  function normalizeChoiceTimerSeconds(value) {
+    const seconds = Number(value);
+    return Number.isFinite(seconds) ? clamp(Math.round(seconds), 1, 3600) : 10;
+  }
+
+  function normalizeChoiceTimer(value) {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return {
+      enabled: Boolean(source.enabled),
+      seconds: normalizeChoiceTimerSeconds(source.seconds),
+      fallbackLinkId: normalizeOptionalString(source.fallbackLinkId || source.linkId).trim()
+    };
   }
 
   function normalizeFrameLayout(value) {
@@ -39877,14 +40621,39 @@ function installNarrativeCanvasApp() {
     return value
       .map((effect) => {
         if (!effect || typeof effect !== "object" || Array.isArray(effect)) return null;
+        if (effect.op === "ifElse" || (effect.condition && effect.thenEffect && effect.elseEffect)) {
+          const thenEffect = normalizeNodeEffectBranch(effect.thenEffect);
+          const elseEffect = normalizeNodeEffectBranch(effect.elseEffect);
+          const condition = normalizeOptionalString(effect.condition).trim();
+          if (!condition || !thenEffect || !elseEffect) return null;
+          return {
+            trigger: normalizePlaybookActionTrigger(effect.trigger || "onVisit"),
+            op: "ifElse",
+            condition,
+            thenEffect,
+            elseEffect
+          };
+        }
         return {
           trigger: normalizePlaybookActionTrigger(effect.trigger || "onVisit"),
           op: normalizePlaybookActionOperation(effect.op || "set"),
           key: normalizeOptionalString(effect.key || effect.variable || effect.name).trim(),
-          value: normalizeOptionalString(effect.value)
+          value: normalizeOptionalString(effect.value),
+          valueMode: effect.valueMode === "variable" ? "variable" : "literal"
         };
       })
-      .filter((effect) => effect && (effect.key || effect.op === "clear"));
+      .filter((effect) => effect && (effect.op === "ifElse" || effect.key || effect.op === "clear"));
+  }
+
+  function normalizeNodeEffectBranch(effect) {
+    if (!effect || typeof effect !== "object" || Array.isArray(effect)) return null;
+    const normalized = {
+      op: normalizePlaybookActionOperation(effect.op || "set"),
+      key: normalizeOptionalString(effect.key || effect.variable || effect.name).trim(),
+      value: normalizeOptionalString(effect.value),
+      valueMode: effect.valueMode === "variable" ? "variable" : "literal"
+    };
+    return normalized.key || normalized.op === "clear" ? normalized : null;
   }
 
   function normalizeNodeRouting(value) {
@@ -40081,19 +40850,64 @@ function installNarrativeCanvasApp() {
   }
 
   function resetPreviewSessionState() {
+    capturePlaySessionSnapshot();
     if (state.playRefreshTimer) {
       window.clearTimeout(state.playRefreshTimer);
       state.playRefreshTimer = null;
     }
+    clearPlayChoiceTimer();
     state.playNodeId = null;
     state.playPath = [];
     state.playStepIndex = 0;
     state.playSteps = [];
+    state.playTrimmedCount = 0;
     state.playTurnIndex = 0;
     state.playVariables = null;
     state.playManualActionRunIds = new Set();
     state.playVisitedNodeIds = new Set();
     state.playVisitRecords = [];
+  }
+
+  function getPlayHistoryLimit() {
+    return normalizePlayHistoryLimit(state.project?.playHistoryLimit);
+  }
+
+  function capturePlaySessionSnapshot() {
+    if (!Array.isArray(state.playPath) || !state.playPath.length) return null;
+    const steps = state.playPath.map((nodeId, index) => {
+      const node = getNode(nodeId);
+      const snapshot = Array.isArray(state.playSteps) ? state.playSteps[index] : null;
+      return {
+        nodeId,
+        displayId: node ? getNodeDisplayId(node) : "",
+        type: node?.type || "",
+        title: node?.title || "",
+        body: node ? displayBody(node) : "",
+        variables: snapshot?.variables ? clonePreviewVariables(snapshot.variables) : null,
+        operations: clonePreviewVisitRecords(snapshot?.visitRecords || [])
+          .find((record) => record.nodeId === nodeId)?.operations || []
+      };
+    });
+    state.lastPlaySession = {
+      projectTitle: state.project?.title || "Narrative Canvas",
+      capturedAt: new Date().toISOString(),
+      trimmedCount: Number(state.playTrimmedCount || 0),
+      steps
+    };
+    return state.lastPlaySession;
+  }
+
+  function trimPreviewHistory() {
+    const limit = getPlayHistoryLimit();
+    const maximum = limit;
+    const excess = Math.max(0, state.playPath.length - maximum);
+    if (!excess) return false;
+    state.playPath = state.playPath.slice(excess);
+    state.playSteps = Array.isArray(state.playSteps) ? state.playSteps.slice(excess) : [];
+    state.playVisitRecords = Array.isArray(state.playVisitRecords) ? state.playVisitRecords.slice(excess) : [];
+    state.playStepIndex = Math.max(0, state.playStepIndex - excess);
+    state.playTrimmedCount = Number(state.playTrimmedCount || 0) + excess;
+    return true;
   }
 
   function scheduleOpenPreviewRefresh() {
@@ -40220,6 +41034,7 @@ function installNarrativeCanvasApp() {
   }
 
   function advancePreview(nodeId, opts = {}) {
+    clearPlayChoiceTimer();
     const currentIndex = getPreviewCurrentPathIndex();
     const currentNode = getNode(state.playNodeId);
     if (currentNode) {
@@ -40290,14 +41105,11 @@ function installNarrativeCanvasApp() {
     renderPreviewNode(node.id, { skipVisit: true });
   }
 
-  // Play keeps a scrollable log of the cards the reader just passed; older cards fall out
-  // of the visible span so long sessions stay light.
-  const PLAY_HISTORY_CARD_LIMIT = 30;
-
   function renderPreviewHistoryCards() {
     const index = getPreviewCurrentPathIndex();
     if (index <= 0) return "";
-    const start = Math.max(0, index - PLAY_HISTORY_CARD_LIMIT);
+    const historyLimit = getPlayHistoryLimit();
+    const start = Math.max(0, index - Math.max(0, historyLimit - 1));
     const cards = [];
     for (let i = start; i < index; i += 1) {
       const node = getNode(state.playPath[i]);
@@ -40306,8 +41118,8 @@ function installNarrativeCanvasApp() {
       cards.push(renderPreviewHistoryCard(node, step, i));
     }
     if (!cards.length) return "";
-    const trimmedNotice = start > 0
-      ? `<div class="play-history-trimmed">${escapeHtml(t("Showing the last {count} cards.", { count: PLAY_HISTORY_CARD_LIMIT }))}</div>`
+    const trimmedNotice = start > 0 || state.playTrimmedCount > 0
+      ? `<div class="play-history-trimmed">${escapeHtml(t("Showing the last {count} cards.", { count: historyLimit }))}</div>`
       : "";
     return `<section class="play-history" aria-label="${escapeAttr(t("Recent cards"))}">${trimmedNotice}${cards.join("")}</section>`;
   }
@@ -40317,31 +41129,59 @@ function installNarrativeCanvasApp() {
   // fixed set of block and inline markers is converted — no raw HTML passes through.
   function renderNarrativeMarkdown(text) {
     const source = String(text ?? "");
+    // Inline formatting runs on already-escaped text, so Markdown markers survive but
+    // no raw HTML gets through. Links are limited to safe schemes.
     const inline = (line) => escapeHtml(line)
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) =>
+        `<a href="${/^(https?:|mailto:|#)/i.test(url) ? url : "#"}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
-      .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+      .replace(/~~([^~]+)~~/g, "<del>$1</del>")
+      .replace(/==([^=]+)==/g, "<mark>$1</mark>");
     const lines = source.split("\n");
     const out = [];
     let listItems = null;
-    const flushList = () => {
-      if (listItems) { out.push(`<ul>${listItems.join("")}</ul>`); listItems = null; }
-    };
+    let orderedItems = null;
+    let codeLines = null;
+    const flushList = () => { if (listItems) { out.push(`<ul>${listItems.join("")}</ul>`); listItems = null; } };
+    const flushOrdered = () => { if (orderedItems) { out.push(`<ol>${orderedItems.join("")}</ol>`); orderedItems = null; } };
+    const flushBlocks = () => { flushList(); flushOrdered(); };
     for (const rawLine of lines) {
       const line = rawLine.replace(/\r$/, "");
+      const fence = /^\s*```/.test(line);
+      if (codeLines) {
+        if (fence) { out.push(`<pre><code>${codeLines.map((code) => escapeHtml(code)).join("\n")}</code></pre>`); codeLines = null; }
+        else codeLines.push(line);
+        continue;
+      }
+      if (fence) { flushBlocks(); codeLines = []; continue; }
+      const taskMatch = line.match(/^\s*-\s+\[([ xX])\]\s+(.*)$/);
+      if (taskMatch) {
+        flushOrdered();
+        const checked = taskMatch[1].toLowerCase() === "x";
+        (listItems ||= []).push(`<li class="nc-md-task"><input type="checkbox" disabled${checked ? " checked" : ""}>${inline(taskMatch[2])}</li>`);
+        continue;
+      }
       const listMatch = line.match(/^\s*-\s+(.*)$/);
-      if (listMatch) { (listItems ||= []).push(`<li>${inline(listMatch[1])}</li>`); continue; }
-      flushList();
+      if (listMatch) { flushOrdered(); (listItems ||= []).push(`<li>${inline(listMatch[1])}</li>`); continue; }
+      const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+      if (orderedMatch) { flushList(); (orderedItems ||= []).push(`<li>${inline(orderedMatch[1])}</li>`); continue; }
+      flushBlocks();
+      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { out.push("<hr>"); continue; }
       const h3 = line.match(/^###\s+(.*)$/);
       const h2 = line.match(/^##\s+(.*)$/);
+      const h1 = line.match(/^#\s+(.*)$/);
       const quote = line.match(/^>\s+(.*)$/);
       if (h3) out.push(`<h5>${inline(h3[1])}</h5>`);
       else if (h2) out.push(`<h4>${inline(h2[1])}</h4>`);
+      else if (h1) out.push(`<h3>${inline(h1[1])}</h3>`);
       else if (quote) out.push(`<blockquote>${inline(quote[1])}</blockquote>`);
       else if (line.trim() === "") out.push("<br>");
       else out.push(`<p>${inline(line)}</p>`);
     }
-    flushList();
+    if (codeLines) out.push(`<pre><code>${codeLines.map((code) => escapeHtml(code)).join("\n")}</code></pre>`);
+    flushBlocks();
     return out.join("");
   }
 
@@ -40424,6 +41264,7 @@ function installNarrativeCanvasApp() {
   function renderPreviewNode(nodeId, options = {}) {
     const node = getNode(nodeId);
     if (!node) return;
+    if (state.playChoiceTimer?.nodeId && state.playChoiceTimer.nodeId !== node.id) clearPlayChoiceTimer();
     const runtimeScript = getNodeRuntimeScript(node);
     if (!options.skipVisit) {
       ensurePreviewVisitRecord(node);
@@ -40431,6 +41272,7 @@ function installNarrativeCanvasApp() {
       applyPlaybookActionsForNode(node, "onVisit", "Node visit");
       applyVisitTrackingRule(node);
       capturePreviewStep(node.id);
+      trimPreviewHistory();
     }
 
     const outgoing = getOutgoing(node.id);
@@ -40484,6 +41326,7 @@ function installNarrativeCanvasApp() {
     if (!options.skipCanvasFocus) focusCanvasOnPreviewNode(node);
 
     if (dialogTurns.length && dialogTurnIndex < dialogTurns.length - 1) {
+      clearPlayChoiceTimer();
       const linePrevButton = dialogTurnIndex > 0
         ? `<button class="play-action" type="button" data-action="play-dialog-prev">${escapeHtml(t("Previous line"))}</button>`
         : "";
@@ -40492,6 +41335,7 @@ function installNarrativeCanvasApp() {
     }
 
     if (isPreviewEndConditionMet() || normalizeNodeRouting(node.routing).mode === "end") {
+      clearPlayChoiceTimer();
       dom.playActions.innerHTML = previousButton + manualActionButtons + `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`;
       return;
     }
@@ -40505,21 +41349,90 @@ function installNarrativeCanvasApp() {
         if (!link.choiceOptionId) return true;  // legacy links with no option id stay visible
         return availability.get(link.choiceOptionId) !== false;
       });
-      dom.playActions.innerHTML = previousButton + manualActionButtons + visibleLinks.map((link, index) => {
+      const timer = normalizeChoiceTimer(node.choiceTimer);
+      const fallbackLink = timer.enabled
+        ? visibleLinks.find((link) => link.id === timer.fallbackLinkId
+          && (!link.choiceOptionId || availability.get(link.choiceOptionId) !== false))
+        : null;
+      const timerStatus = fallbackLink
+        ? `<div class="play-choice-countdown" data-play-choice-countdown aria-live="polite"></div>`
+        : "";
+      dom.playActions.innerHTML = previousButton + manualActionButtons + timerStatus + visibleLinks.map((link, index) => {
         const label = getChoiceBranchButtonLabel(link, runtimeChoices, index, entries);
         const optionAttr = link.choiceOptionId ? ` data-choice-option-id="${escapeAttr(link.choiceOptionId)}"` : "";
         const available = link.choiceOptionId ? availability.get(link.choiceOptionId) !== false : true;
         const disabledAttr = revealMode === "disabled" && !available ? ` disabled aria-disabled="true" title="${escapeAttr(t("Requirements not met"))}"` : "";
         return `<button class="play-action play-choice-action" type="button" data-action="play-next" data-node-id="${escapeAttr(link.to)}"${optionAttr}${disabledAttr}>${escapeHtml(label)}</button>`;
       }).join("");
+      if (fallbackLink) ensurePlayChoiceTimer(node, timer, fallbackLink);
+      else clearPlayChoiceTimer();
+      return;
+    }
+
+    if (nextLinks.length > 1) {
+      clearPlayChoiceTimer();
+      dom.playActions.innerHTML = previousButton + manualActionButtons + nextLinks.map((link, index) => {
+        const rawLabel = normalizeOptionalString(link.label).trim();
+        const target = getNode(link.to);
+        const generic = !rawLabel || /^(?:continue|next|next page)$/i.test(rawLabel);
+        const label = generic
+          ? (target?.title || t("Branch {number}", { number: index + 1 }))
+          : rawLabel;
+        return `<button class="play-action play-choice-action" type="button" data-action="play-next" data-node-id="${escapeAttr(link.to)}">${escapeHtml(label)}</button>`;
+      }).join("");
       return;
     }
 
     const routingNextId = getRoutingNextNodeId(node);
+    clearPlayChoiceTimer();
     const nextId = routingNextId || nextLinks[0]?.to || nextPathId;
     dom.playActions.innerHTML = previousButton + manualActionButtons + (nextId
       ? `<button class="play-action primary" type="button" data-action="play-next" data-node-id="${escapeAttr(nextId)}">${escapeHtml(t("Next page"))}</button>`
       : `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`);
+  }
+
+  function clearPlayChoiceTimer() {
+    const timer = state.playChoiceTimer;
+    if (timer?.timeoutId) window.clearTimeout(timer.timeoutId);
+    if (timer?.intervalId) window.clearInterval(timer.intervalId);
+    state.playChoiceTimer = null;
+  }
+
+  function ensurePlayChoiceTimer(node, timer, fallbackLink) {
+    if (!node || !fallbackLink || !timer?.enabled) {
+      clearPlayChoiceTimer();
+      return;
+    }
+    const key = `${node.id}|${fallbackLink.id}|${timer.seconds}`;
+    if (state.playChoiceTimer?.key === key) {
+      updatePlayChoiceCountdown();
+      return;
+    }
+    clearPlayChoiceTimer();
+    const deadline = Date.now() + timer.seconds * 1000;
+    const timeoutId = window.setTimeout(() => {
+      const active = state.playChoiceTimer;
+      if (!active || active.key !== key || state.playNodeId !== node.id) return;
+      const currentLink = getLink(fallbackLink.id);
+      clearPlayChoiceTimer();
+      if (!currentLink || currentLink.from !== node.id || !isLinkRequirementMet(currentLink, node) || !isTargetNodeRequirementMet(currentLink)) return;
+      const fallbackEntry = currentLink.choiceOptionId
+        ? getRuntimeChoiceEntries(node, getNodeRuntimeScript(node)).find((entry) => entry.optionId === currentLink.choiceOptionId)
+        : null;
+      if (fallbackEntry && !isChoiceOptionAvailable(fallbackEntry, node)) return;
+      advancePreview(currentLink.to, { optionId: currentLink.choiceOptionId || "", timed: true });
+    }, timer.seconds * 1000);
+    const intervalId = window.setInterval(updatePlayChoiceCountdown, 250);
+    state.playChoiceTimer = { key, nodeId: node.id, deadline, timeoutId, intervalId };
+    updatePlayChoiceCountdown();
+  }
+
+  function updatePlayChoiceCountdown() {
+    const timer = state.playChoiceTimer;
+    const target = dom.playActions?.querySelector?.("[data-play-choice-countdown]");
+    if (!timer || !target) return;
+    const seconds = Math.max(0, Math.ceil((timer.deadline - Date.now()) / 1000));
+    target.textContent = t("Time remaining: {seconds}s", { seconds });
   }
 
   function renderPreviewManualActions(node) {
@@ -40640,12 +41553,6 @@ function installNarrativeCanvasApp() {
     return { status: "ok" };
   }
 
-  function collectEndConditionUnknownKeys(text, variables) {
-    const result = collectExpressionKeys(text, variables);
-    if (result.invalid) return null;
-    return result.keys.filter((key) => !resolveRuntimeStatePath(key, variables).found);
-  }
-
   function collectExpressionKeys(text, variables = {}) {
     const trimmed = String(text || "").trim();
     if (!trimmed) return { keys: [], membershipKeys: [], invalid: false };
@@ -40754,13 +41661,27 @@ function installNarrativeCanvasApp() {
       if (row) rows.push(row);
     };
     normalizeNodeStateLogic(node?.stateLogic).effects.forEach((effect) => {
-      push(`${t("Node effect")} / ${t(effect.trigger === "onChoose" ? "On choose" : "On visit")}`, effect);
+      const label = `${t("Node effect")} / ${t(effect.trigger === "onChoose" ? "On choose" : "On visit")}`;
+      if (effect.op === "ifElse") {
+        push(`${label} / if`, effect.thenEffect);
+        push(`${label} / else`, effect.elseEffect);
+      } else {
+        push(label, effect);
+      }
     });
     getMatchingPlaybookActions(node, "onVisit").forEach((action) => push(`${t("Variable action")} / ${t("On visit")}`, action));
     getMatchingPlaybookActions(node, "manual").forEach((action) => push(t("Manual action"), action));
     getMatchingPlaybookActions(node, "onChoose").forEach((action) => push(`${t("Variable action")} / ${t("On choose")}`, action));
     getRuntimeChoiceEntries(node, getNodeRuntimeScript(node)).forEach((entry) => {
-      (entry.effects || []).forEach((effect) => push(`${t("Choice effect")} / ${entry.label || entry.optionId || t("Option")}`, effect));
+      (entry.effects || []).forEach((effect) => {
+        const label = `${t("Choice effect")} / ${entry.label || entry.optionId || t("Option")}`;
+        if (effect.op === "ifElse") {
+          push(`${label} / if`, effect.thenEffect);
+          push(`${label} / else`, effect.elseEffect);
+        } else {
+          push(label, effect);
+        }
+      });
     });
     return [...new Set(rows)];
   }
@@ -40871,6 +41792,18 @@ function installNarrativeCanvasApp() {
   }
 
   function applyNodeEffect(effect, node, contextLabel = "") {
+    if (effect?.op === "ifElse") {
+      const condition = renderRuntimeTemplate(effect.condition, node, effect.condition);
+      const branch = evaluateRequirementExpression(condition) ? effect.thenEffect : effect.elseEffect;
+      if (!branch) return false;
+      return applyPlaybookActionWithPreviewLog({
+        ...branch,
+        id: "",
+        trigger: effect.trigger || "onVisit",
+        target: "",
+        category: "Variable"
+      }, node, contextLabel);
+    }
     return applyPlaybookActionWithPreviewLog({
       id: "",
       trigger: effect.trigger || "onVisit",
@@ -40878,7 +41811,8 @@ function installNarrativeCanvasApp() {
       op: effect.op || "set",
       category: "Variable",
       key: effect.key || "",
-      value: effect.value || ""
+      value: effect.value || "",
+      valueMode: effect.valueMode === "variable" ? "variable" : "literal"
     }, node, contextLabel);
   }
 
@@ -41090,7 +42024,12 @@ function installNarrativeCanvasApp() {
     const key = getPlaybookActionStateKey(action);
     if (!key) return false;
     const variables = getPlayRuntimeVariables();
-    const value = coercePlaybookActionValueForVariable(renderRuntimeTemplate(action.value, node, action.value), info, action);
+    const valueReference = action?.valueMode === "variable"
+      ? resolveRuntimeStatePath(normalizeExpressionVariableTerm(action.value), variables)
+      : null;
+    const value = valueReference?.found
+      ? cloneRuntimeExportValue(valueReference.value)
+      : coercePlaybookActionValueForVariable(renderRuntimeTemplate(action.value, node, action.value), info, action);
     const existing = variables[key];
     if (action.op === "set") {
       variables[key] = value;
@@ -41390,22 +42329,6 @@ function installNarrativeCanvasApp() {
     });
   }
 
-  function parseExpressionPredicate(source) {
-    const match = String(source || "").trim().match(/^(has|contains)\s*\(([\s\S]*)\)$/i);
-    if (!match) return null;
-    const args = splitExpressionArguments(match[2]);
-    if (args.length !== 2) return { invalid: true };
-    const key = normalizeExpressionVariableTerm(args[0]);
-    if (!key) return { invalid: true };
-    return {
-      name: match[1].toLowerCase(),
-      keySource: args[0].trim(),
-      key,
-      value: args[1].trim(),
-      invalid: false
-    };
-  }
-
   function collectExpressionPredicates(source) {
     const parsed = parseJsConditionExpression(source);
     if (parsed.invalid) return [];
@@ -41444,42 +42367,6 @@ function installNarrativeCanvasApp() {
     return predicates;
   }
 
-  function splitExpressionArguments(source) {
-    const text = String(source || "");
-    const args = [];
-    let quote = "";
-    let escaped = false;
-    let depth = 0;
-    let start = 0;
-    for (let index = 0; index < text.length; index += 1) {
-      const char = text[index];
-      if (quote) {
-        if (escaped) escaped = false;
-        else if (char === "\\") escaped = true;
-        else if (char === quote) quote = "";
-        continue;
-      }
-      if (char === "\"" || char === "'") {
-        quote = char;
-        continue;
-      }
-      if (char === "(") {
-        depth += 1;
-        continue;
-      }
-      if (char === ")") {
-        depth = Math.max(0, depth - 1);
-        continue;
-      }
-      if (depth === 0 && char === ",") {
-        args.push(text.slice(start, index).trim());
-        start = index + 1;
-      }
-    }
-    args.push(text.slice(start).trim());
-    return args.filter((arg) => arg !== "");
-  }
-
   function normalizeExpressionVariableTerm(source) {
     const text = String(source || "").trim().replace(/^\$/, "");
     const variablePrefix = text.match(/^variables\.([a-zA-Z_][\w.-]*)$/);
@@ -41501,31 +42388,6 @@ function installNarrativeCanvasApp() {
   function isQuotedExpressionLiteral(source) {
     return /^"(?:\\.|[^"\\])*"$/.test(String(source || "").trim())
       || /^'(?:\\.|[^'\\])*'$/.test(String(source || "").trim());
-  }
-
-  function isPlainExpressionLiteral(source) {
-    const text = String(source || "").trim();
-    return isQuotedExpressionLiteral(text)
-      || /^(true|false|null)$/i.test(text)
-      || (text !== "" && !Number.isNaN(Number(text)));
-  }
-
-  function evaluateExpressionPredicate(predicate, variables) {
-    const key = normalizeExpressionVariableTerm(predicate.key);
-    const container = resolveRuntimeStatePath(key, variables).value;
-    const value = resolveExpressionPredicateValue(predicate.value, variables);
-    return expressionContainerHasValue(container, value);
-  }
-
-  function resolveExpressionPredicateValue(source, variables) {
-    const text = String(source || "").trim();
-    if (isPlainExpressionLiteral(text)) return parseExpressionLiteral(text);
-    const key = normalizeExpressionVariableTerm(text);
-    if (key) {
-      const resolved = resolveRuntimeStatePath(key, variables);
-      if (resolved.found) return resolved.value;
-    }
-    return parseExpressionLiteral(text);
   }
 
   function expressionContainerHasValue(container, value) {
@@ -41614,6 +42476,74 @@ function installNarrativeCanvasApp() {
     "narrative_canvas_codex", "id", "name", "category", "kind", "role", "voice",
     "tags", "notes", "images", "image", "image_preview", "hidden", "files", "canvas", "icon"
   ]);
+  const CODEX_EXTRA_FIELD_TYPES = new Set(["string", "number", "boolean", "array", "object", "null"]);
+
+  function inferCodexExtraFieldType(value) {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    if (typeof value === "number" && Number.isFinite(value)) return "number";
+    if (typeof value === "boolean") return "boolean";
+    if (value && typeof value === "object") return "object";
+    return "string";
+  }
+
+  function normalizeCodexExtraFieldValue(value, type = inferCodexExtraFieldType(value)) {
+    if (type === "null") return null;
+    if (type === "number") {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    }
+    if (type === "boolean") {
+      if (typeof value === "string") return value.trim().toLowerCase() === "true";
+      return Boolean(value);
+    }
+    if (type === "array") {
+      if (Array.isArray(value)) return value;
+      try {
+        const parsed = JSON.parse(String(value || "[]"));
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_error) {
+        return [];
+      }
+    }
+    if (type === "object") {
+      if (value && typeof value === "object" && !Array.isArray(value)) return value;
+      try {
+        const parsed = JSON.parse(String(value || "{}"));
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      } catch (_error) {
+        return {};
+      }
+    }
+    return String(value ?? "");
+  }
+
+  function formatCodexExtraFieldValue(value, type = inferCodexExtraFieldType(value)) {
+    if (type === "array" || type === "object") return JSON.stringify(value);
+    if (type === "null") return "null";
+    return String(value ?? "");
+  }
+
+  function parseCodexExtraFieldInput(value, type) {
+    const source = String(value ?? "").trim();
+    if (type === "string") return { valid: true, value: String(value ?? "") };
+    if (type === "null") return { valid: true, value: null };
+    if (type === "number") {
+      const number = Number(source);
+      return { valid: source !== "" && Number.isFinite(number), value: number };
+    }
+    if (type === "boolean") {
+      if (!["true", "false"].includes(source.toLowerCase())) return { valid: false, value: false };
+      return { valid: true, value: source.toLowerCase() === "true" };
+    }
+    try {
+      const parsed = JSON.parse(source);
+      if (type === "array") return { valid: Array.isArray(parsed), value: parsed };
+      return { valid: Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed), value: parsed };
+    } catch (_error) {
+      return { valid: false, value: type === "array" ? [] : {} };
+    }
+  }
 
   function normalizeCodexVaultFiles(value) {
     const source = Array.isArray(value) ? value : [];
@@ -41636,8 +42566,9 @@ function installNarrativeCanvasApp() {
       const key = String(entry?.key ?? "").trim();
       if (CODEX_RESERVED_FRONTMATTER_KEYS.has(key.toLowerCase())) return;
       const raw = entry?.value;
-      const fieldValue = raw == null ? "" : (typeof raw === "object" ? JSON.stringify(raw) : String(raw));
-      normalized.push({ key, value: fieldValue });
+      const requestedType = String(entry?.type || "").trim().toLowerCase();
+      const type = CODEX_EXTRA_FIELD_TYPES.has(requestedType) ? requestedType : inferCodexExtraFieldType(raw);
+      normalized.push({ key, type, value: normalizeCodexExtraFieldValue(raw, type) });
     });
     return normalized;
   }
@@ -41677,7 +42608,7 @@ function installNarrativeCanvasApp() {
     let changed = false;
     template.forEach((key) => {
       if (present.has(key.toLowerCase())) return;
-      fields.push({ key, value: "" });
+      fields.push({ key, type: "string", value: "" });
       changed = true;
     });
     if (changed) character.extraFields = fields;
@@ -42000,10 +42931,6 @@ function installNarrativeCanvasApp() {
     return getNodeCharacterSummary(node, { includeEventAggregate: true });
   }
 
-  function getEventFrameCharacterIds(node) {
-    return new Set(getNodeCharacterLinks(node, { includeEventAggregate: true }).map((link) => link.characterId));
-  }
-
   function createCharacterBacklinkGroups() {
     return CHARACTER_BACKLINK_GROUP_DEFS.map((group) => ({
       ...group,
@@ -42306,38 +43233,6 @@ function installNarrativeCanvasApp() {
     return [];
   }
 
-  function getSmallestContainingFrame(node, frames) {
-    const nodeBounds = getNodeBounds(node);
-    const nodeCenter = boundsCenter(nodeBounds);
-    const nodeArea = boundsArea(nodeBounds);
-    let smallest = null;
-    let smallestArea = Number.POSITIVE_INFINITY;
-    frames.forEach((frame) => {
-      if (frame.id === node.id) return;
-      const frameBounds = getExpandedFrameBounds(frame);
-      if (!boundsContainPoint(frameBounds, nodeCenter)) return;
-      const area = boundsArea(frameBounds);
-      if (isFrameNode(node) && area <= nodeArea) return;
-      if (area < smallestArea) {
-        smallest = frame;
-        smallestArea = area;
-      }
-    });
-    return smallest;
-  }
-
-  function getExpandedFrameBounds(frame) {
-    if (!isFrameNode(frame)) return getNodeBounds(frame);
-    const width = getManualNodeWidth(frame) || defaultNodeWidth(frame);
-    const height = getManualNodeHeight(frame) || defaultNodeHeight(frame, width);
-    return {
-      left: frame.x,
-      top: frame.y,
-      right: frame.x + width,
-      bottom: frame.y + height
-    };
-  }
-
   function getNodeBounds(node) {
     // Pure arithmetic size: never touch the DOM here. getNodeBounds is called for
     // every node on every viewport cull (and inside frame-containment scans), so
@@ -42350,13 +43245,6 @@ function installNarrativeCanvasApp() {
       top: node.y,
       right: node.x + size.width,
       bottom: node.y + size.height
-    };
-  }
-
-  function boundsCenter(bounds) {
-    return {
-      x: bounds.left + (bounds.right - bounds.left) / 2,
-      y: bounds.top + (bounds.bottom - bounds.top) / 2
     };
   }
 
@@ -42388,13 +43276,6 @@ function installNarrativeCanvasApp() {
       && child.top >= container.top
       && child.right <= container.right
       && child.bottom <= container.bottom;
-  }
-
-  function boundsContainPoint(container, point) {
-    return point.x >= container.left
-      && point.x <= container.right
-      && point.y >= container.top
-      && point.y <= container.bottom;
   }
 
   function boundsArea(bounds) {
@@ -42847,24 +43728,6 @@ function installNarrativeCanvasApp() {
     store.cache = new Map();
     state.derived.frameDescendantNodes = store;
     return store;
-  }
-
-  function getEventBounds(eventNode) {
-    const size = nodeLayoutSize(eventNode);
-    return {
-      left: eventNode.x,
-      top: eventNode.y,
-      right: eventNode.x + size.width,
-      bottom: eventNode.y + size.height
-    };
-  }
-
-  function isNodeInsideBounds(node, bounds) {
-    const size = nodeLayoutSize(node);
-    return node.x >= bounds.left
-      && node.y >= bounds.top
-      && node.x + size.width <= bounds.right
-      && node.y + size.height <= bounds.bottom;
   }
 
   function formatEventElement(node) {
@@ -43548,14 +44411,6 @@ function installNarrativeCanvasApp() {
     return getCharacters().some((character) => String(character.name || "").toLowerCase().includes(text));
   }
 
-  function getCanvasRenderNodes() {
-    const query = state.search.trim().toLowerCase();
-    const visibleIds = getCanvasVisibleNodeIds(query);
-    return getCanvasLayerItems()
-      .filter((item) => visibleIds.has(item.node.id))
-      .map((item) => item.node);
-  }
-
   function getCanvasLayerItems() {
     return state.project.nodes
       .map((node, index) => ({ node, index, order: getNodeLayerOrder(node, index) }))
@@ -43577,10 +44432,6 @@ function installNarrativeCanvasApp() {
 
   function isEventSheetNode(node) {
     return isEventSheetTypeDef(getNodeMeta(node?.type));
-  }
-
-  function isEventFrameKind(kind) {
-    return isFrameKind(normalizeNodeTypeKind(kind));
   }
 
   function isEventSheetTypeDef(typeDef) {

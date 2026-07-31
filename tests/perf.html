@@ -273,7 +273,7 @@
       function sendBeacon() {
         report.finishedAt = new Date().toISOString();
         report.status = report.error ? "fail" : "pass";
-        document.body.setAttribute("data-perf-status", report.error ? "fail" : "done");
+        document.body.setAttribute("data-perf-status", report.error ? "fail" : "pass");
         document.querySelector("#perf-report").textContent = JSON.stringify(report, null, 2);
         if (beaconPort) {
           try {
