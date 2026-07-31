@@ -10866,6 +10866,17 @@ function getNodeTypeDef(type) {
   return getProjectNodeTypes().find((typeDef) => typeDef.type === type) || null;
 }
 
+function getLinkLabelVisualMetrics(scaleValue = state.view.scale) {
+  const scale = Math.max(CANVAS_MIN_ZOOM, Number(scaleValue) || DEFAULT_CANVAS_ZOOM);
+  const screenFontSize = Math.min(16, Math.max(10, 12 * Math.sqrt(scale)));
+  return {
+    fontSize: screenFontSize / scale,
+    offset: 8 / scale,
+    strokeWidth: 4 / scale,
+    screenFontSize
+  };
+}
+
 function renderLinks(renderContext = getCanvasRenderContext()) {
   const visibleNodeIds = renderContext.visibleNodeIds;
   const nodeMap = renderContext.nodeMap;
@@ -10907,7 +10918,8 @@ function renderLinks(renderContext = getCanvasRenderContext()) {
       `);
     } else if (link.label) {
       const mid = midpoint(fromPoint, toPoint);
-      linkSvg.push(`<text class="link-label" x="${mid.x}" y="${mid.y - 8}" font-size="12" text-anchor="middle" data-link-id="${escapeAttr(link.id)}">${escapeHtml(link.label)}</text>`);
+      const labelMetrics = getLinkLabelVisualMetrics();
+      linkSvg.push(`<text class="link-label" x="${mid.x}" y="${mid.y - labelMetrics.offset}" font-size="${labelMetrics.fontSize}" stroke-width="${labelMetrics.strokeWidth}" text-anchor="middle" data-link-id="${escapeAttr(link.id)}" data-screen-font-size="${labelMetrics.screenFontSize}">${escapeHtml(link.label)}</text>`);
     }
   });
 
@@ -13420,7 +13432,7 @@ function scheduleStoryPanelRender() {
 
 function handleDocumentClickCapture(event) {
   if (event.__narrativeCanvasClickHandled) return;
-  const target = getCanvasCoveredFrameTarget(event) || getComposedEventTarget(event);
+  const target = getCanvasClickEventTarget(event);
   if (target?.closest?.("#aiFloatingButton, [data-action='close-ai-window']")) return;
   if (!isNarrativeCanvasClickDelegateTarget(target)) return;
   syncDomScopeForEventTarget(target);
@@ -13443,12 +13455,12 @@ function handlePlayDebugToggle(event) {
 }
 
 function handleDocumentClickEvent(event, retarget = null) {
-  const target = retarget || getCanvasCoveredFrameTarget(event) || event.target;
+  const target = retarget || getCanvasClickEventTarget(event);
   if (!isNarrativeCanvasTarget(target)) return;
   const nodeId = getCanvasNodeIdFromTargetForClick(target, event);
   if (state.ignoreNextCanvasClick) {
     const isCanvasReleaseClick = Boolean(dom.viewport?.contains(target));
-    const isExplicitControl = Boolean(target.closest?.("[data-action], [data-file-id], [data-panel], [data-sidebar-toggle], [data-port]"));
+    const isExplicitControl = Boolean(target.closest?.("[data-action], [data-file-id], [data-panel], [data-sidebar-toggle], [data-port], [data-link-id]"));
     const shouldIgnore = isCanvasReleaseClick
       && !isExplicitControl
       && (state.ignoreNextCanvasClickTargetId == null || state.ignoreNextCanvasClickTargetId === nodeId);
@@ -13543,9 +13555,8 @@ function handleDocumentClickEvent(event, retarget = null) {
   }
 
   if (link) {
-    state.selectedLinkId = link.dataset.linkId;
-    clearNodeSelection();
-    renderAll();
+    startInlineLinkLabelEdit(link.dataset.linkId);
+    event.preventDefault();
     return true;
   }
 
@@ -16300,6 +16311,13 @@ function isNarrativeCanvasClickDelegateTarget(target) {
   if (!target?.closest) return false;
   const actionable = target.closest("[data-mention-index], [data-layer-action], [data-sidebar-toggle], [data-action], [data-file-id], [data-panel], [data-port], [data-link-id], [data-node-id], .node[data-node-id], .node-stack[data-node-stack-id]");
   return Boolean(actionable && getNarrativeCanvasScopeForTarget(target));
+}
+
+function getCanvasClickEventTarget(event) {
+  const directTarget = getComposedEventTarget(event) || event?.target;
+  const directLink = directTarget?.closest?.("[data-link-id]");
+  if (directLink && dom.linkLayer?.contains(directLink)) return directTarget;
+  return getCanvasCoveredFrameTarget(event) || directTarget;
 }
 
 function getCanvasCoveredFrameTarget(event) {

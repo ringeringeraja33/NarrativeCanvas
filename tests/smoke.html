@@ -2263,10 +2263,26 @@
         doc.querySelector("#canvasViewport")?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 54 }));
         assert(`${label}: Graph hover clears over blank canvas`, !doc.querySelector(".graph-hover-node, .graph-hover-link"));
 
+        while (Number.parseInt(doc.querySelector("#zoomReadout")?.textContent || "100", 10) > 50) {
+          click(doc.querySelector("[data-action='zoom-out']"));
+        }
+        await waitFor(`${label}: link labels rerender for 50 percent zoom`, () => Number(doc.querySelector(".link-label[data-screen-font-size]")?.getAttribute("font-size") || 0) > 12);
+        const scaledLinkLabel = doc.querySelector(".link-label[data-screen-font-size]");
+        const scaledScreenFontSize = Number(scaledLinkLabel?.dataset.screenFontSize || 0);
+        const scaledBoardFontSize = Number(scaledLinkLabel?.getAttribute("font-size") || 0);
+        assert(
+          `${label}: link labels remain readable at 50 percent zoom`,
+          scaledScreenFontSize >= 10 && scaledBoardFontSize > 12,
+          `screen=${scaledScreenFontSize}, board=${scaledBoardFontSize}, zoom=${doc.querySelector("#zoomReadout")?.textContent || ""}`
+        );
+        while (Number.parseInt(doc.querySelector("#zoomReadout")?.textContent || "0", 10) < 100) {
+          click(doc.querySelector("[data-action='zoom-in']"));
+        }
+
         const ordinaryLinkId = "l3";
         const ordinaryLinkOriginalLabel = win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === ordinaryLinkId)?.label || "";
-        doc.querySelector(`.link-hitpath[data-link-id='${ordinaryLinkId}']`)?.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, view: win }));
-        await waitFor(`${label}: double-clicking an unlabeled link opens its label editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`)));
+        doc.querySelector(`.link-hitpath[data-link-id='${ordinaryLinkId}']`)?.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
+        await waitFor(`${label}: clicking an unlabeled link opens its label editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`)));
         let linkLabelEditor = doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`);
         const linkEditorRect = linkLabelEditor?.getBoundingClientRect();
         assert(`${label}: link label editor remains usable at canvas zoom`, linkEditorRect?.width >= 220 && linkEditorRect?.height >= 32, `${linkEditorRect?.width || 0}x${linkEditorRect?.height || 0}`);
@@ -2277,8 +2293,8 @@
           () => win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === ordinaryLinkId)?.label === "Continue to choice"
             && doc.querySelector(`.link-label[data-link-id='${ordinaryLinkId}']`)?.textContent === "Continue to choice"
         );
-        doc.querySelector(`.link-label[data-link-id='${ordinaryLinkId}']`)?.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, view: win }));
-        await waitFor(`${label}: double-clicking an existing link label reopens its editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`)));
+        doc.querySelector(`.link-label[data-link-id='${ordinaryLinkId}']`)?.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
+        await waitFor(`${label}: clicking an existing link label reopens its editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`)));
         linkLabelEditor = doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`);
         setControlInputValue(win, linkLabelEditor, ordinaryLinkOriginalLabel);
         linkLabelEditor.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
@@ -2290,8 +2306,8 @@
 
         const choiceInlineLinkId = "l4";
         const choiceInlineOriginalLabel = win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === choiceInlineLinkId)?.label || "";
-        doc.querySelector(`.link-hitpath[data-link-id='${choiceInlineLinkId}']`)?.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, view: win }));
-        await waitFor(`${label}: Choice link opens the same inline label editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${choiceInlineLinkId}']`)));
+        doc.querySelector(`.link-hitpath[data-link-id='${choiceInlineLinkId}']`)?.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true, view: win }));
+        await waitFor(`${label}: clicking a Choice link opens the same inline label editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${choiceInlineLinkId}']`)));
         linkLabelEditor = doc.querySelector(`.link-label-editor[data-link-id='${choiceInlineLinkId}']`);
         setControlInputValue(win, linkLabelEditor, "Choice label from link");
         linkLabelEditor.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
