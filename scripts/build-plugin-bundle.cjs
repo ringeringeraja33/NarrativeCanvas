@@ -16,8 +16,10 @@ const checkOnly = process.argv.includes("--check");
 function computeAssetVersionToken() {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const hash = crypto.createHash("sha256");
-  hash.update(fs.readFileSync(appPath));
-  hash.update(fs.readFileSync(canvasCssPath));
+  // Git may check text files out with CRLF on Windows and LF in CI. Hash the
+  // normalized source so the committed cache token is platform-independent.
+  hash.update(fs.readFileSync(appPath, "utf8").replace(/\r\n?/g, "\n"));
+  hash.update(fs.readFileSync(canvasCssPath, "utf8").replace(/\r\n?/g, "\n"));
   return `${manifest.version}-${hash.digest("hex").slice(0, 8)}`;
 }
 
