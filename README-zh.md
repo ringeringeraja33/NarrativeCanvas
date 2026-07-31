@@ -4,7 +4,7 @@
 
 English version: [README.md](https://github.com/ringeringeraja33/NarrativeCanvas/blob/main/README.md)
 
-最新正式版本：[1.4.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0) · [发布说明](RELEASE_NOTES.md) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+最新正式版本：[1.4.1](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.1) · [发布说明](RELEASE_NOTES.md) · [全部版本](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 Obsidian 社区插件：[Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
@@ -76,9 +76,11 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 3. 从一个节点的输出端口连到另一个节点的输入端口。
 4. 使用 `框架` 归组节点。`框架` 默认进入 `事件表`；仅作为画布归组辅助的 `框架` 类型可在类型设置中隐藏。
 5. 选中节点，在右侧 `检查器` 编辑。
-6. 在 `故事` 里查看从 Entry 可到达的故事顺序。
+6. 在 `故事` 里查看从所有 Entry 可到达的故事顺序。
 7. 点击 `演示` 预览当前叙事路线。演示窗口会保留刚刚经过的卡片，向上滚动即可回看，最多保留最近 30 张；历史卡片上的「回到此卡片」可一键回溯到该步，也可将游玩记录导出为 UTF-8 Markdown。
 8. 结构整理完成后保存或导出。工具栏的 PNG 分辨率按输出像素分档（`4096 x 4096`、`6144 x 6144`、`8192 x 8192`、`12000 x 12000`），导出文件名记录实际像素尺寸；超大画布自动缩放以避开浏览器位图尺寸限制。
+
+Obsidian 的 Narrative Canvas 插件设置和大编辑弹窗都提供同一组富文本语言下拉框：Markdown、HTML、Unity TextMeshPro、Godot / Ren'Py BBCode、Unreal RichTextBlock；插件设置同时决定新项目的默认语言。切换任一处都会转换当前项目已有的节点正文、对话台词和项目备注。弹窗的整条工具栏会立即跟随，包括行内格式、链接、标题、引用、列表、任务、代码块、分隔线、字色与高亮色，各按钮提示也会显示当前语言实际写入的语法。HTML 在预览前会经过安全过滤；Unreal 模式使用 `NC*` 样式 / Decorator 标签，供导入器映射到项目的 RichText 样式。
 
 ### 默认节点类型
 
@@ -93,6 +95,7 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 - 拖动 `框架` 头部时，当前位于 `框架` 内的节点同步移动。
 - 使用 Shift/Cmd/Ctrl 点击或矩形框选多选节点和 `框架`；多选后拖动任一已选对象的头部，即可移动整个选择集。
 - 点击输出端口，再点击输入端口，建立连线。
+- 双击任意连线或已有标签，即可直接填写连线标签；回车或点击其他位置保存，Esc 取消，留空则清除标签。编辑 Choice 连线时，对应的 Choice 选项也会同步更新。
 - 连线过程中双击空白画布，取消待建立的连线。
 - 右键点击已有连线，执行重连或删除。
 - `吸附` 将节点的新建位置、移动位置和缩放尺寸对齐到 16 px 画布网格。该功能可随时开关，状态保存在项目中。
@@ -104,7 +107,7 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 
 ### 故事
 
-`故事` 显示从 Entry 节点可到达的结构。非 `框架` 节点仅在可从 Entry 到达时显示。`框架` 节点本身可到达，或包含需要显示的子节点时，显示在 `故事` 中。
+`故事` 显示从所有 Entry 节点可到达的结构。非 `框架` 节点仅在至少可从一个 Entry 到达时显示。`框架` 节点本身可到达，或包含需要显示的子节点时，显示在 `故事` 中。
 
 `故事` 中的包含关系存为节点上的显式 `frameId`。旧项目打开时按几何位置推断一次：没有父 `框架` 的节点归入包含其中心点的最小 `框架`；之后移动节点、`故事` 条目或 `框架` 时，更新该显式归属，避免仅凭重叠关系反复计算。
 
@@ -184,6 +187,8 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 - **`演示规则`** 只保留演示预览规则：Start Node、End Condition 和 Debug Mode。Visit Tracking 位于 Debug Mode 内，演示预览关闭后丢弃本次访问列表。
 - **`校验`** 扫描状态读取、写入、文本插值和导出风险。每行列出一个 key 的读取、写入或插值位置；引用按钮可跳回画布或高级 JSON。
 
+一个画布可以包含多个 `Entry` 节点，每个 Entry 代表一个可独立演示的系统或故事线。检测到多个 Entry 时，点击演示会先要求玩家选择要进入的系统，选中的 Entry 随后成为本次演示的起点。请为每个 Entry 设置不同标题，系统选择器会显示该标题。只有一个 Entry 时仍和以前一样直接开始演示；Story 也会包含从所有 Entry 可达的结构。
+
 运行时状态 key 默认使用扁平名称。需要被条件、效果、文本模板和可迁移导出共同读取的值，优先使用小写下划线命名，例如 `inventory_coins`、`flag_watch_missing`、`clue_glass_key`。旧项目中的点号 key 仍可加载和运行；resolver 查找完全同名的扁平 key，未匹配时再按 `inventory.coins` 路径读取 `{ "inventory": { "coins": 3 } }` 等 JSON 对象。可迁移文本导出将对象路径转换为下划线标识符，并在导出报告中列出映射。
 
 条件字段使用安全的 JavaScript 表达式子集：比较、`&&`、`||`、`!`、括号、字符串、数字、布尔值、点号状态路径和 `.includes(...)`。工具不会执行任意 JavaScript。超出该子集的表达式会保留在 Runtime JSON，并进入导出警告；Yarn、Ink 和 Twee 会给对应分支写出可解析的 `false` 条件保护。
@@ -204,8 +209,10 @@ ribbon 按钮会根据库内项目数量调整行为：存在多个 `.ncanvas` �
 - **Yarn**：导出 `.yarn` 节点、快捷选项、变量声明、`<<jump>>` 和 `<<set>>`。
 - **Ink**：导出 `.ink` knot、`VAR` 声明、可重复 `+` 选项、divert 和 `~` 赋值。
 - **Twee**：导出给 Twine / Tweego 使用的 Twee 3 `.twee` passage，使用 SugarCube `StoryData`、`StoryInit`、条件链接、`<<goto>>` 和 `<<set>>`。
+- **Godot Dialogic 2**：导出可编辑的 `.dtl` timeline，包含 label、选项、条件、变量效果、jump 和 Godot BBCode。
+- **Unreal CommonConversation 适配数据**：导出 `.conversation.json`，包含 Entry、参与者、路线、状态操作和 Unreal `NC*` 富文本标签。Unreal 的对话图是 Asset，并不存在统一的独立文本脚本语言，因此该文件需要配套 Editor Utility 或自定义 importer。
 
-这些导出共用同一套节点 slug 和变量名映射。复杂变量、演示设置动作、无法直接映射到目标格式的效果操作不会在导出中丢弃：执行 Story MD、Runtime JSON、Yarn、Ink、Twee 或 `导出全部` 后，界面打开导出报告弹窗，显示警告和被转换过的变量名映射。Runtime JSON 保留完整报告，供下游工具读取。
+Yarn Spinner 与 Ink 继续作为 Unity 集成的主要脚本目标。这些导出共用同一套节点 slug 和变量名映射。复杂变量、演示设置动作、无法直接映射到目标格式的效果操作不会在导出中丢弃：执行 Story MD、Runtime JSON、Yarn、Ink、Twee、Dialogic、Unreal 适配数据或 `导出全部` 后，界面打开导出报告弹窗，显示警告和被转换过的变量名映射。Runtime JSON 保留完整报告，供下游工具读取。
 
 ### AI 助手（测试版）
 

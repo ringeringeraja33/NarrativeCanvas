@@ -2,7 +2,7 @@
 
 [![Verify plugin artifacts](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml/badge.svg?branch=main)](https://github.com/ringeringeraja33/NarrativeCanvas/actions/workflows/plugin-artifacts.yml?query=branch%3Amain)
 
-Latest release: [1.4.0](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.0) · [Release notes](RELEASE_NOTES.md) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
+Latest release: [1.4.1](https://github.com/ringeringeraja33/NarrativeCanvas/releases/tag/1.4.1) · [Release notes](RELEASE_NOTES.md) · [All releases](https://github.com/ringeringeraja33/NarrativeCanvas/releases)
 
 Obsidian Community Plugins: [Narrative Canvas](https://community.obsidian.md/plugins/narrative-canvas)
 
@@ -77,9 +77,11 @@ Canvas editing, navigation, zoom, search, preview, and node-creation commands ar
 3. Connect one node’s output port to another node’s input port.
 4. Use frames to group nodes. Frames are shown in Events Sheet by default; frame-only types can be hidden there via node type settings.
 5. Select a node and edit it in the Inspector.
-6. Use `Story` to inspect the reachable graph from `Entry`.
+6. Use `Story` to inspect the reachable graph from every `Entry`.
 7. Click `Play` to preview the current narrative path. The preview keeps a scrollable log of the cards you just passed — scroll up to reread recent story, limited to the last 30 cards, use `Return to this card` on a past card to rewind the story to that step, or export the playthrough as UTF-8 Markdown.
 8. Save or export when structure is ready. PNG export presets are `4096 x 4096`, `6144 x 6144`, `8192 x 8192`, and `12000 x 12000`, and filenames include the final rendered size. Very large canvases are auto-scaled to stay within browser raster limits.
+
+Obsidian's Narrative Canvas settings and the expanded editor include the same rich-text language selector: Markdown, HTML, Unity TextMeshPro, Godot / Ren'Py BBCode, or Unreal RichTextBlock. The plugin setting is also the default for new projects. Changing either selector converts the currently open project's node bodies, dialog lines, and project notes. The entire expanded-editor toolbar follows immediately: inline styles, links, headings, quotes, lists, tasks, code blocks, dividers, text color, and highlight color all write the selected language, with language-specific syntax shown in each tooltip. HTML is sanitized before preview, and Unreal uses `NC*` style/decorator tags for importer-side mapping.
 
 ### Default Node Types
 
@@ -94,6 +96,7 @@ Default node types are editable templates. `Entry` is a system type and cannot b
 - Drag a frame by its header to move all nodes inside it.
 - Use Shift/Cmd/Ctrl + click or rectangle select for multi-select, then drag a selected header to move the group.
 - Click an output port then an input port to create a link.
+- Double-click any link or its existing label to edit the label inline. Press Enter or click away to save, Escape to cancel, or leave it empty to clear the label. Editing a Choice link also updates its bound Choice option.
 - Double-click empty canvas space to cancel a pending connection.
 - Right-click an existing link to reconnect or delete it.
 - `Snap` aligns node creation, movement, and resizing to the 16 px canvas grid. It is optional and stored with the project.
@@ -105,7 +108,7 @@ Default node types are editable templates. `Entry` is a system type and cannot b
 
 ### Story
 
-`Story` shows the reachable structure from `Entry`. Non-frame nodes appear only if reachable from `Entry`. Frame nodes appear when the frame itself is reachable, or when it contains reachable descendants.
+`Story` shows the reachable structure from all `Entry` nodes. Non-frame nodes appear only if reachable from at least one Entry. Frame nodes appear when the frame itself is reachable, or when it contains reachable descendants.
 
 Story membership is stored explicitly as `frameId` on each node. On opening older projects, membership is initially inferred from canvas geometry: ungrouped nodes are assigned to the smallest frame containing their center. After that, moving nodes, Story rows, or frames updates explicit membership instead of recomputing overlap continuously.
 
@@ -186,6 +189,8 @@ Playbook has six tabs:
 - **Play rules** controls preview behavior only: Start Node, End Condition, and Debug Mode. Visit Tracking is under Debug Mode, and its visit list is discarded when Play preview ends.
 - **Validation** checks state reads/writes, text interpolation, and export risks. Each entry points to where a key is read, written, or interpolated, with links back to canvas or Advanced JSON.
 
+One canvas can contain multiple `Entry` nodes, with each Entry representing an independently playable system or storyline. When Play finds more than one Entry, it first asks the player which system to enter; the selected Entry then becomes that session's start node. Give each Entry a distinct title because that title is shown in the system picker. With only one Entry, Play starts immediately as before. Story also includes the reachable graph from every Entry.
+
 Runtime state keys are flat names by default. For values shared across requirements, effects, text templates, and portable exports, prefer underscore keys like `inventory_coins`, `flag_watch_missing`, and `clue_glass_key`. Dot keys from older projects are still loadable: resolution checks flat keys first, then falls back to object paths like `inventory.coins`. Portable text exports flatten object paths and include key mappings in the export report.
 
 Condition fields use a safe JavaScript expression subset: comparisons, `&&`, `||`, `!`, parentheses, quoted strings, numbers, booleans, dotted state paths, and `.includes(...)`. Arbitrary JavaScript is not executed. Expressions outside this subset stay in Runtime JSON with an export warning; Yarn, Ink, and Twee receive a parseable `false` guard for that branch.
@@ -207,8 +212,10 @@ The top toolbar supports these export types:
 - **Yarn**: exports `.yarn` nodes, shortcut options, variable declarations, `<<jump>>`, and `<<set>>` commands.
 - **Ink**: exports `.ink` knots, `VAR` declarations, sticky `+` choices, diverts, and `~` assignments.
 - **Twee**: exports Twee 3 `.twee` passages for Twine / Tweego, including SugarCube `StoryData`, `StoryInit`, conditional links, `<<goto>>`, and `<<set>>`.
+- **Godot Dialogic 2**: exports an editable `.dtl` timeline with labels, choices, conditions, variable effects, jumps, and Godot BBCode.
+- **Unreal CommonConversation adapter**: exports `.conversation.json`, an importer-oriented graph payload with entry points, participants, routes, state operations, and Unreal `NC*` rich-text tags. Unreal conversation graphs are assets rather than a standalone text scripting language, so this file requires the matching editor utility or a custom importer.
 
-All exporters share one mapping of node slugs and variable names. Complex variables, Playbook actions, and effect operations that do not map cleanly to target formats are retained in Runtime JSON and exported as comments with warnings. After Story MD, Runtime JSON, Yarn, Ink, Twee, or Export All, an export report dialog appears with warnings and renamed variable mappings. Runtime JSON retains the full report for downstream tools.
+Yarn Spinner and Ink remain the primary script targets for Unity integrations. All exporters share one mapping of node slugs and variable names. Complex variables, Playbook actions, and effect operations that do not map cleanly to target formats are retained in Runtime JSON and exported as comments with warnings. After Story MD, Runtime JSON, Yarn, Ink, Twee, Dialogic, Unreal adapter, or Export All, an export report dialog appears with warnings and renamed variable mappings. Runtime JSON retains the full report for downstream tools.
 
 ### AI copilot (Beta)
 

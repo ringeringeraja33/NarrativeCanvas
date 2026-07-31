@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Narrative Canvas Rich Text</title>
+  </head>
+  <body data-rich-status="running">
+    <pre id="rich-report">Running rich-text checks...</pre>
+    <script src="../app.js"></script>
+    <script>
+      const report = { status: "running", tests: [], failures: [] };
+      function assert(name, condition, detail = "") {
+        report.tests.push({ name, status: condition ? "pass" : "fail", detail });
+        if (!condition) report.failures.push({ name, detail });
+        document.body.dataset.richProgress = String(report.tests.length);
+        document.body.dataset.richLastTest = name;
+      }
+
+      function run() {
+        try {
+          const markdown = [
+            "# Heading",
+            "",
+            "**Bold** *italic* ~~strike~~ `code` ==highlight==",
+            "{color:#ff3366}rose{/color} {highlight:#33aa77}green{/highlight}",
+            "[Link](https://example.com)",
+            "",
+            "- item",
+            "- [x] done",
+            "> quote",
+            "---"
+          ].join("\n");
+          const formats = ["html", "unity", "bbcode", "unreal"];
+          formats.forEach((format) => {
+            const converted = convertNarrativeRichText(markdown, "markdown", format);
+            const rendered = renderNarrativeRichText(converted, format);
+            assert(`${format}: converts bold`, rendered.includes("<strong>Bold</strong>"), converted);
+            assert(`${format}: preserves text color`, rendered.includes("color:#ff3366"), rendered);
+            assert(`${format}: preserves highlight color`, rendered.includes("background-color:#33aa77"), rendered);
+            assert(`${format}: preserves safe link`, rendered.includes('href="https://example.com"'), rendered);
+            const roundtrip = convertNarrativeRichText(converted, format, "markdown");
+            assert(`${format}: roundtrip keeps heading`, roundtrip.includes("# Heading"), roundtrip);
+            assert(`${format}: roundtrip keeps bold`, roundtrip.includes("**Bold**"), roundtrip);
+          });
+          assert("toolbar: HTML syntax follows setting", getRichTextInlineSyntax("html", "bold").join("") === "<strong></strong>");
+          assert("toolbar: Unity syntax follows setting", getRichTextInlineSyntax("unity", "textColor", "#123456")[0] === "<color=#123456>");
+          assert("toolbar: BBCode syntax follows setting", getRichTextInlineSyntax("bbcode", "highlightColor", "#123456")[0] === "[bgcolor=#123456]");
+          assert("toolbar: Unreal syntax follows setting", getRichTextInlineSyntax("unreal", "italic").join("") === "<NCItalic></>");
+          assert("toolbar: engine block syntax follows setting", formatRichTextBlock("unity", "h1", "Title").includes("<size=160%>"));
+
+          state.project = {
+            richTextFormat: "markdown",
+            notes: "**Project note**",
+            nodes: [{ body: "==Body==", turns: [{ line: "*Dialog line*" }] }]
+          };
+          convertProjectRichText("markdown", "html");
+          assert("project conversion: converts notes", state.project.notes === "<p><strong>Project note</strong></p>", state.project.notes);
+          assert("project conversion: converts node bodies", state.project.nodes[0].body.includes("<mark>Body</mark>"), state.project.nodes[0].body);
+          assert("project conversion: converts dialog lines", state.project.nodes[0].turns[0].line.includes("<em>Dialog line</em>"), state.project.nodes[0].turns[0].line);
+
+          const unsafe = renderNarrativeRichText('<img src=x onerror=alert(1)><script>alert(2)<\/script><strong>safe</strong>', "html");
+          assert("html: strips executable markup", !unsafe.includes("onerror") && !unsafe.includes("<script"), unsafe);
+          assert("html: keeps allowed formatting", unsafe.includes("<strong>safe</strong>"), unsafe);
+
+          const runtime = {
+            exportedAt: "2026-01-01T00:00:00.000Z",
+            source: { title: "Engine sample", richTextFormat: "markdown" },
+            startNode: "Start",
+            variables: { score: 0 },
+            characters: [],
+            nodes: [
+              {
+                id: "n1", slug: "Start", title: "Start", type: "Entry", body: "**Hello**",
+                requirements: "", effects: [], cast: [], customFields: {},
+                choices: [{ id: "c1", label: "Continue", condition: "score >= 0", effects: [], target: "End", targetId: "n2" }],
+                next: []
+              },
+              {
+                id: "n2", slug: "End", title: "End", type: "Content", body: "Done",
+                requirements: "", effects: [], cast: [], customFields: {}, choices: [], next: []
+              }
+            ]
+          };
+          const dialogic = buildDialogicScript(runtime);
+          assert("dialogic: emits labels", dialogic.includes("label Start") && dialogic.includes("label End"), dialogic);
+          assert("dialogic: emits conditional choice and jump", dialogic.includes("[if {score} >= 0]") && dialogic.includes("jump End"), dialogic);
+          const unreal = buildUnrealConversationDocument(runtime);
+          assert("unreal: emits adapter schema", unreal.format === "narrative-canvas-unreal-conversation");
+          assert("unreal: emits rich text tags", unreal.nodes[0].text.includes("<NCBold>"), unreal.nodes[0].text);
+          assert("unreal: emits entry points", unreal.entryPoints[0]?.tag === "Start");
+        } catch (error) {
+          report.failures.push({ name: "rich-text runner", detail: error.stack || String(error) });
+        }
+        report.status = report.failures.length ? "fail" : "pass";
+        document.body.dataset.richStatus = report.status;
+        document.querySelector("#rich-report").textContent = JSON.stringify(report, null, 2);
+      }
+      window.addEventListener("load", run, { once: true });
+    </script>
+  </body>
+</html>

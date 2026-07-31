@@ -32,11 +32,14 @@
     },
     "source": {
       "type": "object",
-      "required": ["title", "notes"],
+      "required": ["title", "notes", "richTextFormat"],
       "additionalProperties": false,
       "properties": {
         "title": { "type": "string" },
-        "notes": { "type": "string" }
+        "notes": { "type": "string" },
+        "richTextFormat": {
+          "enum": ["markdown", "html", "unity", "bbcode", "unreal"]
+        }
       }
     },
     "startNodeId": { "type": "string" },

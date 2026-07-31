@@ -10,7 +10,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32x32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png">
     <link rel="manifest" href="./site.webmanifest">
-    <link rel="stylesheet" href="./canvas.css?v=1.4.0-ce579e14">
+    <link rel="stylesheet" href="./canvas.css?v=1.4.1-6ce8b827">
   </head>
   <body>
     <div class="app-shell" spellcheck="false">
@@ -431,7 +431,14 @@
           </div>
           <button class="icon-button" type="button" data-action="close-expand-editor" aria-label="Close editor" title="Close editor">x</button>
         </header>
-        <div class="expand-editor-toolbar" role="toolbar" aria-label="Formatting">
+        <div class="expand-editor-toolbar" id="expandEditorToolbar" role="toolbar" aria-label="Formatting">
+          <select class="expand-editor-language" id="expandEditorLanguage" data-expand-rich-text-format title="Rich text language" aria-label="Rich text language">
+            <option value="markdown">Markdown</option>
+            <option value="html">HTML</option>
+            <option value="unity">Unity TextMeshPro</option>
+            <option value="bbcode">Godot / Ren'Py BBCode</option>
+            <option value="unreal">Unreal RichTextBlock</option>
+          </select>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="bold" title="Bold" aria-label="Bold"><b>B</b></button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="italic" title="Italic" aria-label="Italic"><i>I</i></button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="strike" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button>
@@ -450,6 +457,15 @@
           <span class="expand-editor-toolbar-sep" aria-hidden="true"></span>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="codeblock" title="Code block" aria-label="Code block">{ }</button>
           <button class="expand-format-button" type="button" data-action="expand-editor-format" data-format="divider" title="Divider" aria-label="Divider">—</button>
+          <span class="expand-editor-toolbar-sep" aria-hidden="true"></span>
+          <label class="expand-color-control" title="Text color">
+            <span class="expand-color-letter" aria-hidden="true">A</span>
+            <input id="expandEditorTextColor" type="color" value="#e6e6e6" data-expand-color="text" aria-label="Text color">
+          </label>
+          <label class="expand-color-control" title="Highlight color">
+            <span class="expand-color-highlight" aria-hidden="true">H</span>
+            <input id="expandEditorHighlightColor" type="color" value="#ffd43b" data-expand-color="highlight" aria-label="Highlight color">
+          </label>
         </div>
         <div class="expand-editor-live" data-live-field>
           <div class="expand-editor-rendered play-body-text" data-live-rendered role="textbox" tabindex="0" aria-label="Formatted text, click to edit"></div>
@@ -600,6 +616,6 @@
       </section>
     </dialog>
 
-    <script src="./app.js?v=1.4.0-ce579e14"></script>
+    <script src="./app.js?v=1.4.1-6ce8b827"></script>
   </body>
 </html>

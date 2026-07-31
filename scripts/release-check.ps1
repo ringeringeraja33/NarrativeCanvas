@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$VaultRoot = Resolve-Path (Join-Path $ProjectRoot "..\..")
+$VaultRoot = Resolve-Path (Join-Path $ProjectRoot "..")
 if (-not $RuntimeDir) {
   $RuntimeDir = Join-Path $VaultRoot ".obsidian\plugins\narrative-canvas"
 }
@@ -213,6 +213,67 @@ function Get-PluginBundledAppSource([string]$SourceRaw) {
   return $source.TrimEnd()
 }
 
+function Replace-MarkedRuntimeBlock([string]$Source, [string]$Name, [string]$Replacement) {
+  $startMarker = "// BEGIN WEB_RUNTIME:$Name"
+  $endMarker = "// END WEB_RUNTIME:$Name"
+  $start = $Source.IndexOf($startMarker)
+  $end = $Source.IndexOf($endMarker, $start + $startMarker.Length)
+  if ($start -lt 0 -or $end -lt 0) {
+    throw "Could not find web runtime block $Name"
+  }
+  if ($Source.IndexOf($startMarker, $start + $startMarker.Length) -ge 0 -or $Source.IndexOf($endMarker, $end + $endMarker.Length) -ge 0) {
+    throw "Web runtime block $Name must appear exactly once"
+  }
+  return $Source.Substring(0, $start) + $Replacement.Trim() + $Source.Substring($end + $endMarker.Length)
+}
+
+function Get-PluginBundledAppSourceFromMarkers([string]$SourceRaw) {
+  $source = [regex]::Replace($SourceRaw, '(?m)^const WEB_STORAGE_KEY = .*\r?\n', "")
+  $rewrites = [ordered]@{
+    PROJECT_STORAGE = @'
+function loadWebState() {
+  return null;
+}
+
+function saveWebState(_savedState) {
+  return;
+}
+
+function getWebProjectStorage() {
+  // Obsidian-plugin bundle: persistence runs through NarrativeCanvasHost, no browser storage.
+  return null;
+}
+'@
+    CLEAR_STORAGE = @'
+async function clearBrowserStorageFromUi() {
+  return;
+}
+
+async function clearBrowserStorageConfirmed() {
+  return;
+}
+'@
+    AI_CONFIG = @'
+function getWebAiConfig() {
+  return { endpoint: "", apiKey: "", model: "" };
+}
+
+function saveWebAiConfig() {
+  return;
+}
+'@
+    AI_REQUEST = @'
+async function requestWebAiCompletion(_payload, _options) {
+  throw new Error("AI networking is only available through the Narrative Canvas host in Obsidian.");
+}
+'@
+  }
+  foreach ($entry in $rewrites.GetEnumerator()) {
+    $source = Replace-MarkedRuntimeBlock $source $entry.Key $entry.Value
+  }
+  return $source.TrimEnd()
+}
+
 function Assert-BundledAppMatchesSource {
   try {
     $mainJs = Read-Utf8Strict (Resolve-ProjectPath "main.js")
@@ -226,7 +287,7 @@ function Assert-BundledAppMatchesSource {
     }
     $bundled = [string]::Join("`n", $body).TrimEnd()
     $sourceRaw = (Read-Utf8Strict (Resolve-ProjectPath "app.js")).Replace("`r`n", "`n").TrimEnd()
-    $source = Get-PluginBundledAppSource $sourceRaw
+    $source = Get-PluginBundledAppSourceFromMarkers $sourceRaw
     if ($bundled -eq $source) {
       Write-CheckOk "bundled app.js matches source app.js"
     } else {
@@ -394,7 +455,7 @@ Assert-TextDoesNotMatch $mainJsText '\beval\s*\(' "main.js avoids eval"
 Assert-TextDoesNotMatch $mainJsText 'window\.(prompt|confirm)\b' "main.js avoids native prompt/confirm dialogs"
 Assert-TextDoesNotMatch $mainJsText 'EMBEDDED_(INDEX_HTML|CANVAS_CSS|APP_JS)' "main.js has no base64 embedded fallback constants"
 Assert-TextDoesNotMatch $mainJsText 'app\.vault\.adapter' "main.js avoids direct vault adapter project file I/O"
-Assert-TextDoesNotMatch $mainJsText '\bvault\.getFiles\s*\(' "main.js avoids full vault enumeration"
+Assert-TextDoesNotMatch $mainJsText '\bvault\.adapter\.(list|walk)\s*\(' "main.js avoids direct full vault adapter enumeration"
 Assert-TextDoesNotMatch $mainJsText '\b(localStorage|sessionStorage)\b' "main.js avoids browser storage APIs in plugin release"
 Assert-TextDoesNotMatch $mainJsText 'detachLeavesOfType' "main.js does not detach leaves on unload"
 Assert-TextDoesNotMatch $mainJsText 'document\.head\.appendChild' "main.js does not inject plugin CSS into document.head"

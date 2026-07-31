@@ -332,6 +332,7 @@
             await waitFor("state key: canvas returns", () => doc.querySelector("#canvasPanel")?.classList.contains("active"));
             clickElement(doc.querySelector("[data-action='play']"));
             await waitFor("state key: play opens", () => doc.querySelector("#playDialog")?.open);
+            assert("state key: one Entry keeps the normal Play flow", !doc.querySelector("#playBody .play-entry-selector"));
             assert("state key: start body interpolates key", doc.querySelector("#playBody")?.textContent.includes("Coins before: 3.") && doc.querySelector("#playBody")?.textContent.includes("Nested coins: 3."));
             const startDebugText = doc.querySelector("#playBody .play-debug")?.textContent || "";
             assert("state key: play executes the matching if branch", startDebugText.includes("variable3: 5"), startDebugText);
@@ -392,10 +393,54 @@
             await doc.defaultView.NarrativeCanvasApp.loadVaultProject();
             clickElement(doc.querySelector("[data-action='play']"));
             await waitFor("state key: play opens with multiple ordinary exits", () => doc.querySelector("#playDialog")?.open);
+            assert("state key: multiple ordinary exits do not open the Entry selector", !doc.querySelector("#playBody .play-entry-selector"));
             assert(
               "state key: multiple outgoing links render as playable branches",
               [...doc.querySelectorAll("#playActions [data-action='play-next']")].some((button) => button.dataset.nodeId === "n1")
                 && [...doc.querySelectorAll("#playActions [data-action='play-next']")].some((button) => button.dataset.nodeId === "n2")
+            );
+            doc.querySelector("#playDialog")?.close();
+            const multipleEntryState = JSON.parse(JSON.stringify(entryRequirementState));
+            multipleEntryState.project.nodes.push({
+              id: "entry_npc",
+              type: "Entry",
+              title: "NPC System",
+              body: "Play the independent NPC simulation.",
+              x: 80,
+              y: 500
+            });
+            multipleEntryState.project.links.push({
+              id: "l_npc_entry",
+              from: "entry_npc",
+              to: "n2"
+            });
+            doc.defaultView.NarrativeCanvasHost.loadProject = async () => JSON.stringify(multipleEntryState);
+            await doc.defaultView.NarrativeCanvasApp.loadVaultProject();
+            clickElement(doc.querySelector("[data-action='play']"));
+            await waitFor("state key: multiple Entry selector opens", () => Boolean(doc.querySelector("#playBody .play-entry-selector")));
+            assert(
+              "state key: every Entry renders as a named system",
+              doc.querySelectorAll("#playActions .play-entry-option").length === 2
+                && doc.querySelector("#playActions [data-node-id='n0']")?.textContent.includes("Start")
+                && doc.querySelector("#playActions [data-node-id='entry_npc']")?.textContent.includes("NPC System")
+                && doc.querySelector("#playActions [data-node-id='entry_npc']")?.textContent.includes("independent NPC simulation"),
+              doc.querySelector("#playDialog")?.textContent || ""
+            );
+            clickElement(doc.querySelector("#playActions [data-action='play-select-entry'][data-node-id='entry_npc']"));
+            await waitFor("state key: selected Entry starts its system", () => doc.querySelector("#playTitle")?.textContent.includes("NPC System"));
+            assert("state key: selected Entry body renders", doc.querySelector("#playBody")?.textContent.includes("independent NPC simulation"));
+            clickElement(doc.querySelector("#playActions [data-action='play-next'][data-node-id='n2']"));
+            await waitFor("state key: selected Entry route continues", () => doc.querySelector("#playTitle")?.textContent.includes("Bribe accepted"));
+            clickElement(doc.querySelector("#playActions [data-action='restart-play']"));
+            await waitFor("state key: restart returns to the Entry selector", () => Boolean(doc.querySelector("#playBody .play-entry-selector")));
+            clickElement(doc.querySelector(".node[data-node-id='entry_npc']"));
+            await waitFor("state key: Entry can be selected while selector is open", () => doc.defaultView.NarrativeCanvasApp.getSavedState()?.ui?.selectedNodeId === "entry_npc");
+            doc.defaultView.NarrativeCanvasApp.executeCommand("delete-selection");
+            await waitFor("state key: deleting an Entry refreshes the open selector", () => doc.querySelectorAll("#playActions .play-entry-option").length === 1);
+            assert(
+              "state key: deleted Entry is removed from play candidates",
+              !doc.querySelector("#playActions [data-node-id='entry_npc']")
+                && !doc.defaultView.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.id === "entry_npc")
             );
             doc.querySelector("#playDialog")?.close();
             const entryNode = entryRequirementState.project.nodes.find((node) => node.id === "n0");

@@ -284,6 +284,16 @@ if (!main.includes('DEFAULT_CONTENT_FONT_SETTING = "obsidian"') || !main.include
 } else {
   pass("main.js contains Obsidian, system, Cascadia Code, and serif content font options");
 }
+if (!main.includes('DEFAULT_RICH_TEXT_FORMAT_SETTING = "markdown"')
+  || !main.includes('setName(text("Rich text language"))')
+  || !main.includes('.addOption("unity", "Unity TextMeshPro")')
+  || !main.includes('.addOption("bbcode", "Godot / Ren\'Py BBCode")')
+  || !main.includes('.addOption("unreal", "Unreal RichTextBlock")')
+  || !main.includes("setRichTextFormat: (format) => this.plugin.updateRichTextFormatSetting")) {
+  fail("main.js is missing the synchronized rich-text language plugin setting");
+} else {
+  pass("plugin settings expose all rich-text languages and synchronize the open project");
+}
 if (!main.includes('DEFAULT_LIBRARY_FOLDER_NAME = "Library"')
   || !main.includes('LEGACY_CODEX_FOLDER_NAME = "Codex"')
   || !main.includes("getNewProjectLayout(savedStateJson, options = {})")

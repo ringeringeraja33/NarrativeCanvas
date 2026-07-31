@@ -903,7 +903,7 @@ button {
 
 .hidden-node-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr) max-content;
   align-items: center;
   gap: 6px;
 }
@@ -912,10 +912,18 @@ button {
   cursor: default;
 }
 
-.restore-node-type-button {
-  width: 48px;
-  padding: 0;
+.hidden-node-row .restore-node-type-button {
+  width: auto;
+  min-width: 52px;
+  max-width: none;
+  padding: 0 8px;
   font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  writing-mode: horizontal-tb;
+  justify-self: end;
 }
 
 .palette-row {
@@ -1546,11 +1554,36 @@ button {
 
 .expand-editor-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
+}
+
+.expand-editor-language {
+  width: auto;
+  max-width: 170px;
+  min-height: 26px;
+  margin-right: 4px;
+  padding: 2px 24px 2px 8px;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background-color: var(--background-primary);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.expand-editor-language:hover,
+.expand-editor-language:focus-visible {
+  border-color: var(--background-modifier-border-hover);
+  color: var(--text-normal);
 }
 
 .expand-editor-toolbar-sep {
@@ -1602,6 +1635,57 @@ button {
 
 .expand-format-button u {
   text-underline-offset: 2px;
+}
+
+.expand-color-control {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.expand-color-control:hover {
+  border-color: var(--background-modifier-border);
+  background: var(--background-modifier-hover);
+}
+
+.expand-color-control input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.expand-color-letter,
+.expand-color-highlight {
+  z-index: 0;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.expand-color-letter {
+  color: var(--text-normal);
+  text-decoration: underline 3px var(--expand-selected-color, #e6e6e6);
+  text-underline-offset: 3px;
+}
+
+.expand-color-highlight {
+  padding: 2px 4px;
+  border-radius: 2px;
+  background: var(--expand-selected-color, #ffd43b);
+  color: #241f00;
 }
 
 .expand-editor-header {
@@ -2514,6 +2598,32 @@ button {
 
 .link-label:hover {
   fill: var(--text-normal);
+}
+
+.link-label-editor-wrap {
+  overflow: visible;
+  pointer-events: all;
+}
+
+.link-label-editor {
+  display: block;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: var(--interactive-accent);
+  outline: none;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--nc-font-interface);
+  line-height: 1;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  pointer-events: auto;
+}
+
+.link-label-editor::placeholder {
+  color: var(--text-faint);
 }
 
 .node-stack {
@@ -9568,6 +9678,93 @@ select:focus {
 /* Each choice option takes a full row of its own. */
 .play-actions .play-choice-action {
   flex: 1 1 100%;
+}
+
+.play-entry-selector {
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
+}
+
+.play-entry-selector-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-accent);
+  font-family: var(--nc-font-interface);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.play-entry-selector h3 {
+  margin: 0 0 5px;
+  color: var(--text-normal);
+  font-family: var(--nc-font-interface);
+  font-size: 18px;
+}
+
+.play-entry-selector p {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--nc-font-interface);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.play-entry-option {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.play-entry-option:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 72%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary-alt));
+}
+
+.play-entry-option-number {
+  color: var(--text-accent);
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.play-entry-option-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.play-entry-option-copy strong {
+  overflow: hidden;
+  color: var(--text-normal);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play-entry-option-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+
+.play-entry-option-arrow {
+  color: var(--text-accent);
+  font-size: 17px;
 }
 
 .play-choice-countdown {

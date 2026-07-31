@@ -14,6 +14,15 @@ const CANVAS_GRID_SIZE = 16;
 const HISTORY_LIMIT = 80;
 const DEFAULT_PLAY_HISTORY_LIMIT = 30;
 const PLAY_HISTORY_LIMIT_OPTIONS = [10, 30, 50, 100];
+const DEFAULT_RICH_TEXT_FORMAT = "markdown";
+const RICH_TEXT_FORMATS = [
+  { value: "markdown", label: "Markdown" },
+  { value: "html", label: "HTML" },
+  { value: "unity", label: "Unity TextMeshPro" },
+  { value: "bbcode", label: "Godot / Ren'Py BBCode" },
+  { value: "unreal", label: "Unreal RichTextBlock" }
+];
+const RICH_TEXT_FORMAT_VALUES = new Set(RICH_TEXT_FORMATS.map((option) => option.value));
 const APP_SHORTCUT_CONTEXT_MS = 30000;
 const EVENT_LAYER_BASE = 0;
 const REGULAR_LAYER_BASE = 1000000;
@@ -690,6 +699,7 @@ function createSampleProject(language = "en") {
   return {
     title: text.title,
     workflowMode: WORKFLOW_MODE_TEXT_SOURCE,
+    richTextFormat: "markdown",
     notes: text.notes,
     variables: {
       sample_id: "narrative_canvas_feature_guide",
@@ -1351,6 +1361,19 @@ const uiTranslations = {
     "Export Yarn": "导出 Yarn",
     "Export Ink": "导出 Ink",
     "Export Twee": "导出 Twee",
+    "Dialogic .dtl": "Dialogic .dtl",
+    "UE Conversation .json": "UE 对话 .json",
+    "Export Godot Dialogic 2 timeline": "导出 Godot Dialogic 2 时间线",
+    "Export Unreal CommonConversation adapter JSON": "导出 Unreal CommonConversation 适配 JSON",
+    "Dialogic timeline exported.": "Dialogic 时间线已导出。",
+    "Unreal conversation adapter exported.": "Unreal 对话适配数据已导出。",
+    "Rich text language": "富文本语言",
+    "Text color": "字色",
+    "Highlight color": "高亮色",
+    "Unity TextMeshPro": "Unity TextMeshPro",
+    "Godot / Ren'Py BBCode": "Godot / Ren'Py BBCode",
+    "Unreal RichTextBlock": "Unreal RichTextBlock",
+    "Rich text converted to {format}.": "富文本已转换为 {format}。",
     "Export Profile": "格式档案",
     "Export editable project file (.json)": "导出可重新打开的完整项目文件（.json）",
     "Export readable story text (.md)": "导出可阅读的剧情文本（.md）",
@@ -1818,6 +1841,13 @@ const uiTranslations = {
     "Matches node:": "匹配节点：",
     "Narrative canvas": "叙事画布",
     "Next page": "下一页",
+    "Add label": "添加连线标签",
+    "Edit link label": "编辑连线标签",
+    "Link label updated.": "连线标签已更新。",
+    "Link label cleared.": "连线标签已清除。",
+    "Choose a system to play": "选择要演示的系统",
+    "System entries": "系统入口",
+    "This canvas has {count} Entry nodes. Choose the system you want to play.": "该画布包含 {count} 个初始节点。请选择要进入并演示的系统。",
     "No editable node logic yet.": "暂无可编辑节点逻辑。",
     "No choice conditions yet.": "暂无选项条件。",
     "No variable actions yet.": "暂无变量动作。",
@@ -2352,6 +2382,8 @@ function createInitialRuntimeState() {
   selectedNodeId: "n1",
   selectedNodeIds: [],
   selectedLinkId: null,
+  inlineEditLinkId: null,
+  inlineEditLinkInitialValue: "",
   panel: "project",
   activeFileId: "adventure",
   language: "en",
@@ -2549,6 +2581,8 @@ window.NarrativeCanvasApp = {
   refreshCodexCanvasPreviews,
   refreshAiLauncher,
   applySpellCheckSetting,
+  setRichTextFormat: setProjectRichTextFormatFromHost,
+  getRichTextFormat: getCurrentRichTextFormat,
   importStoryMarkdownText,
   importStoryLayoutText,
   importStateSchemaText
@@ -2779,6 +2813,8 @@ function bindDom(scopeOverride = null) {
   dom.expandEditorDialog = dom.scope.querySelector("#expandEditorDialog");
   dom.expandEditorTitle = dom.scope.querySelector("#expandEditorTitle");
   dom.expandEditorInput = dom.scope.querySelector("#expandEditorInput");
+  dom.expandEditorLanguage = dom.scope.querySelector("#expandEditorLanguage");
+  dom.expandEditorToolbar = dom.scope.querySelector("#expandEditorToolbar");
   dom.genericTextKicker = dom.scope.querySelector("#genericTextKicker");
   dom.genericTextTitle = dom.scope.querySelector("#genericTextTitle");
   dom.genericTextLabel = dom.scope.querySelector("#genericTextLabel");
@@ -10245,7 +10281,7 @@ function renderNodeText(node, inlineEditField) {
   const body = displayBody(node);
   // Non-edit cards render the Markdown so bold/italic/heading/quote/list show as
   // formatted text; the raw markers only appear once you click in to edit.
-  return `<div class="node-text node-text-rendered play-body-text">${renderNarrativeMarkdown(body)}</div>`;
+  return `<div class="node-text node-text-rendered play-body-text">${renderNarrativeRichText(body)}</div>`;
 }
 
 function renderNodeCardContent(node, inlineEditField) {
@@ -10853,7 +10889,23 @@ function renderLinks(renderContext = getCanvasRenderContext()) {
     const path = linkPath(fromPoint, toPoint);
     linkSvg.push(`<path class="link-hitpath" d="${path}" data-link-id="${escapeAttr(link.id)}"></path>`);
     linkSvg.push(`<path class="link-path ${link.id === state.selectedLinkId ? "selected" : ""}" d="${path}" marker-end="url(#arrow-head)" data-link-id="${escapeAttr(link.id)}"></path>`);
-    if (link.label) {
+    if (link.id === state.inlineEditLinkId) {
+      const mid = midpoint(fromPoint, toPoint);
+      const scale = Math.max(CANVAS_MIN_ZOOM, state.view.scale || DEFAULT_CANVAS_ZOOM);
+      const editorWidth = 240 / scale;
+      const editorHeight = 38 / scale;
+      const editorStyle = [
+        `font-size:${14 / scale}px`,
+        `padding:0 ${10 / scale}px`,
+        `border-width:${1 / scale}px`,
+        `border-radius:${6 / scale}px`
+      ].join(";");
+      linkSvg.push(`
+        <foreignObject class="link-label-editor-wrap" x="${mid.x - editorWidth / 2}" y="${mid.y - editorHeight / 2}" width="${editorWidth}" height="${editorHeight}" data-link-id="${escapeAttr(link.id)}">
+          <input xmlns="http://www.w3.org/1999/xhtml" class="link-label-editor" type="text" data-inline-link-label="true" data-link-id="${escapeAttr(link.id)}" value="${escapeAttr(link.label || "")}" placeholder="${escapeAttr(t("Add label"))}" aria-label="${escapeAttr(t("Edit link label"))}" style="${escapeAttr(editorStyle)}">
+        </foreignObject>
+      `);
+    } else if (link.label) {
       const mid = midpoint(fromPoint, toPoint);
       linkSvg.push(`<text class="link-label" x="${mid.x}" y="${mid.y - 8}" font-size="12" text-anchor="middle" data-link-id="${escapeAttr(link.id)}">${escapeHtml(link.label)}</text>`);
     }
@@ -11203,6 +11255,13 @@ function openExpandEditor(nodeId, field, title) {
   if (!node || !dom.expandEditorDialog?.showModal) return;
   state.expandEditor = { nodeId, field };
   if (dom.expandEditorTitle) dom.expandEditorTitle.textContent = title || t("Edit text");
+  if (dom.expandEditorLanguage) {
+    const format = normalizeRichTextFormat(state.project.richTextFormat);
+    dom.expandEditorLanguage.value = format;
+    dom.expandEditorLanguage.title = t("Rich text language");
+    dom.expandEditorLanguage.setAttribute("aria-label", t("Rich text language"));
+    updateExpandEditorToolbarFormat(format);
+  }
   if (dom.expandEditorInput) {
     dom.expandEditorInput.value = String(node[field] ?? "");
     dom.expandEditorInput.dataset.nodeField = field;
@@ -11233,7 +11292,7 @@ function renderLiveField(wrap) {
   if (!source || !rendered) return;
   const value = source.value || "";
   rendered.innerHTML = value.trim()
-    ? renderNarrativeMarkdown(value)
+    ? renderNarrativeRichText(value)
     : `<span class="field-live-placeholder">${escapeHtml(t("Click to edit"))}</span>`;
   rendered.hidden = false;
   source.hidden = true;
@@ -11252,8 +11311,169 @@ function enterLiveFieldEdit(wrap) {
   source.setSelectionRange?.(length, length);
 }
 
-// Lightweight Markdown formatting for the expanded text editor. Inline styles wrap
-// the selection; block styles toggle a prefix on each selected line.
+function getCurrentRichTextFormat() {
+  return normalizeRichTextFormat(state.project?.richTextFormat);
+}
+
+function updateExpandEditorToolbarFormat(value) {
+  const format = normalizeRichTextFormat(value);
+  const toolbar = dom.expandEditorToolbar;
+  if (!toolbar) return;
+  toolbar.dataset.richTextFormat = format;
+  const labels = {
+    bold: "Bold", italic: "Italic", strike: "Strikethrough", code: "Inline code",
+    highlight: "Highlight", link: "Link", h1: "Heading 1", h2: "Heading 2", h3: "Heading 3",
+    quote: "Quote", list: "Bullet list", ordered: "Numbered list", task: "Task list",
+    codeblock: "Code block", divider: "Divider"
+  };
+  const hints = {
+    markdown: {
+      bold: "**text**", italic: "*text*", strike: "~~text~~", code: "`text`", highlight: "==text==",
+      link: "[text](url)", h1: "# text", h2: "## text", h3: "### text", quote: "> text",
+      list: "- text", ordered: "1. text", task: "- [ ] text", codeblock: "```", divider: "---"
+    },
+    html: {
+      bold: "<strong>", italic: "<em>", strike: "<s>", code: "<code>", highlight: "<mark>",
+      link: "<a href>", h1: "<h1>", h2: "<h2>", h3: "<h3>", quote: "<blockquote>",
+      list: "<ul><li>", ordered: "<ol><li>", task: "<li data-nc-task>", codeblock: "<pre><code>", divider: "<hr>"
+    },
+    unity: {
+      bold: "<b>", italic: "<i>", strike: "<s>", code: '<style="NCCode">', highlight: "<mark=#...>",
+      link: '<link="url">', h1: "<size=160%>", h2: "<size=140%>", h3: "<size=120%>", quote: "<indent><i>",
+      list: "<indent>•", ordered: "<indent>1.", task: "<indent>☐", codeblock: '<style="NCCode">', divider: "────────"
+    },
+    bbcode: {
+      bold: "[b]", italic: "[i]", strike: "[s]", code: "[code]", highlight: "[bgcolor]",
+      link: "[url]", h1: "[font_size=32]", h2: "[font_size=26]", h3: "[font_size=21]", quote: "[quote]",
+      list: "[ul][li]", ordered: "[ol][li]", task: "[ul][li]☐", codeblock: "[code]", divider: "────────"
+    },
+    unreal: {
+      bold: "<NCBold>", italic: "<NCItalic>", strike: "<NCStrike>", code: "<NCCode>", highlight: "<NCHighlight>",
+      link: "<NCLink>", h1: "<NCH1>", h2: "<NCH2>", h3: "<NCH3>", quote: "<NCQuote>",
+      list: "<NCList>", ordered: "<NCOrderedList>", task: "<NCTaskList>", codeblock: "<NCCodeBlock>", divider: "<NCDivider>"
+    }
+  };
+  toolbar.querySelectorAll("[data-action='expand-editor-format']").forEach((button) => {
+    const action = button.dataset.format;
+    const label = t(labels[action] || action);
+    const hint = hints[format]?.[action] || "";
+    button.title = hint ? `${label} · ${hint}` : label;
+    button.setAttribute("aria-label", label);
+    button.dataset.richTextFormat = format;
+  });
+  const codeButton = toolbar.querySelector("[data-format='code'] code");
+  if (codeButton) codeButton.textContent = ({ markdown: "`x`", html: "</>", unity: "TMP", bbcode: "[]", unreal: "UE" })[format];
+  const textColor = toolbar.querySelector("[data-expand-color='text']")?.closest(".expand-color-control");
+  const highlightColor = toolbar.querySelector("[data-expand-color='highlight']")?.closest(".expand-color-control");
+  if (textColor) textColor.title = `${t("Text color")} · ${hints[format]?.bold?.startsWith("[") ? "[color]" : format === "unity" ? "<color>" : format === "unreal" ? "<NCColor>" : format === "html" ? "<span style=color>" : "{color:#...}"}`;
+  if (highlightColor) highlightColor.title = `${t("Highlight color")} · ${format === "bbcode" ? "[bgcolor]" : format === "unity" ? "<mark=#...>" : format === "unreal" ? "<NCHighlight>" : format === "html" ? "<mark style=background-color>" : "{highlight:#...}"}`;
+}
+
+function getRichTextInlineSyntax(format, action, color = "") {
+  const safeColor = normalizeRichTextColor(color, action === "highlight" ? "#ffd43b" : "#e6e6e6");
+  const syntax = {
+    markdown: {
+      bold: ["**", "**"], italic: ["*", "*"], strike: ["~~", "~~"], code: ["`", "`"],
+      highlight: ["==", "=="], textColor: [`{color:${safeColor}}`, "{/color}"],
+      highlightColor: [`{highlight:${safeColor}}`, "{/highlight}"]
+    },
+    html: {
+      bold: ["<strong>", "</strong>"], italic: ["<em>", "</em>"], strike: ["<s>", "</s>"], code: ["<code>", "</code>"],
+      highlight: ["<mark>", "</mark>"], textColor: [`<span style="color:${safeColor}">`, "</span>"],
+      highlightColor: [`<mark style="background-color:${safeColor}">`, "</mark>"]
+    },
+    unity: {
+      bold: ["<b>", "</b>"], italic: ["<i>", "</i>"], strike: ["<s>", "</s>"], code: ['<style="NCCode">', "</style>"],
+      highlight: ["<mark=#ffff0080>", "</mark>"], textColor: [`<color=${safeColor}>`, "</color>"],
+      highlightColor: [`<mark=${safeColor}80>`, "</mark>"]
+    },
+    bbcode: {
+      bold: ["[b]", "[/b]"], italic: ["[i]", "[/i]"], strike: ["[s]", "[/s]"], code: ["[code]", "[/code]"],
+      highlight: ["[bgcolor=#ffd43b]", "[/bgcolor]"], textColor: [`[color=${safeColor}]`, "[/color]"],
+      highlightColor: [`[bgcolor=${safeColor}]`, "[/bgcolor]"]
+    },
+    unreal: {
+      bold: ["<NCBold>", "</>"], italic: ["<NCItalic>", "</>"], strike: ["<NCStrike>", "</>"], code: ["<NCCode>", "</>"],
+      highlight: ["<NCHighlight>", "</>"], textColor: [`<NCColor value="${safeColor}">`, "</>"],
+      highlightColor: [`<NCHighlight value="${safeColor}">`, "</>"]
+    }
+  };
+  return syntax[format]?.[action] || null;
+}
+
+function getRichTextLinkSyntax(format, label) {
+  const url = "https://";
+  if (format === "html") return { text: `<a href="${url}">${label}</a>`, urlOffset: 9 };
+  if (format === "unity") return { text: `<link="${url}">${label}</link>`, urlOffset: 7 };
+  if (format === "bbcode") return { text: `[url=${url}]${label}[/url]`, urlOffset: 5 };
+  if (format === "unreal") return { text: `<NCLink href="${url}">${label}</>`, urlOffset: 14 };
+  return { text: `[${label}](${url})`, urlOffset: label.length + 3 };
+}
+
+function formatRichTextBlock(format, action, selected) {
+  const lines = (selected || t(action === "codeblock" ? "code" : "text")).split("\n");
+  if (format === "markdown") {
+    if (action === "codeblock") return `\`\`\`\n${lines.join("\n")}\n\`\`\``;
+    if (action === "divider") return "---";
+    const prefix = { h1: "# ", h2: "## ", h3: "### ", quote: "> ", list: "- ", ordered: "1. ", task: "- [ ] " }[action];
+    return prefix ? lines.map((line) => `${prefix}${line}`).join("\n") : null;
+  }
+  if (format === "html") {
+    const tags = { h1: "h1", h2: "h2", h3: "h3", quote: "blockquote" };
+    if (tags[action]) return `<${tags[action]}>${lines.join("<br>")}</${tags[action]}>`;
+    if (action === "codeblock") return `<pre><code>${lines.join("\n")}</code></pre>`;
+    if (action === "divider") return "<hr>";
+    if (["list", "ordered", "task"].includes(action)) {
+      const tag = action === "ordered" ? "ol" : "ul";
+      const taskAttr = action === "task" ? ' data-nc-task-list="true"' : "";
+      return `<${tag}${taskAttr}>\n${lines.map((line) => `<li${action === "task" ? ' data-nc-task="false"' : ""}>${line}</li>`).join("\n")}\n</${tag}>`;
+    }
+  }
+  if (format === "unity") {
+    const wrappers = {
+      h1: ["<size=160%><b>", "</b></size>"],
+      h2: ["<size=140%><b>", "</b></size>"],
+      h3: ["<size=120%><b>", "</b></size>"],
+      quote: ['<indent=5%><i>“', "”</i></indent>"],
+      codeblock: ['<style="NCCode">', "</style>"]
+    };
+    if (wrappers[action]) return `${wrappers[action][0]}${lines.join("\n")}${wrappers[action][1]}`;
+    if (action === "divider") return "────────────────";
+    if (action === "list") return lines.map((line) => `<indent=5%>• ${line}</indent>`).join("\n");
+    if (action === "ordered") return lines.map((line, index) => `<indent=5%>${index + 1}. ${line}</indent>`).join("\n");
+    if (action === "task") return lines.map((line) => `<indent=5%>☐ ${line}</indent>`).join("\n");
+  }
+  if (format === "bbcode") {
+    const wrappers = {
+      h1: ["[font_size=32][b]", "[/b][/font_size]"],
+      h2: ["[font_size=26][b]", "[/b][/font_size]"],
+      h3: ["[font_size=21][b]", "[/b][/font_size]"],
+      quote: ["[quote]", "[/quote]"],
+      codeblock: ["[code]", "[/code]"]
+    };
+    if (wrappers[action]) return `${wrappers[action][0]}${lines.join("\n")}${wrappers[action][1]}`;
+    if (action === "divider") return "────────────────";
+    if (["list", "ordered"].includes(action)) {
+      const tag = action === "ordered" ? "ol" : "ul";
+      return `[${tag}]${lines.map((line) => `[li]${line}[/li]`).join("")}[/${tag}]`;
+    }
+    if (action === "task") return `[ul]${lines.map((line) => `[li]☐ ${line}[/li]`).join("")}[/ul]`;
+  }
+  if (format === "unreal") {
+    const tags = { h1: "NCH1", h2: "NCH2", h3: "NCH3", quote: "NCQuote", codeblock: "NCCodeBlock", list: "NCList", ordered: "NCOrderedList", task: "NCTaskList" };
+    if (tags[action]) {
+      const body = ["list", "ordered", "task"].includes(action)
+        ? lines.map((line) => `<NCItem>${line}</>`).join("")
+        : lines.join("\n");
+      return `<${tags[action]}>${body}</>`;
+    }
+    if (action === "divider") return "<NCDivider></>";
+  }
+  return null;
+}
+
+// Formatting follows the project's selected storage language. All formats share the
+// same semantic renderer, so changing language never changes the visible result.
 function applyExpandEditorFormat(action) {
   const input = dom.expandEditorInput;
   if (!input) return;
@@ -11264,53 +11484,33 @@ function applyExpandEditorFormat(action) {
   const start = input.selectionStart ?? value.length;
   const end = input.selectionEnd ?? start;
   const selected = value.slice(start, end);
-  const inlineWrap = { bold: "**", italic: "*", strike: "~~", code: "`", highlight: "==" }[action];
-  const prefix = { h1: "# ", h2: "## ", h3: "### ", quote: "> ", list: "- ", ordered: "1. ", task: "- [ ] " }[action];
+  const format = getCurrentRichTextFormat();
+  const inlineWrap = getRichTextInlineSyntax(format, action);
 
   let nextValue;
   let nextStart;
   let nextEnd;
   if (inlineWrap) {
     const inner = selected || t("text");
-    nextValue = `${value.slice(0, start)}${inlineWrap}${inner}${inlineWrap}${value.slice(end)}`;
-    nextStart = start + inlineWrap.length;
+    nextValue = `${value.slice(0, start)}${inlineWrap[0]}${inner}${inlineWrap[1]}${value.slice(end)}`;
+    nextStart = start + inlineWrap[0].length;
     nextEnd = nextStart + inner.length;
   } else if (action === "link") {
     const label = selected || t("text");
-    const url = "https://";
-    nextValue = `${value.slice(0, start)}[${label}](${url})${value.slice(end)}`;
-    // Select the URL placeholder so it is ready to overwrite.
-    nextStart = start + label.length + 3;
-    nextEnd = nextStart + url.length;
-  } else if (action === "codeblock") {
-    const inner = selected || t("code");
-    const before = value.slice(0, start);
-    const lead = before && !before.endsWith("\n") ? "\n" : "";
-    const block = `${lead}\`\`\`\n${inner}\n\`\`\`\n`;
-    nextValue = `${before}${block}${value.slice(end)}`;
-    nextStart = start + lead.length + 4;
-    nextEnd = nextStart + inner.length;
-  } else if (action === "divider") {
-    const before = value.slice(0, start);
-    const lead = before && !before.endsWith("\n") ? "\n" : "";
-    const insert = `${lead}---\n`;
-    nextValue = `${before}${insert}${value.slice(end)}`;
-    nextStart = nextEnd = start + insert.length;
-  } else if (prefix) {
-    // Expand the range to whole lines, then toggle the prefix on each.
-    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-    let lineEnd = value.indexOf("\n", end);
-    if (lineEnd === -1) lineEnd = value.length;
-    const block = value.slice(lineStart, lineEnd);
-    const allPrefixed = block.split("\n").every((line) => line.startsWith(prefix));
-    const nextBlock = block.split("\n")
-      .map((line) => (allPrefixed ? line.slice(prefix.length) : `${prefix}${line}`))
-      .join("\n");
-    nextValue = `${value.slice(0, lineStart)}${nextBlock}${value.slice(lineEnd)}`;
-    nextStart = lineStart;
-    nextEnd = lineStart + nextBlock.length;
+    const link = getRichTextLinkSyntax(format, label);
+    nextValue = `${value.slice(0, start)}${link.text}${value.slice(end)}`;
+    nextStart = start + link.urlOffset;
+    nextEnd = nextStart + "https://".length;
   } else {
-    return;
+    const block = formatRichTextBlock(format, action, selected);
+    if (block == null) return;
+    const before = value.slice(0, start);
+    const lead = before && !before.endsWith("\n") ? "\n" : "";
+    const tail = value.slice(end) && !value.slice(end).startsWith("\n") ? "\n" : "";
+    const insert = `${lead}${block}${tail}`;
+    nextValue = `${before}${insert}${value.slice(end)}`;
+    nextStart = start + lead.length;
+    nextEnd = nextStart + block.length;
   }
 
   input.value = nextValue;
@@ -11318,6 +11518,67 @@ function applyExpandEditorFormat(action) {
   input.focus();
   // Route through the same input path as typing so the node field and history update.
   input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function normalizeRichTextColor(value, fallback = "#ffffff") {
+  const color = normalizeOptionalString(value).trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : fallback;
+}
+
+function applyExpandEditorColor(kind, value) {
+  const input = dom.expandEditorInput;
+  if (!input) return;
+  const wrap = input.closest("[data-live-field]");
+  if (wrap && input.hidden) enterLiveFieldEdit(wrap);
+  const source = input.value;
+  const start = input.selectionStart ?? source.length;
+  const end = input.selectionEnd ?? start;
+  const selected = source.slice(start, end) || t("text");
+  const action = kind === "highlight" ? "highlightColor" : "textColor";
+  const syntax = getRichTextInlineSyntax(getCurrentRichTextFormat(), action, value);
+  if (!syntax) return;
+  input.value = `${source.slice(0, start)}${syntax[0]}${selected}${syntax[1]}${source.slice(end)}`;
+  input.setSelectionRange(start + syntax[0].length, start + syntax[0].length + selected.length);
+  input.focus();
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function setExpandEditorRichTextFormat(value) {
+  const nextFormat = normalizeRichTextFormat(value);
+  const previousFormat = getCurrentRichTextFormat();
+  if (nextFormat === previousFormat) return;
+  const before = getHistorySnapshot();
+  const input = dom.expandEditorInput;
+  const wasEditing = Boolean(input && !input.hidden);
+  convertProjectRichText(previousFormat, nextFormat);
+  state.project.richTextFormat = nextFormat;
+  void window.NarrativeCanvasHost?.setRichTextFormat?.(nextFormat);
+  const active = state.expandEditor;
+  const node = active ? getNode(active.nodeId) : null;
+  if (input && node) {
+    input.value = String(node[active.field] ?? "");
+    if (wasEditing) {
+      input.hidden = false;
+      input.closest("[data-live-field]")?.classList.add("live-editing");
+      const cursor = input.value.length;
+      input.setSelectionRange(cursor, cursor);
+      input.focus();
+    } else {
+      renderLiveField(input.closest("[data-live-field]"));
+    }
+  }
+  if (dom.expandEditorLanguage) dom.expandEditorLanguage.value = nextFormat;
+  updateExpandEditorToolbarFormat(nextFormat);
+  setProjectDirty(true);
+  commitHistoryFromSnapshot(before);
+  renderNodes();
+  renderStoryPanel();
+  renderProjectPanel();
+  renderWorkspaceFile();
+  updateStatus();
+  setStatus(t("Rich text converted to {format}.", {
+    format: RICH_TEXT_FORMATS.find((option) => option.value === nextFormat)?.label || nextFormat
+  }));
 }
 
 function handleExpandEditorClose() {
@@ -11671,6 +11932,8 @@ function renderProjectExportControls() {
     { action: "export-yarn", label: "Yarn .yarn", title: "Export Yarn Spinner script" },
     { action: "export-ink", label: "Ink .ink", title: "Export ink script" },
     { action: "export-twee", label: "Twee .twee", title: "Export Twee / Twine script" },
+    { action: "export-dialogic", label: "Dialogic .dtl", title: "Export Godot Dialogic 2 timeline" },
+    { action: "export-unreal-conversation", label: "UE Conversation .json", title: "Export Unreal CommonConversation adapter JSON" },
     { action: "import-story-md", label: "Import story .md", title: "Import Story Markdown and replace this project" },
     { action: "import-story-layout", label: "Import layout .json", title: "Import Story Markdown layout sidecar" },
     { action: "import-state-schema", label: "Import state .json", title: "Import state schema sidecar and replace variables" }
@@ -11870,7 +12133,7 @@ function getNodeBodyLabel(node) {
 function renderNodeBodyField(node) {
   const raw = node.body || "";
   const rendered = raw.trim()
-    ? renderNarrativeMarkdown(raw)
+    ? renderNarrativeRichText(raw)
     : `<span class="field-live-placeholder">${escapeHtml(t("Click to edit"))}</span>`;
   return `
     <label class="field field-with-expand">
@@ -13816,6 +14079,8 @@ function handleAction(target) {
   if (action === "export-yarn") exportYarn();
   if (action === "export-ink") exportInk();
   if (action === "export-twee") exportTwee();
+  if (action === "export-dialogic") exportDialogic();
+  if (action === "export-unreal-conversation") exportUnrealConversation();
   if (action === "export-characters-md") exportCharactersMarkdown();
   if (action === "export-characters-json") exportCharactersJson();
   if (action === "export-image") exportImage();
@@ -13853,6 +14118,11 @@ function handleAction(target) {
   if (action === "select-node") selectNode(target.dataset.nodeId);
   if (action === "focus-character-node") focusCharacterNode(target.dataset.nodeId);
   if (action === "focus-story-node") focusStoryNode(target.dataset.nodeId);
+  if (action === "play-select-entry") {
+    const entry = getNode(target.dataset.nodeId);
+    if (entry?.type === "Entry" && !isFrameNode(entry)) startPreviewSession(entry);
+    else openPreviewEntrySelector();
+  }
   if (action === "play-next") advancePreview(target.dataset.nodeId, { optionId: target.dataset.choiceOptionId || "" });
   if (action === "play-dialog-next") advanceDialogTurn(1);
   if (action === "play-dialog-prev") advanceDialogTurn(-1);
@@ -14496,6 +14766,7 @@ function deleteSelectedNodesConfirmed(ids, options = {}) {
   clearNodeSelection();
   hideNodeContextMenu();
   renderAll();
+  refreshOpenPreviewEntrySelector();
   setStatus(`${ids.length} nodes deleted and archived outside runtime.`);
 }
 
@@ -14578,10 +14849,10 @@ function getEditableHistoryKey(target) {
   if (!target?.dataset) return "";
   if (target === dom.queryInput || target.hasAttribute?.("data-character-search") || target.hasAttribute?.("data-event-search")) return "";
   const parts = [];
-  ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceTimerField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
+  ["documentSource", "projectField", "nodeField", "nodeVaultFileIndex", "inlineNodeField", "inlineLinkLabel", "nodeCustomField", "characterField", "variableField", "eventField", "nodeCastField", "nodeConditionField", "nodeLogicField", "nodeEffectField", "nodeRoutingField", "choiceTimerField", "choiceConditionField", "choiceOptionField", "choiceOptionEffectField", "dialogTurnField", "playbookActionField", "scriptConditionField", "scriptNodeField", "gateConditionField", "gateEffectField", "gateField", "runnerRuleField", "runnerRuleEnabled"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
-  ["nodeId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
+  ["nodeId", "linkId", "choiceNodeId", "dialogNodeId", "characterId", "variableKey", "eventNodeId", "nodeCastIndex", "conditionIndex", "nodeEffectIndex", "choiceOptionId", "choiceOptionIndex", "dialogTurnIndex", "choiceOptionEffectIndex", "playbookActionId", "scriptNodeId", "gateId", "gateEffectId", "gateEffectIndex"].forEach((name) => {
     if (target.dataset[name]) parts.push(`${name}:${target.dataset[name]}`);
   });
   return parts.join("|");
@@ -14654,6 +14925,9 @@ function handleEditFocusOut(event) {
     }
     finishInlineNodeEdit(target.dataset.nodeId);
   }
+  if (target?.dataset?.inlineLinkLabel != null) {
+    finishInlineLinkLabelEdit(target.dataset.linkId);
+  }
 }
 
 function commitFocusedEdit(target) {
@@ -14671,6 +14945,11 @@ function handleInput(event) {
     updateMentionFromTarget(target);
   }
   if (!isMentionTarget && !isNarrativeCanvasTarget(target)) return;
+
+  if (target.dataset?.inlineLinkLabel != null) {
+    setInlineLinkLabel(target.dataset.linkId, target.value);
+    return;
+  }
 
   if (target.hasAttribute?.("data-character-tag-input")) {
     handleCodexTagInput(target);
@@ -14943,6 +15222,17 @@ function handleInput(event) {
 function handleChange(event) {
   const target = event.target;
   if (!isNarrativeCanvasTarget(target)) return;
+
+  if (target.dataset?.expandRichTextFormat !== undefined) {
+    setExpandEditorRichTextFormat(target.value);
+    return;
+  }
+
+  if (target.dataset?.expandColor) {
+    target.closest(".expand-color-control")?.style.setProperty("--expand-selected-color", normalizeRichTextColor(target.value));
+    applyExpandEditorColor(target.dataset.expandColor, target.value);
+    return;
+  }
 
   if (target.dataset?.nodeVaultSizeSlider != null) {
     setNodeVaultPreviewSize(target.dataset.nodeId, Number(target.dataset.nodeVaultFileIndex), target.value, true);
@@ -15263,6 +15553,20 @@ function handleKeyDown(event) {
       return;
     }
     if (event.key === "Enter" && (event.target.tagName === "INPUT" || event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      event.target.blur();
+    }
+    return;
+  }
+  if (event.target.dataset?.inlineLinkLabel != null) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      state.editHistoryTarget = null;
+      setInlineLinkLabel(event.target.dataset.linkId, state.inlineEditLinkInitialValue);
+      finishInlineLinkLabelEdit(event.target.dataset.linkId, { canceled: true });
+      return;
+    }
+    if (event.key === "Enter") {
       event.preventDefault();
       event.target.blur();
     }
@@ -16577,10 +16881,67 @@ function handleViewportDoubleClick(event) {
     event.stopPropagation();
     return;
   }
+  const linkElement = event.target.closest?.("[data-link-id]");
+  if (linkElement && dom.linkLayer?.contains(linkElement)) {
+    startInlineLinkLabelEdit(linkElement.dataset.linkId);
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   if (event.target !== dom.viewport && event.target !== dom.content && event.target !== dom.frameLayer && event.target !== dom.nodeLayer && event.target !== dom.linkLayer) return;
   if (cancelPendingConnection()) {
     event.preventDefault();
   }
+}
+
+function startInlineLinkLabelEdit(linkId) {
+  const link = getLink(linkId);
+  if (!link) return;
+  state.inlineEditLinkId = link.id;
+  state.inlineEditLinkInitialValue = normalizeOptionalString(link.label);
+  state.selectedLinkId = link.id;
+  clearNodeSelection();
+  renderLinks();
+  runAfterRender(() => {
+    const editor = dom.linkLayer?.querySelector?.(`[data-inline-link-label][data-link-id="${CSS.escape(link.id)}"]`);
+    editor?.focus?.({ preventScroll: true });
+    editor?.select?.();
+  });
+}
+
+function setInlineLinkLabel(linkId, value) {
+  const link = getLink(linkId);
+  if (!link) return;
+  const label = normalizeOptionalString(value);
+  const source = getNode(link.from);
+  if (source && isChoiceNode(source)) {
+    const options = ensureChoiceOptionsArray(source);
+    const choiceIndex = normalizeChoiceIndex(link.choiceIndex);
+    const option = (link.choiceOptionId ? options.find((entry) => entry.id === link.choiceOptionId) : null)
+      || (choiceIndex != null ? options[choiceIndex] : null);
+    if (option) {
+      option.label = label;
+      syncChoicesFromOptions(source);
+    }
+  }
+  link.label = label;
+  setProjectDirty(true);
+  updateStatus();
+  scheduleStoryPanelRender();
+}
+
+function finishInlineLinkLabelEdit(linkId, options = {}) {
+  const link = getLink(linkId);
+  if (link && !options.canceled) {
+    const normalized = normalizeOptionalString(link.label).trim();
+    if (normalized !== link.label) setInlineLinkLabel(link.id, normalized);
+  }
+  state.inlineEditLinkId = null;
+  state.inlineEditLinkInitialValue = "";
+  renderNodes();
+  renderLinks();
+  renderInspector();
+  if (!options.canceled) setStatus(link?.label ? t("Link label updated.") : t("Link label cleared."));
 }
 
 function cancelPendingConnection() {
@@ -20188,7 +20549,7 @@ function addExistingNodeTypeField(fieldKey) {
   renderNodeTypeFieldSections(typeDef);
 }
 
-function setProjectField(field, value) {
+function setProjectField(field, value, options = {}) {
   if (field === "variables") {
     if (value === buildVariablesJson()) return;
     try {
@@ -20201,6 +20562,16 @@ function setProjectField(field, value) {
   } else if (field === "playHistoryLimit") {
     state.project.playHistoryLimit = normalizePlayHistoryLimit(value);
     trimPreviewHistory();
+  } else if (field === "richTextFormat") {
+    const nextFormat = normalizeRichTextFormat(value);
+    const previousFormat = normalizeRichTextFormat(state.project.richTextFormat);
+    if (nextFormat === previousFormat) return;
+    convertProjectRichText(previousFormat, nextFormat);
+    state.project.richTextFormat = nextFormat;
+    if (!options.skipHostSync) void window.NarrativeCanvasHost?.setRichTextFormat?.(nextFormat);
+    setStatus(t("Rich text converted to {format}.", {
+      format: RICH_TEXT_FORMATS.find((option) => option.value === nextFormat)?.label || nextFormat
+    }));
   } else {
     state.project[field] = value;
   }
@@ -20219,11 +20590,23 @@ function setProjectField(field, value) {
     return;
   }
 
+  if (field === "richTextFormat") {
+    renderAll();
+    return;
+  }
+
   renderNodes();
   renderStoryPanel();
   renderProjectPanel();
   renderWorkspaceFile();
   updateStatus();
+}
+
+function setProjectRichTextFormatFromHost(value) {
+  const nextFormat = normalizeRichTextFormat(value);
+  if (!state.project || nextFormat === getCurrentRichTextFormat()) return true;
+  setProjectField("richTextFormat", nextFormat, { skipHostSync: true });
+  return true;
 }
 
 function setNodeField(field, value) {
@@ -21230,6 +21613,7 @@ function deleteSelectedNodeConfirmed(id, options = {}) {
   clearEventRowOrderOverrides();
   clearNodeSelection();
   renderAll();
+  refreshOpenPreviewEntrySelector();
   setStatus("Node deleted and archived outside runtime.");
 }
 
@@ -21782,6 +22166,7 @@ function createBlankProject(title = "Untitled") {
   const projectTitle = normalizeNewProjectTitle(title);
   return {
     title: projectTitle,
+    richTextFormat: normalizeRichTextFormat(window.NarrativeCanvasHost?.getRichTextFormat?.()),
     notes: "",
     variables: defaultVariables(),
     nodeTypes: visibleDefaultNodeTypeList(),
@@ -22430,6 +22815,22 @@ function exportTwee() {
   setStatus("Twee exported.");
 }
 
+function exportDialogic() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const document = buildRuntimeExportDocument();
+  downloadBlob(new Blob([buildDialogicScript(document)], { type: "text/plain;charset=utf-8" }), `${slug}.dtl`);
+  showExportReport(document, "Godot Dialogic 2");
+  setStatus(t("Dialogic timeline exported."));
+}
+
+function exportUnrealConversation() {
+  const slug = slugify(state.project.title || "narrative-canvas");
+  const document = buildRuntimeExportDocument();
+  downloadJsonFile(buildUnrealConversationDocument(document), `${slug}.conversation.json`);
+  showExportReport(document, "Unreal CommonConversation");
+  setStatus(t("Unreal conversation adapter exported."));
+}
+
 function exportCharactersMarkdown() {
   downloadBlob(new Blob([buildCharactersMarkdown()], { type: "text/markdown;charset=utf-8" }), "Narrative-Library.md");
   setStatus(t("Narrative Library Markdown exported."));
@@ -22489,6 +22890,8 @@ async function exportAll() {
       { name: `${slug}.yarn`, blob: new Blob([buildYarnScript(runtimeDocument)], { type: "text/plain;charset=utf-8" }) },
       { name: `${slug}.ink`, blob: new Blob([buildInkScript(runtimeDocument)], { type: "text/plain;charset=utf-8" }) },
       { name: `${slug}.twee`, blob: new Blob([buildTweeScript(runtimeDocument)], { type: "text/plain;charset=utf-8" }) },
+      { name: `${slug}.dtl`, blob: new Blob([buildDialogicScript(runtimeDocument)], { type: "text/plain;charset=utf-8" }) },
+      { name: `${slug}.conversation.json`, blob: new Blob([JSON.stringify(buildUnrealConversationDocument(runtimeDocument), null, 2)], { type: "application/json;charset=utf-8" }) },
       { name: "Events Sheet.csv", blob: new Blob([buildEventSheetCsv()], { type: "text/csv;charset=utf-8" }) },
       { name: `${slug}-events.json`, blob: new Blob([JSON.stringify(buildEventSheetJsonDocument(), null, 2)], { type: "application/json;charset=utf-8" }) },
       { name: "Node Fields.csv", blob: new Blob([buildNodeFieldsCsv()], { type: "text/csv;charset=utf-8" }) },
@@ -22686,7 +23089,8 @@ function buildRuntimeExportDocument() {
     exportedAt: new Date().toISOString(),
     source: {
       title: state.project.title || "Untitled",
-      notes: state.project.notes || ""
+      notes: state.project.notes || "",
+      richTextFormat: getCurrentRichTextFormat()
     },
     startNodeId: model.startNode?.id || "",
     startNode: model.startNode ? model.nodeNameMap[model.startNode.id] : "",
@@ -23668,7 +24072,11 @@ function buildYarnScript(document, options = {}) {
     }
     appendYarnNodeEffects(lines, node.effects);
     if (documentSource) lines.push("// narrativeCanvasBody:start");
-    appendTextLines(lines, convertRuntimeTextForFormat(node.body, document, "yarn"));
+    appendTextLines(lines, convertRuntimeTextForFormat(
+      convertNarrativeRichText(node.body, document.source?.richTextFormat, "unity"),
+      document,
+      "yarn"
+    ));
     if (documentSource) lines.push("// narrativeCanvasBody:end");
     appendYarnRouting(lines, node, nodeMap, document, formatContext);
     lines.push("===", "");
@@ -23693,7 +24101,11 @@ function buildInkScript(document, options = {}) {
     lines.push(`=== ${node.slug} ===`);
     appendInkNodeEffects(lines, node.effects);
     if (documentSource) lines.push("// narrativeCanvasBody:start");
-    appendTextLines(lines, convertRuntimeTextForFormat(getInkNodeBody(node), document, "ink"));
+    appendTextLines(lines, convertRuntimeTextForFormat(
+      convertNarrativeRichText(getInkNodeBody(node), document.source?.richTextFormat, "unity"),
+      document,
+      "ink"
+    ));
     if (documentSource) lines.push("// narrativeCanvasBody:end");
     appendInkRouting(lines, node, nodeMap, document, formatContext);
     lines.push("");
@@ -23714,12 +24126,164 @@ function buildTweeScript(document, options = {}) {
     }
     appendTweeNodeEffects(lines, node.effects);
     if (documentSource) lines.push("<!-- narrativeCanvasBody:start -->");
-    appendTextLines(lines, convertRuntimeTextForFormat(node.body, document, "twee"));
+    appendTextLines(lines, convertRuntimeTextForFormat(
+      convertNarrativeRichText(node.body, document.source?.richTextFormat, "html"),
+      document,
+      "twee"
+    ));
     if (documentSource) lines.push("<!-- narrativeCanvasBody:end -->");
     appendTweeRouting(lines, node, nodeMap, document, formatContext);
     lines.push("");
   });
   return lines.join("\n").trimEnd() + "\n";
+}
+
+function formatDialogicCondition(expression) {
+  let source = normalizeOptionalString(expression).trim();
+  if (!source) return "";
+  source = source
+    .replace(/===/g, "==")
+    .replace(/!==/g, "!=")
+    .replace(/&&/g, " and ")
+    .replace(/\|\|/g, " or ");
+  return source.replace(/\b([A-Za-z_][\w.]*)\b/g, (match, key, offset, whole) => {
+    if (["true", "false", "null", "and", "or", "not"].includes(key.toLowerCase())) return match;
+    const previous = whole.slice(0, offset);
+    if ((previous.match(/"/g) || []).length % 2 || (previous.match(/'/g) || []).length % 2) return match;
+    return `{${key}}`;
+  });
+}
+
+function formatDialogicValue(value) {
+  const source = normalizeOptionalString(value).trim();
+  if (!source) return '""';
+  if (/^(true|false|null|-?\d+(?:\.\d+)?)$/i.test(source)) return source;
+  if (/^\{[^}]+\}$/.test(source)) return source;
+  return `"${source.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function formatDialogicEffect(effect) {
+  const key = normalizeOptionalString(effect?.key || effect?.stateKey).trim();
+  if (!key) return `# Unsupported effect: ${normalizeOptionalString(effect?.op || "unknown")}`;
+  const variable = `{${key}}`;
+  const value = formatDialogicValue(effect?.value);
+  const operation = {
+    set: "=",
+    add: "+=",
+    subtract: "-=",
+    append: "+="
+  }[effect?.op];
+  if (operation) return `set ${variable} ${operation} ${value}`;
+  if (effect?.op === "toggle") return `set ${variable} = not ${variable}`;
+  if (effect?.op === "clear") return `set ${variable} = null`;
+  return `# Unsupported effect ${effect?.op || "unknown"} on ${key}`;
+}
+
+function appendDialogicNodeBody(lines, node, document, indent = "") {
+  const format = normalizeRichTextFormat(document?.source?.richTextFormat);
+  const body = convertNarrativeRichText(node.body || "", format, "bbcode");
+  String(body).split(/\r?\n/).forEach((line) => {
+    if (line.trim()) lines.push(`${indent}${line}`);
+  });
+}
+
+function buildDialogicScript(document) {
+  const lines = [
+    `# Exported from Narrative Canvas: ${document.source?.title || "Untitled"}`,
+    "# Target: Dialogic 2 timeline text (.dtl)",
+    ""
+  ];
+  const nodes = Array.isArray(document.nodes) ? document.nodes : [];
+  for (const node of nodes) {
+    lines.push(`label ${node.slug} (${String(node.title || node.slug).replace(/[()\r\n]/g, " ")})`);
+    const requirement = formatDialogicCondition(node.requirements);
+    const bodyIndent = requirement ? "\t" : "";
+    if (requirement) lines.push(`if ${requirement}:`);
+    (node.effects || []).forEach((effect) => lines.push(`${bodyIndent}${formatDialogicEffect(effect)}`));
+    appendDialogicNodeBody(lines, node, document, bodyIndent);
+    if (node.choices?.length) {
+      for (const choice of node.choices) {
+        const condition = formatDialogicCondition(choice.condition);
+        lines.push(`${bodyIndent}- ${choice.label || "Continue"}${condition ? ` | [if ${condition}]` : ""}`);
+        const choiceIndent = `${bodyIndent}\t`;
+        (choice.effects || []).forEach((effect) => lines.push(`${choiceIndent}${formatDialogicEffect(effect)}`));
+        if (choice.target) lines.push(`${choiceIndent}jump ${choice.target}`);
+      }
+    } else if (node.next?.length) {
+      for (const transition of node.next) {
+        const condition = formatDialogicCondition(transition.condition);
+        if (condition) {
+          lines.push(`${bodyIndent}if ${condition}:`);
+          if (transition.target) lines.push(`${bodyIndent}\tjump ${transition.target}`);
+        } else if (transition.target) {
+          lines.push(`${bodyIndent}jump ${transition.target}`);
+        }
+      }
+    } else {
+      lines.push(`${bodyIndent}[end_timeline]`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+function buildUnrealConversationDocument(document) {
+  const sourceFormat = normalizeRichTextFormat(document?.source?.richTextFormat);
+  return {
+    format: "narrative-canvas-unreal-conversation",
+    version: 1,
+    target: {
+      engine: "Unreal Engine",
+      system: "CommonConversation",
+      integration: "adapter-import",
+      note: "CommonConversation assets are UPrimaryDataAsset graphs; import this JSON with a Narrative Canvas editor utility or custom importer."
+    },
+    source: {
+      title: document?.source?.title || "Untitled",
+      exportedAt: document?.exportedAt || new Date().toISOString(),
+      richTextFormat: "unreal"
+    },
+    richTextStyles: {
+      NCBold: "bold",
+      NCItalic: "italic",
+      NCStrike: "strikethrough",
+      NCCode: "inline-code",
+      NCCodeBlock: "code-block",
+      NCHighlight: "highlight",
+      NCColor: "text-color decorator; read the value metadata",
+      NCLink: "hyperlink decorator; read the href metadata",
+      NCH1: "heading-1",
+      NCH2: "heading-2",
+      NCH3: "heading-3",
+      NCQuote: "quote"
+    },
+    entryPoints: (document?.nodes || [])
+      .filter((node) => node.type === "Entry")
+      .map((node) => ({ tag: node.slug, nodeId: node.id })),
+    defaultEntry: document?.startNode || "",
+    variables: cloneRuntimeExportValue(document?.variables || {}),
+    participants: cloneRuntimeExportValue(document?.characters || []),
+    nodes: (document?.nodes || []).map((node) => ({
+      id: node.id,
+      name: node.slug,
+      title: node.title,
+      type: node.type,
+      text: convertNarrativeRichText(node.body || "", sourceFormat, "unreal"),
+      requirements: node.requirements || "",
+      effects: cloneRuntimeExportValue(node.effects || []),
+      choices: (node.choices || []).map((choice) => ({
+        id: choice.id || "",
+        text: convertNarrativeRichText(choice.label || "", sourceFormat, "unreal"),
+        target: choice.target || "",
+        targetId: choice.targetId || "",
+        condition: choice.condition || "",
+        effects: cloneRuntimeExportValue(choice.effects || [])
+      })),
+      transitions: cloneRuntimeExportValue(node.next || []),
+      cast: cloneRuntimeExportValue(node.cast || []),
+      customFields: cloneRuntimeExportValue(node.customFields || {})
+    }))
+  };
 }
 
 function getDocumentSourceNodeTitle(runtimeNode) {
@@ -24222,7 +24786,9 @@ function buildStoryMarkdown(document, options = {}) {
   ];
   if (document.source?.notes) {
     lines.push("> Source notes");
-    String(document.source.notes).split(/\r?\n/).forEach((line) => lines.push(`> ${line}`));
+    convertNarrativeRichText(document.source.notes, document.source?.richTextFormat, "markdown")
+      .split(/\r?\n/)
+      .forEach((line) => lines.push(`> ${line}`));
     lines.push("");
   }
   const variables = Object.entries(document.variables || {});
@@ -24241,7 +24807,7 @@ function buildStoryMarkdown(document, options = {}) {
     if (node.cast?.length) lines.push(`cast: ${node.cast.map((entry) => entry.name).filter(Boolean).join(", ")}`);
     lines.push("");
     if (documentSource) lines.push("<!-- narrativeCanvasBody:start -->");
-    appendStoryMarkdownBody(lines, node.body);
+    appendStoryMarkdownBody(lines, convertNarrativeRichText(node.body, document.source?.richTextFormat, "markdown"));
     if (documentSource) lines.push("<!-- narrativeCanvasBody:end -->", "");
     appendStoryMarkdownEffects(lines, node.effects, "effects");
     appendStoryMarkdownChoices(lines, node, nodeMap);
@@ -24355,13 +24921,17 @@ function buildExportProfileDocument(runtimeDocument = buildRuntimeExportDocument
       { id: "runtime-json", name: `${slug}-runtime.json`, role: "runtime", format: "narrative-canvas-runtime", schema: "docs/runtime-json.schema.json" },
       { id: "yarn", name: `${slug}.yarn`, role: "engine-script", format: "yarn-spinner" },
       { id: "ink", name: `${slug}.ink`, role: "engine-script", format: "ink" },
-      { id: "twee", name: `${slug}.twee`, role: "engine-script", format: "twee-3-sugarcube" }
+      { id: "twee", name: `${slug}.twee`, role: "engine-script", format: "twee-3-sugarcube" },
+      { id: "dialogic", name: `${slug}.dtl`, role: "engine-script", format: "dialogic-2-timeline" },
+      { id: "unreal-conversation", name: `${slug}.conversation.json`, role: "engine-adapter", format: "narrative-canvas-unreal-conversation" }
     ],
     targets: [
       { id: "runtime-json", label: "Runtime JSON", fileId: "runtime-json", consumer: "custom-loader", schema: "docs/runtime-json.schema.json" },
       { id: "yarn", label: "Yarn Spinner", fileId: "yarn", consumer: "ysc" },
       { id: "ink", label: "Ink", fileId: "ink", consumer: "inklecate" },
-      { id: "twee", label: "Twee / Twine", fileId: "twee", consumer: "Tweego / SugarCube" }
+      { id: "twee", label: "Twee / Twine", fileId: "twee", consumer: "Tweego / SugarCube" },
+      { id: "dialogic", label: "Godot Dialogic 2", fileId: "dialogic", consumer: "Dialogic .dtl" },
+      { id: "unreal-conversation", label: "Unreal CommonConversation", fileId: "unreal-conversation", consumer: "Narrative Canvas UE importer" }
     ],
     mappings: {
       variables: filterTransientVisitVariableMap(report.variableNameMap || {}),
@@ -25105,6 +25675,7 @@ function buildProjectFromStoryMarkdown(source) {
   return {
     title: parsed.title || "Imported Story",
     workflowMode: WORKFLOW_MODE_TEXT_SOURCE,
+    richTextFormat: "markdown",
     notes: "Imported from Story Markdown.",
     variables: {},
     script: {
@@ -26336,6 +26907,11 @@ function normalizePlayHistoryLimit(value) {
   return PLAY_HISTORY_LIMIT_OPTIONS.includes(number) ? number : DEFAULT_PLAY_HISTORY_LIMIT;
 }
 
+function normalizeRichTextFormat(value) {
+  const format = normalizeOptionalString(value).trim().toLowerCase();
+  return RICH_TEXT_FORMAT_VALUES.has(format) ? format : DEFAULT_RICH_TEXT_FORMAT;
+}
+
 function normalizeProject(project) {
   const nodeTypesList = normalizeProjectNodeTypes(project.nodeTypes, project.customNodeTypes);
   const nodeTypeTemplates = new Map(nodeTypesList.map((typeDef) => [typeDef.type, getNodeTypeTemplate(typeDef)]));
@@ -26346,6 +26922,7 @@ function normalizeProject(project) {
     workflowMode: normalizeWorkflowMode(project.workflowMode || project.sourceMode || project.mode),
     notes: project.notes || "",
     playHistoryLimit: normalizePlayHistoryLimit(project.playHistoryLimit),
+    richTextFormat: normalizeRichTextFormat(project.richTextFormat),
     variables: normalizeVariablesObject(project.variables),
     script: normalizeScriptConfig(project.script),
     eventSheet,
@@ -27308,8 +27885,77 @@ function focusCanvasOnPreviewNode(node) {
 }
 
 function openPreview() {
+  const entries = getPreviewEntryNodes();
+  if (entries.length > 1) {
+    openPreviewEntrySelector(entries);
+    return;
+  }
+
   const previewPath = getPreviewPath();
   const entry = getPreviewStartNode(previewPath);
+  if (!entry) {
+    setStatus("No nodes to play.");
+    return;
+  }
+  startPreviewSession(entry);
+}
+
+function getPreviewEntryNodes() {
+  return state.project.nodes
+    .filter((node) => node.type === "Entry" && !isFrameNode(node))
+    .slice()
+    .sort(compareRawNodePosition);
+}
+
+function openPreviewEntrySelector(entries = getPreviewEntryNodes()) {
+  const liveEntries = [];
+  const seen = new Set();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const current = getNode(entry?.id);
+    if (!current || current.type !== "Entry" || isFrameNode(current) || seen.has(current.id)) return;
+    seen.add(current.id);
+    liveEntries.push(current);
+  });
+  resetPreviewSessionState();
+  state.project.variables = normalizeVariablesObject(state.project.variables);
+  openPreviewPanel();
+  dom.playTitle.textContent = t("Choose a system to play");
+  dom.playBody.innerHTML = `
+    <section class="play-entry-selector" aria-label="${escapeAttr(t("System entries"))}">
+      <span class="play-entry-selector-kicker">${escapeHtml(t("System entries"))}</span>
+      <h3>${escapeHtml(t("Choose a system to play"))}</h3>
+      <p>${escapeHtml(t("This canvas has {count} Entry nodes. Choose the system you want to play.", { count: liveEntries.length }))}</p>
+    </section>
+  `;
+  dom.playActions.innerHTML = liveEntries.map((entry, index) => renderPreviewEntryOption(entry, index)).join("");
+  const scroller = getPreviewScroller();
+  if (scroller) scroller.scrollTop = 0;
+}
+
+function refreshOpenPreviewEntrySelector() {
+  if (!dom.playDialog?.open || !dom.playBody?.querySelector(".play-entry-selector")) return;
+  openPreviewEntrySelector(getPreviewEntryNodes());
+}
+
+function renderPreviewEntryOption(entry, index = 0) {
+  const title = getNodeDisplayTitle(entry, t("Entry"));
+  const snippet = formatNodeSnippet(entry);
+  const detail = snippet === "No text"
+    ? `${getNodeTypeLabel(entry.type)} ${getNodeDisplayId(entry)}`
+    : `${getNodeTypeLabel(entry.type)} ${getNodeDisplayId(entry)} · ${snippet}`;
+  return `
+    <button class="play-action play-choice-action play-entry-option" type="button" data-action="play-select-entry" data-node-id="${escapeAttr(entry.id)}">
+      <span class="play-entry-option-number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span>
+      <span class="play-entry-option-copy">
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(detail)}</small>
+      </span>
+      <span class="play-entry-option-arrow" aria-hidden="true">→</span>
+    </button>
+  `;
+}
+
+function startPreviewSession(entry) {
   if (!entry) {
     setStatus("No nodes to play.");
     return;
@@ -27628,7 +28274,9 @@ function renderNarrativeMarkdown(text) {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
     .replace(/~~([^~]+)~~/g, "<del>$1</del>")
-    .replace(/==([^=]+)==/g, "<mark>$1</mark>");
+    .replace(/==([^=]+)==/g, "<mark>$1</mark>")
+    .replace(/\{color:(#[0-9a-f]{6})\}(.+?)\{\/color\}/gi, '<span style="color:$1">$2</span>')
+    .replace(/\{highlight:(#[0-9a-f]{6})\}(.+?)\{\/highlight\}/gi, '<mark style="background-color:$1">$2</mark>');
   const lines = source.split("\n");
   const out = [];
   let listItems = null;
@@ -27650,7 +28298,7 @@ function renderNarrativeMarkdown(text) {
     if (taskMatch) {
       flushOrdered();
       const checked = taskMatch[1].toLowerCase() === "x";
-      (listItems ||= []).push(`<li class="nc-md-task"><input type="checkbox" disabled${checked ? " checked" : ""}>${inline(taskMatch[2])}</li>`);
+      (listItems ||= []).push(`<li class="nc-md-task" data-nc-task="${checked ? "true" : "false"}"><input type="checkbox" disabled${checked ? " checked" : ""}>${inline(taskMatch[2])}</li>`);
       continue;
     }
     const listMatch = line.match(/^\s*-\s+(.*)$/);
@@ -27663,9 +28311,9 @@ function renderNarrativeMarkdown(text) {
     const h2 = line.match(/^##\s+(.*)$/);
     const h1 = line.match(/^#\s+(.*)$/);
     const quote = line.match(/^>\s+(.*)$/);
-    if (h3) out.push(`<h5>${inline(h3[1])}</h5>`);
-    else if (h2) out.push(`<h4>${inline(h2[1])}</h4>`);
-    else if (h1) out.push(`<h3>${inline(h1[1])}</h3>`);
+    if (h3) out.push(`<h3>${inline(h3[1])}</h3>`);
+    else if (h2) out.push(`<h2>${inline(h2[1])}</h2>`);
+    else if (h1) out.push(`<h1>${inline(h1[1])}</h1>`);
     else if (quote) out.push(`<blockquote>${inline(quote[1])}</blockquote>`);
     else if (line.trim() === "") out.push("<br>");
     else out.push(`<p>${inline(line)}</p>`);
@@ -27673,6 +28321,355 @@ function renderNarrativeMarkdown(text) {
   if (codeLines) out.push(`<pre><code>${codeLines.map((code) => escapeHtml(code)).join("\n")}</code></pre>`);
   flushBlocks();
   return out.join("");
+}
+
+function normalizeNarrativeMarkupColor(value, fallback = "") {
+  const match = normalizeOptionalString(value).trim().match(/^(#[0-9a-f]{6})(?:[0-9a-f]{2})?$/i);
+  return match ? match[1].toLowerCase() : fallback;
+}
+
+function safeNarrativeHref(value) {
+  const href = normalizeOptionalString(value).trim();
+  return /^(https?:|mailto:|#)/i.test(href) ? href : "#";
+}
+
+function getNarrativeStyleColor(node, property) {
+  const style = normalizeOptionalString(node?.getAttribute?.("style"));
+  const pattern = property === "background-color"
+    ? /(?:^|;)\s*background-color\s*:\s*(#[0-9a-f]{6})(?:\s*;|$)/i
+    : /(?:^|;)\s*color\s*:\s*(#[0-9a-f]{6})(?:\s*;|$)/i;
+  return style.match(pattern)?.[1] || "";
+}
+
+function sanitizeNarrativeHtml(source) {
+  const template = document.createElement("template");
+  template.innerHTML = String(source ?? "");
+  const renderNode = (node, parentTag = "") => {
+    if (node.nodeType === 3) return escapeHtml(node.nodeValue || "");
+    if (node.nodeType !== 1) return "";
+    const tag = node.tagName.toLowerCase();
+    const children = [...node.childNodes].map((child) => renderNode(child, tag)).join("");
+    if (tag === "script" || tag === "style" || tag === "iframe" || tag === "object") return "";
+    if (tag === "br" || tag === "hr") return `<${tag}>`;
+    if (tag === "input" && node.getAttribute("type") === "checkbox") {
+      return `<input type="checkbox" disabled${node.hasAttribute("checked") ? " checked" : ""}>`;
+    }
+    if (tag === "b" || tag === "strong") return `<strong>${children}</strong>`;
+    if (tag === "i" || tag === "em") return `<em>${children}</em>`;
+    if (tag === "s" || tag === "strike" || tag === "del") return `<del>${children}</del>`;
+    if (tag === "code") return `<code>${children}</code>`;
+    if (tag === "pre") return `<pre>${children}</pre>`;
+    if (tag === "a") {
+      const href = safeNarrativeHref(node.getAttribute("href"));
+      return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${children}</a>`;
+    }
+    if (tag === "span") {
+      const color = normalizeNarrativeMarkupColor(
+        node.dataset.ncColor || getNarrativeStyleColor(node, "color") || node.getAttribute("color")
+      );
+      return color ? `<span style="color:${color}">${children}</span>` : children;
+    }
+    if (tag === "mark") {
+      const color = normalizeNarrativeMarkupColor(
+        node.dataset.ncHighlight || getNarrativeStyleColor(node, "background-color") || node.getAttribute("color")
+      );
+      return `<mark${color ? ` style="background-color:${color}"` : ""}>${children}</mark>`;
+    }
+    if (["h1", "h2", "h3", "blockquote", "ul", "ol", "p"].includes(tag)) {
+      return `<${tag}>${children}</${tag}>`;
+    }
+    if (tag === "li") {
+      const taskValue = node.dataset.ncTask;
+      const taskAttr = taskValue === "true" || taskValue === "false" ? ` data-nc-task="${taskValue}" class="nc-md-task"` : "";
+      return `<li${taskAttr}>${children}</li>`;
+    }
+    if (tag === "div") return `<p>${children}</p>`;
+    return children;
+  };
+  return [...template.content.childNodes].map((node) => renderNode(node)).join("");
+}
+
+function renderNarrativeHtml(text) {
+  return sanitizeNarrativeHtml(text);
+}
+
+function renderNarrativeUnity(text) {
+  let source = String(text ?? "");
+  source = source
+    .replace(/<size=160%>\s*<b>([\s\S]*?)<\/b>\s*<\/size>/gi, "<h1>$1</h1>")
+    .replace(/<size=140%>\s*<b>([\s\S]*?)<\/b>\s*<\/size>/gi, "<h2>$1</h2>")
+    .replace(/<size=120%>\s*<b>([\s\S]*?)<\/b>\s*<\/size>/gi, "<h3>$1</h3>")
+    .replace(/<indent=5%>\s*<i>[“\"]?([\s\S]*?)[”\"]?<\/i>\s*<\/indent>/gi, "<blockquote>$1</blockquote>")
+    .replace(/<indent=5%>\s*•\s*([\s\S]*?)<\/indent>/gi, "<ul><li>$1</li></ul>")
+    .replace(/<indent=5%>\s*\d+\.\s*([\s\S]*?)<\/indent>/gi, "<ol><li>$1</li></ol>")
+    .replace(/<indent=5%>\s*☐\s*([\s\S]*?)<\/indent>/gi, '<ul><li data-nc-task="false">$1</li></ul>')
+    .replace(/<style=["']NCCode["']>([\s\S]*?)<\/style>/gi, (match, content) =>
+      content.includes("\n") ? `<pre><code>${content}</code></pre>` : `<code>${content}</code>`)
+    .replace(/<color=([^>]+)>/gi, '<span data-nc-color="$1">')
+    .replace(/<\/color>/gi, "</span>")
+    .replace(/<mark=([^>]+)>/gi, '<mark data-nc-highlight="$1">')
+    .replace(/<link=["']([^"']+)["']>/gi, '<a href="$1">')
+    .replace(/<\/link>/gi, "</a>")
+    .replace(/^─{4,}$/gm, "<hr>");
+  return sanitizeNarrativeHtml(source);
+}
+
+function renderNarrativeBbcode(text) {
+  let source = escapeHtml(String(text ?? ""));
+  const replacePaired = (pattern, replacement) => {
+    for (let pass = 0; pass < 8 && pattern.test(source); pass += 1) {
+      pattern.lastIndex = 0;
+      source = source.replace(pattern, replacement);
+    }
+    pattern.lastIndex = 0;
+  };
+  replacePaired(/\[font_size=32\]\[b\]([\s\S]*?)\[\/b\]\[\/font_size\]/gi, "<h1>$1</h1>");
+  replacePaired(/\[font_size=26\]\[b\]([\s\S]*?)\[\/b\]\[\/font_size\]/gi, "<h2>$1</h2>");
+  replacePaired(/\[font_size=21\]\[b\]([\s\S]*?)\[\/b\]\[\/font_size\]/gi, "<h3>$1</h3>");
+  replacePaired(/\[quote\]([\s\S]*?)\[\/quote\]/gi, "<blockquote>$1</blockquote>");
+  replacePaired(/\[code\]([\s\S]*?)\[\/code\]/gi, (match, content) =>
+    content.includes("\n") ? `<pre><code>${content}</code></pre>` : `<code>${content}</code>`);
+  replacePaired(/\[url=([^\]]+)\]([\s\S]*?)\[\/url\]/gi, '<a href="$1">$2</a>');
+  replacePaired(/\[color=(#[0-9a-f]{6})\]([\s\S]*?)\[\/color\]/gi, '<span data-nc-color="$1">$2</span>');
+  replacePaired(/\[bgcolor=(#[0-9a-f]{6})\]([\s\S]*?)\[\/bgcolor\]/gi, '<mark data-nc-highlight="$1">$2</mark>');
+  replacePaired(/\[b\]([\s\S]*?)\[\/b\]/gi, "<strong>$1</strong>");
+  replacePaired(/\[i\]([\s\S]*?)\[\/i\]/gi, "<em>$1</em>");
+  replacePaired(/\[s\]([\s\S]*?)\[\/s\]/gi, "<del>$1</del>");
+  replacePaired(/\[li\]([\s\S]*?)\[\/li\]/gi, "<li>$1</li>");
+  replacePaired(/\[ul\]([\s\S]*?)\[\/ul\]/gi, "<ul>$1</ul>");
+  replacePaired(/\[ol\]([\s\S]*?)\[\/ol\]/gi, "<ol>$1</ol>");
+  source = source.replace(/^─{4,}$/gm, "<hr>");
+  return sanitizeNarrativeHtml(source);
+}
+
+function parseUnrealTag(token) {
+  const match = token.match(/^<([A-Za-z][\w]*)([^>]*)>$/);
+  if (!match) return null;
+  const attrs = {};
+  match[2].replace(/([\w-]+)=["']([^"']*)["']/g, (whole, key, value) => {
+    attrs[key.toLowerCase()] = value;
+    return whole;
+  });
+  return { tag: match[1], attrs, children: [] };
+}
+
+function renderNarrativeUnreal(text) {
+  const root = { tag: "root", attrs: {}, children: [] };
+  const stack = [root];
+  const source = String(text ?? "");
+  let cursor = 0;
+  const tokens = source.matchAll(/<[^>]*>/g);
+  for (const match of tokens) {
+    if (match.index > cursor) stack.at(-1).children.push({ text: source.slice(cursor, match.index) });
+    const token = match[0];
+    if (token === "</>") {
+      if (stack.length > 1) stack.pop();
+    } else {
+      const entry = parseUnrealTag(token);
+      if (entry) {
+        stack.at(-1).children.push(entry);
+        stack.push(entry);
+      } else {
+        stack.at(-1).children.push({ text: token });
+      }
+    }
+    cursor = match.index + token.length;
+  }
+  if (cursor < source.length) stack.at(-1).children.push({ text: source.slice(cursor) });
+  const renderEntry = (entry) => {
+    if (Object.prototype.hasOwnProperty.call(entry, "text")) return escapeHtml(entry.text);
+    const children = entry.children.map(renderEntry).join("");
+    const tag = entry.tag.toLowerCase();
+    if (tag === "root") return children;
+    if (tag === "ncbold") return `<strong>${children}</strong>`;
+    if (tag === "ncitalic") return `<em>${children}</em>`;
+    if (tag === "ncstrike") return `<del>${children}</del>`;
+    if (tag === "nccode") return `<code>${children}</code>`;
+    if (tag === "nccodeblock") return `<pre><code>${children}</code></pre>`;
+    if (tag === "nchighlight") {
+      const color = normalizeNarrativeMarkupColor(entry.attrs.value);
+      return `<mark${color ? ` style="background-color:${color}"` : ""}>${children}</mark>`;
+    }
+    if (tag === "nccolor") {
+      const color = normalizeNarrativeMarkupColor(entry.attrs.value);
+      return color ? `<span style="color:${color}">${children}</span>` : children;
+    }
+    if (tag === "nclink") return `<a href="${escapeAttr(safeNarrativeHref(entry.attrs.href))}">${children}</a>`;
+    if (tag === "nch1" || tag === "nch2" || tag === "nch3") return `<h${tag.at(-1)}>${children}</h${tag.at(-1)}>`;
+    if (tag === "ncquote") return `<blockquote>${children}</blockquote>`;
+    if (tag === "ncitem") return `<li>${children}</li>`;
+    if (tag === "nclist" || tag === "nctasklist") return `<ul>${children}</ul>`;
+    if (tag === "ncorderedlist") return `<ol>${children}</ol>`;
+    if (tag === "ncdivider") return "<hr>";
+    return children;
+  };
+  return sanitizeNarrativeHtml(renderEntry(root));
+}
+
+function renderNarrativeRichText(text, format = getCurrentRichTextFormat()) {
+  const normalized = normalizeRichTextFormat(format);
+  if (normalized === "html") return renderNarrativeHtml(text);
+  if (normalized === "unity") return renderNarrativeUnity(text);
+  if (normalized === "bbcode") return renderNarrativeBbcode(text);
+  if (normalized === "unreal") return renderNarrativeUnreal(text);
+  return renderNarrativeMarkdown(text);
+}
+
+function getCanonicalNodeColor(node, kind) {
+  const value = kind === "highlight"
+    ? node.dataset?.ncHighlight || getNarrativeStyleColor(node, "background-color")
+    : node.dataset?.ncColor || getNarrativeStyleColor(node, "color");
+  return normalizeNarrativeMarkupColor(value);
+}
+
+function serializeNarrativeHtml(html, format) {
+  const target = normalizeRichTextFormat(format);
+  if (target === "html") return sanitizeNarrativeHtml(html);
+  const template = document.createElement("template");
+  template.innerHTML = sanitizeNarrativeHtml(html);
+  const textValue = (node) => node.textContent || "";
+  const children = (node, context = {}) => [...node.childNodes].map((child) => serializeNode(child, context)).join("");
+  const serializeList = (node, ordered, context) => {
+    const items = [...node.children].filter((child) => child.tagName?.toLowerCase() === "li");
+    if (target === "markdown") {
+      return items.map((item, index) => {
+        const task = item.dataset.ncTask;
+        const prefix = task != null ? `- [${task === "true" ? "x" : " "}] ` : ordered ? `${index + 1}. ` : "- ";
+        return `${prefix}${children(item, context).replace(/^<input[^>]*>/, "")}`;
+      }).join("\n");
+    }
+    if (target === "unity") {
+      return items.map((item, index) => {
+        const task = item.dataset.ncTask;
+        const prefix = task != null ? (task === "true" ? "☑ " : "☐ ") : ordered ? `${index + 1}. ` : "• ";
+        return `<indent=5%>${prefix}${children(item, context).replace(/^<input[^>]*>/, "")}</indent>`;
+      }).join("\n");
+    }
+    if (target === "bbcode") {
+      const tag = ordered ? "ol" : "ul";
+      return `[${tag}]${items.map((item) => {
+        const task = item.dataset.ncTask;
+        const prefix = task != null ? (task === "true" ? "☑ " : "☐ ") : "";
+        return `[li]${prefix}${children(item, context).replace(/^<input[^>]*>/, "")}[/li]`;
+      }).join("")}[/${tag}]`;
+    }
+    const tag = ordered ? "NCOrderedList" : items.some((item) => item.dataset.ncTask != null) ? "NCTaskList" : "NCList";
+    return `<${tag}>${items.map((item) => {
+      const task = item.dataset.ncTask;
+      const prefix = task != null ? (task === "true" ? "☑ " : "☐ ") : "";
+      return `<NCItem>${prefix}${children(item, context).replace(/^<input[^>]*>/, "")}</>`;
+    }).join("")}</>`;
+  };
+  const serializeNode = (node, context = {}) => {
+    if (node.nodeType === 3) return node.nodeValue || "";
+    if (node.nodeType !== 1) return "";
+    const tag = node.tagName.toLowerCase();
+    const inner = children(node, context);
+    if (tag === "input") return "";
+    if (tag === "br") return "\n";
+    if (tag === "hr") return target === "markdown" ? "---" : target === "unreal" ? "<NCDivider></>" : "────────────────";
+    if (tag === "p") return inner;
+    if (tag === "h1" || tag === "h2" || tag === "h3") {
+      const level = Number(tag.at(-1));
+      if (target === "markdown") return `${"#".repeat(level)} ${inner}`;
+      if (target === "unity") return `<size=${[0, "160%", "140%", "120%"][level]}><b>${inner}</b></size>`;
+      if (target === "bbcode") return `[font_size=${[0, 32, 26, 21][level]}][b]${inner}[/b][/font_size]`;
+      return `<NCH${level}>${inner}</>`;
+    }
+    if (tag === "blockquote") {
+      if (target === "markdown") return textValue(node).split("\n").map((line) => `> ${line}`).join("\n");
+      if (target === "unity") return `<indent=5%><i>“${inner}”</i></indent>`;
+      if (target === "bbcode") return `[quote]${inner}[/quote]`;
+      return `<NCQuote>${inner}</>`;
+    }
+    if (tag === "ul" || tag === "ol") return serializeList(node, tag === "ol", context);
+    if (tag === "li") return inner;
+    if (tag === "pre") {
+      const code = textValue(node);
+      if (target === "markdown") return `\`\`\`\n${code}\n\`\`\``;
+      if (target === "unity") return `<style="NCCode">${code}</style>`;
+      if (target === "bbcode") return `[code]${code}[/code]`;
+      return `<NCCodeBlock>${code}</>`;
+    }
+    if (tag === "strong") {
+      if (target === "markdown") return `**${inner}**`;
+      if (target === "unity") return `<b>${inner}</b>`;
+      if (target === "bbcode") return `[b]${inner}[/b]`;
+      return `<NCBold>${inner}</>`;
+    }
+    if (tag === "em") {
+      if (target === "markdown") return `*${inner}*`;
+      if (target === "unity") return `<i>${inner}</i>`;
+      if (target === "bbcode") return `[i]${inner}[/i]`;
+      return `<NCItalic>${inner}</>`;
+    }
+    if (tag === "del") {
+      if (target === "markdown") return `~~${inner}~~`;
+      if (target === "unity") return `<s>${inner}</s>`;
+      if (target === "bbcode") return `[s]${inner}[/s]`;
+      return `<NCStrike>${inner}</>`;
+    }
+    if (tag === "code") {
+      if (node.parentElement?.tagName?.toLowerCase() === "pre") return inner;
+      if (target === "markdown") return `\`${inner}\``;
+      if (target === "unity") return `<style="NCCode">${inner}</style>`;
+      if (target === "bbcode") return `[code]${inner}[/code]`;
+      return `<NCCode>${inner}</>`;
+    }
+    if (tag === "a") {
+      const href = safeNarrativeHref(node.getAttribute("href"));
+      if (target === "markdown") return `[${inner}](${href})`;
+      if (target === "unity") return `<link="${href}">${inner}</link>`;
+      if (target === "bbcode") return `[url=${href}]${inner}[/url]`;
+      return `<NCLink href="${href}">${inner}</>`;
+    }
+    if (tag === "span") {
+      const color = getCanonicalNodeColor(node, "text");
+      if (!color) return inner;
+      if (target === "markdown") return `{color:${color}}${inner}{/color}`;
+      if (target === "unity") return `<color=${color}>${inner}</color>`;
+      if (target === "bbcode") return `[color=${color}]${inner}[/color]`;
+      return `<NCColor value="${color}">${inner}</>`;
+    }
+    if (tag === "mark") {
+      const color = getCanonicalNodeColor(node, "highlight");
+      if (target === "markdown") return color ? `{highlight:${color}}${inner}{/highlight}` : `==${inner}==`;
+      if (target === "unity") return `<mark=${color || "#ffff00"}80>${inner}</mark>`;
+      if (target === "bbcode") return `[bgcolor=${color || "#ffd43b"}]${inner}[/bgcolor]`;
+      return `<NCHighlight${color ? ` value="${color}"` : ""}>${inner}</>`;
+    }
+    return inner;
+  };
+  const blockTags = new Set(["p", "h1", "h2", "h3", "blockquote", "ul", "ol", "pre", "hr"]);
+  let output = "";
+  let previousWasBlock = false;
+  for (const node of template.content.childNodes) {
+    const part = serializeNode(node);
+    if (!part) continue;
+    const isBlock = node.nodeType === 1 && blockTags.has(node.tagName.toLowerCase());
+    if (output && (isBlock || previousWasBlock) && !output.endsWith("\n")) output += "\n";
+    output += part;
+    previousWasBlock = isBlock;
+  }
+  return output.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function convertNarrativeRichText(text, fromFormat, toFormat) {
+  const source = String(text ?? "");
+  if (!source || normalizeRichTextFormat(fromFormat) === normalizeRichTextFormat(toFormat)) return source;
+  return serializeNarrativeHtml(renderNarrativeRichText(source, fromFormat), toFormat);
+}
+
+function convertProjectRichText(fromFormat, toFormat) {
+  state.project.notes = convertNarrativeRichText(state.project.notes, fromFormat, toFormat);
+  for (const node of state.project.nodes || []) {
+    node.body = convertNarrativeRichText(node.body, fromFormat, toFormat);
+    if (Array.isArray(node.turns)) {
+      for (const turn of node.turns) {
+        turn.line = convertNarrativeRichText(turn.line, fromFormat, toFormat);
+      }
+    }
+  }
 }
 
 // Linked image previews (the ones enabled on the node card) also show on play cards.
@@ -27716,7 +28713,7 @@ function renderPreviewHistoryCard(node, step, index) {
           <span>${index + 1}</span>
         </div>
         <h4>${escapeHtml(title)}</h4>
-        <div class="play-body-text">${turns.length ? `<p>${escapeHtml(body)}</p>` : renderNarrativeMarkdown(body)}</div>
+        <div class="play-body-text">${renderNarrativeRichText(body)}</div>
         ${renderPlayCardImages(node)}
         ${canRestore ? `
           <button class="play-history-jump" type="button" data-action="play-history-jump" data-play-step-index="${index}" title="${escapeAttr(t("Rewind the story to this card. Later steps are discarded."))}">
@@ -27805,7 +28802,7 @@ function renderPreviewNode(nodeId, options = {}) {
         <span>${pageNumber} / ${pageTotal}</span>
       </div>
       <h3>${escapeHtml(runtimeTitle)}</h3>
-      <div class="play-body-text">${dialogTurns.length ? `<p>${escapeHtml(runtimeBody)}</p>` : renderNarrativeMarkdown(runtimeBody)}</div>
+      <div class="play-body-text">${renderNarrativeRichText(runtimeBody)}</div>
       ${renderPlayCardImages(node)}
       ${dialogTurns.length ? `<div class="play-meta"><span>${escapeHtml(t("Line"))} ${dialogTurnIndex + 1} / ${dialogTurns.length}</span></div>` : ""}
       ${customFields}
@@ -27862,12 +28859,7 @@ function renderPreviewNode(nodeId, options = {}) {
   if (nextLinks.length > 1) {
     clearPlayChoiceTimer();
     dom.playActions.innerHTML = previousButton + manualActionButtons + nextLinks.map((link, index) => {
-      const rawLabel = normalizeOptionalString(link.label).trim();
-      const target = getNode(link.to);
-      const generic = !rawLabel || /^(?:continue|next|next page)$/i.test(rawLabel);
-      const label = generic
-        ? (target?.title || t("Branch {number}", { number: index + 1 }))
-        : rawLabel;
+      const label = getPreviewBranchLabel(link, index);
       return `<button class="play-action play-choice-action" type="button" data-action="play-next" data-node-id="${escapeAttr(link.to)}">${escapeHtml(label)}</button>`;
     }).join("");
     return;
@@ -27879,6 +28871,15 @@ function renderPreviewNode(nodeId, options = {}) {
   dom.playActions.innerHTML = previousButton + manualActionButtons + (nextId
     ? `<button class="play-action primary" type="button" data-action="play-next" data-node-id="${escapeAttr(nextId)}">${escapeHtml(t("Next page"))}</button>`
     : `<button class="play-action" type="button" data-action="restart-play">${escapeHtml(t("Restart"))}</button>`);
+}
+
+function getPreviewBranchLabel(link, index = 0) {
+  const rawLabel = normalizeOptionalString(link?.label).trim();
+  const target = getNode(link?.to);
+  const generic = !rawLabel || /^(?:continue|next|next page)$/i.test(rawLabel);
+  return generic
+    ? (target?.title || t("Branch {number}", { number: index + 1 }))
+    : rawLabel;
 }
 
 function clearPlayChoiceTimer() {
@@ -29573,8 +30574,8 @@ function renameVariableReferences(oldKey, newKey) {
 }
 
 function getReachableStory() {
-  const entry = state.project.nodes.find((node) => node.type === "Entry");
-  if (!entry) return [];
+  const entries = getPreviewEntryNodes();
+  if (!entries.length) return [];
   const seen = new Set();
   const ordered = [];
   const walk = (node) => {
@@ -29583,7 +30584,7 @@ function getReachableStory() {
     ordered.push(node);
     getOutgoing(node.id).forEach((link) => walk(getNode(link.to)));
   };
-  walk(entry);
+  entries.forEach(walk);
   return ordered;
 }
 

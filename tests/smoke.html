@@ -643,6 +643,7 @@
         assert(`${label}: pinned inspector stays open on outside click`, !overlay.hidden && overlay.querySelector("#nodePanel"));
         click(doc.querySelector(".inspector-tab[data-panel='project']"));
         assert(`${label}: pinned inspector allows editing another sidebar panel`, !overlay.hidden && overlay.querySelector("#nodePanel.active") && doc.querySelector(".sidebar-right #projectPanel.active"));
+        assert(`${label}: Project panel omits the duplicate rich-text language selector`, !doc.querySelector(".sidebar-right #projectPanel [data-project-field='richTextFormat']"));
         const playHistoryLimit = doc.querySelector(".sidebar-right #projectPanel [data-project-field='playHistoryLimit']");
         assert(`${label}: Play history defaults to 30 cards`, playHistoryLimit?.value === "30");
         setControlValue(win, playHistoryLimit, "10");
@@ -1962,11 +1963,23 @@
           assert(`${label}: large editor offers a formatting toolbar`, Boolean(doc.querySelector("#expandEditorDialog .expand-editor-toolbar [data-action='expand-editor-format']")));
           const toolbarFormats = [...doc.querySelectorAll("#expandEditorDialog .expand-editor-toolbar [data-action='expand-editor-format']")].map((b) => b.dataset.format);
           assert(`${label}: toolbar covers the extended markdown set`, ["bold","italic","strike","code","highlight","link","h1","h2","h3","quote","list","ordered","task","codeblock","divider"].every((f) => toolbarFormats.includes(f)), toolbarFormats.join(","));
+          const richTextFormatSelect = doc.querySelector("#expandEditorDialog [data-expand-rich-text-format]");
+          assert(`${label}: large editor offers a rich-text language selector`, richTextFormatSelect?.value === "markdown", richTextFormatSelect?.value);
           setControlValue(win, expandInput, "Large body");
           expandInput.focus();
           expandInput.setSelectionRange(0, 5);
           click(doc.querySelector("#expandEditorDialog [data-action='expand-editor-format'][data-format='bold']"));
           assert(`${label}: toolbar wraps the selection in bold markdown`, expandInput.value === "**Large** body", expandInput.value);
+          setControlValue(win, richTextFormatSelect, "html");
+          await waitFor(`${label}: editor selector converts current rich text to HTML`, () => expandInput.value.includes("<strong>Large</strong>") && win.NarrativeCanvasApp.getSavedState()?.project?.richTextFormat === "html", 4000, () => expandInput.value);
+          assert(`${label}: whole toolbar identifies the HTML language`, doc.querySelector("#expandEditorToolbar")?.dataset.richTextFormat === "html" && doc.querySelector("#expandEditorToolbar [data-format='bold']")?.title.includes("<strong>"));
+          setControlValue(win, expandInput, "HTML body");
+          expandInput.setSelectionRange(0, 4);
+          click(doc.querySelector("#expandEditorDialog [data-action='expand-editor-format'][data-format='bold']"));
+          assert(`${label}: toolbar writes HTML after language switch`, expandInput.value === "<strong>HTML</strong> body", expandInput.value);
+          setControlValue(win, richTextFormatSelect, "markdown");
+          await waitFor(`${label}: editor selector converts current rich text back to Markdown`, () => expandInput.value === "**HTML** body" && win.NarrativeCanvasApp.getSavedState()?.project?.richTextFormat === "markdown", 4000, () => expandInput.value);
+          assert(`${label}: whole toolbar returns to Markdown syntax`, doc.querySelector("#expandEditorToolbar")?.dataset.richTextFormat === "markdown" && doc.querySelector("#expandEditorToolbar [data-format='bold']")?.title.includes("**text**"));
           setControlValue(win, expandInput, "Large editor body edit");
           await waitFor(`${label}: node body restored after formatting check`, () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.some((node) => node.body === "Large editor body edit"));
           click(doc.querySelector("#expandEditorDialog [data-action='close-expand-editor']"));
@@ -2249,6 +2262,55 @@
         assert(`${label}: Link hover highlights both endpoint cards`, doc.querySelector(".node[data-node-id='n4']")?.classList.contains("graph-hover-node") && doc.querySelector(".node[data-node-id='n5']")?.classList.contains("graph-hover-node"));
         doc.querySelector("#canvasViewport")?.dispatchEvent(new win.PointerEvent("pointermove", { bubbles: true, pointerId: 54 }));
         assert(`${label}: Graph hover clears over blank canvas`, !doc.querySelector(".graph-hover-node, .graph-hover-link"));
+
+        const ordinaryLinkId = "l3";
+        const ordinaryLinkOriginalLabel = win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === ordinaryLinkId)?.label || "";
+        doc.querySelector(`.link-hitpath[data-link-id='${ordinaryLinkId}']`)?.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, view: win }));
+        await waitFor(`${label}: double-clicking an unlabeled link opens its label editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`)));
+        let linkLabelEditor = doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`);
+        const linkEditorRect = linkLabelEditor?.getBoundingClientRect();
+        assert(`${label}: link label editor remains usable at canvas zoom`, linkEditorRect?.width >= 220 && linkEditorRect?.height >= 32, `${linkEditorRect?.width || 0}x${linkEditorRect?.height || 0}`);
+        setControlInputValue(win, linkLabelEditor, "Continue to choice");
+        linkLabelEditor.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        await waitFor(
+          `${label}: Enter saves an inline link label`,
+          () => win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === ordinaryLinkId)?.label === "Continue to choice"
+            && doc.querySelector(`.link-label[data-link-id='${ordinaryLinkId}']`)?.textContent === "Continue to choice"
+        );
+        doc.querySelector(`.link-label[data-link-id='${ordinaryLinkId}']`)?.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, view: win }));
+        await waitFor(`${label}: double-clicking an existing link label reopens its editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`)));
+        linkLabelEditor = doc.querySelector(`.link-label-editor[data-link-id='${ordinaryLinkId}']`);
+        setControlInputValue(win, linkLabelEditor, ordinaryLinkOriginalLabel);
+        linkLabelEditor.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        await waitFor(
+          `${label}: an empty inline label clears the link label`,
+          () => (win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === ordinaryLinkId)?.label || "") === ordinaryLinkOriginalLabel
+            && (ordinaryLinkOriginalLabel || !doc.querySelector(`.link-label[data-link-id='${ordinaryLinkId}']`))
+        );
+
+        const choiceInlineLinkId = "l4";
+        const choiceInlineOriginalLabel = win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === choiceInlineLinkId)?.label || "";
+        doc.querySelector(`.link-hitpath[data-link-id='${choiceInlineLinkId}']`)?.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, view: win }));
+        await waitFor(`${label}: Choice link opens the same inline label editor`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${choiceInlineLinkId}']`)));
+        linkLabelEditor = doc.querySelector(`.link-label-editor[data-link-id='${choiceInlineLinkId}']`);
+        setControlInputValue(win, linkLabelEditor, "Choice label from link");
+        linkLabelEditor.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        await waitFor(
+          `${label}: editing a Choice link keeps its option label synchronized`,
+          () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((item) => item.id === "n4")?.choiceOptions?.[0]?.label === "Choice label from link"
+            && win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === choiceInlineLinkId)?.label === "Choice label from link"
+        );
+        doc.querySelector(`.link-label[data-link-id='${choiceInlineLinkId}']`)?.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, view: win }));
+        await waitFor(`${label}: edited Choice link label can be reopened`, () => Boolean(doc.querySelector(`.link-label-editor[data-link-id='${choiceInlineLinkId}']`)));
+        linkLabelEditor = doc.querySelector(`.link-label-editor[data-link-id='${choiceInlineLinkId}']`);
+        setControlInputValue(win, linkLabelEditor, choiceInlineOriginalLabel);
+        linkLabelEditor.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        await waitFor(
+          `${label}: Choice link label can be restored inline`,
+          () => win.NarrativeCanvasApp.getSavedState()?.project?.nodes?.find((item) => item.id === "n4")?.choiceOptions?.[0]?.label === choiceInlineOriginalLabel
+            && win.NarrativeCanvasApp.getSavedState()?.project?.links?.find((item) => item.id === choiceInlineLinkId)?.label === choiceInlineOriginalLabel
+        );
+
         const choicePreview = doc.querySelector(".node[data-node-id='n4'] .node-choice-preview");
         const choicePreviewClones = Array.from({ length: 16 }, () => choicePreview?.lastElementChild?.cloneNode(true)).filter(Boolean);
         choicePreviewClones.forEach((item) => choicePreview.append(item));
@@ -2422,6 +2484,9 @@
         assert("plugin zh: node search placeholder translated", doc.querySelector("#queryInput")?.getAttribute("placeholder") === "查找节点");
         assert("plugin zh: node template options translated", [...(doc.querySelector("#customNodeKind")?.options || [])].map((option) => option.textContent.trim()).join("|") === "基础节点|对话|选择|框架");
         assert("plugin zh: node type dialog template options translated", [...(doc.querySelector("#nodeTypeKindInput")?.options || [])].map((option) => option.textContent.trim()).join("|") === "基础节点|对话|选择|框架");
+        const restoreNodeTypeButton = doc.querySelector(".hidden-node-row .restore-node-type-button");
+        const restoreNodeTypeStyle = restoreNodeTypeButton ? win.getComputedStyle(restoreNodeTypeButton) : null;
+        assert("plugin zh: hidden node restore button stays on one line", restoreNodeTypeButton?.textContent.trim() === "显示" && restoreNodeTypeStyle?.whiteSpace === "nowrap" && restoreNodeTypeButton.getBoundingClientRect().height <= 32);
         win.NarrativeCanvasApp.executeCommand("open-events");
         await wait(80);
         click(doc.querySelector("[data-action='delete-event-column']"));
