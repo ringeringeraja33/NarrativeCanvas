@@ -13226,7 +13226,7 @@ const CANVAS_INDEX_HTML = [
   "    \u003clink rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"./assets/icons/favicon-32x32.png\"\u003e",
   "    \u003clink rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"./assets/icons/apple-touch-icon.png\"\u003e",
   "    \u003clink rel=\"manifest\" href=\"./site.webmanifest\"\u003e",
-  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.4.1-6ce8b827\"\u003e",
+  "    \u003clink rel=\"stylesheet\" href=\"./canvas.css?v=1.4.1-5f4d7811\"\u003e",
   "  \u003c/head\u003e",
   "  \u003cbody\u003e",
   "    \u003cdiv class=\"app-shell\" spellcheck=\"false\"\u003e",
@@ -13832,7 +13832,7 @@ const CANVAS_INDEX_HTML = [
   "      \u003c/section\u003e",
   "    \u003c/dialog\u003e",
   "",
-  "    \u003cscript src=\"./app.js?v=1.4.1-6ce8b827\"\u003e\u003c/script\u003e",
+  "    \u003cscript src=\"./app.js?v=1.4.1-5f4d7811\"\u003e\u003c/script\u003e",
   "  \u003c/body\u003e",
   "\u003c/html\u003e",
 ].join("\n");
@@ -24706,6 +24706,17 @@ function installNarrativeCanvasApp() {
     return getProjectNodeTypes().find((typeDef) => typeDef.type === type) || null;
   }
 
+  function getLinkLabelVisualMetrics(scaleValue = state.view.scale) {
+    const scale = Math.max(CANVAS_MIN_ZOOM, Number(scaleValue) || DEFAULT_CANVAS_ZOOM);
+    const screenFontSize = Math.min(16, Math.max(10, 12 * Math.sqrt(scale)));
+    return {
+      fontSize: screenFontSize / scale,
+      offset: 8 / scale,
+      strokeWidth: 4 / scale,
+      screenFontSize
+    };
+  }
+
   function renderLinks(renderContext = getCanvasRenderContext()) {
     const visibleNodeIds = renderContext.visibleNodeIds;
     const nodeMap = renderContext.nodeMap;
@@ -24747,7 +24758,8 @@ function installNarrativeCanvasApp() {
         `);
       } else if (link.label) {
         const mid = midpoint(fromPoint, toPoint);
-        linkSvg.push(`<text class="link-label" x="${mid.x}" y="${mid.y - 8}" font-size="12" text-anchor="middle" data-link-id="${escapeAttr(link.id)}">${escapeHtml(link.label)}</text>`);
+        const labelMetrics = getLinkLabelVisualMetrics();
+        linkSvg.push(`<text class="link-label" x="${mid.x}" y="${mid.y - labelMetrics.offset}" font-size="${labelMetrics.fontSize}" stroke-width="${labelMetrics.strokeWidth}" text-anchor="middle" data-link-id="${escapeAttr(link.id)}" data-screen-font-size="${labelMetrics.screenFontSize}">${escapeHtml(link.label)}</text>`);
       }
     });
 
@@ -27234,7 +27246,7 @@ function installNarrativeCanvasApp() {
 
   function handleDocumentClickCapture(event) {
     if (event.__narrativeCanvasClickHandled) return;
-    const target = getCanvasCoveredFrameTarget(event) || getComposedEventTarget(event);
+    const target = getCanvasClickEventTarget(event);
     if (target?.closest?.("#aiFloatingButton, [data-action='close-ai-window']")) return;
     if (!isNarrativeCanvasClickDelegateTarget(target)) return;
     syncDomScopeForEventTarget(target);
@@ -27257,12 +27269,12 @@ function installNarrativeCanvasApp() {
   }
 
   function handleDocumentClickEvent(event, retarget = null) {
-    const target = retarget || getCanvasCoveredFrameTarget(event) || event.target;
+    const target = retarget || getCanvasClickEventTarget(event);
     if (!isNarrativeCanvasTarget(target)) return;
     const nodeId = getCanvasNodeIdFromTargetForClick(target, event);
     if (state.ignoreNextCanvasClick) {
       const isCanvasReleaseClick = Boolean(dom.viewport?.contains(target));
-      const isExplicitControl = Boolean(target.closest?.("[data-action], [data-file-id], [data-panel], [data-sidebar-toggle], [data-port]"));
+      const isExplicitControl = Boolean(target.closest?.("[data-action], [data-file-id], [data-panel], [data-sidebar-toggle], [data-port], [data-link-id]"));
       const shouldIgnore = isCanvasReleaseClick
         && !isExplicitControl
         && (state.ignoreNextCanvasClickTargetId == null || state.ignoreNextCanvasClickTargetId === nodeId);
@@ -27357,9 +27369,8 @@ function installNarrativeCanvasApp() {
     }
 
     if (link) {
-      state.selectedLinkId = link.dataset.linkId;
-      clearNodeSelection();
-      renderAll();
+      startInlineLinkLabelEdit(link.dataset.linkId);
+      event.preventDefault();
       return true;
     }
 
@@ -30084,6 +30095,13 @@ function installNarrativeCanvasApp() {
     if (!target?.closest) return false;
     const actionable = target.closest("[data-mention-index], [data-layer-action], [data-sidebar-toggle], [data-action], [data-file-id], [data-panel], [data-port], [data-link-id], [data-node-id], .node[data-node-id], .node-stack[data-node-stack-id]");
     return Boolean(actionable && getNarrativeCanvasScopeForTarget(target));
+  }
+
+  function getCanvasClickEventTarget(event) {
+    const directTarget = getComposedEventTarget(event) || event?.target;
+    const directLink = directTarget?.closest?.("[data-link-id]");
+    if (directLink && dom.linkLayer?.contains(directLink)) return directTarget;
+    return getCanvasCoveredFrameTarget(event) || directTarget;
   }
 
   function getCanvasCoveredFrameTarget(event) {
