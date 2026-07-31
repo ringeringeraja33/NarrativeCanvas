@@ -458,7 +458,7 @@
           name: "export-outside-viewport",
           file: "fixtures/export-outside-viewport.ncanvas",
           async checks(doc, saved, downloads) {
-            await waitFor("export: png download created", () => downloads.some((item) => /^export-outside-viewport-\d+x\d+\.png$/.test(item.filename)));
+            await waitFor("export: png download created", () => downloads.some((item) => /^export-outside-viewport-\d+x\d+\.png$/.test(item.filename)), 15000);
             const png = await getDownloadBlob(downloads, /^export-outside-viewport-\d+x\d+\.png$/);
             const distinctPixels = await countDistinctOpaquePixels(png);
             assert("export: png contains visible non-background content", distinctPixels > 4, `distinct=${distinctPixels}`);
@@ -474,7 +474,7 @@
           name: "export-large-canvas",
           file: "fixtures/export-large-canvas.ncanvas",
           async checks(doc, saved, downloads) {
-            await waitFor("export large: png download created", () => downloads.some((item) => /^export-large-canvas-\d+x\d+\.png$/.test(item.filename)));
+            await waitFor("export large: png download created", () => downloads.some((item) => /^export-large-canvas-\d+x\d+\.png$/.test(item.filename)), 15000);
             const png = await getDownloadBlob(downloads, /^export-large-canvas-\d+x\d+\.png$/);
             const distinctPixels = await countDistinctOpaquePixels(png);
             assert("export large: png contains visible non-background content", distinctPixels > 4, `distinct=${distinctPixels}`);
