@@ -199,7 +199,7 @@ function connectCdp(webSocketUrl) {
   });
 }
 
-async function readTestState(cdp) {
+async function readTestState(cdp, timeoutMs) {
   const attributeName = `data-${statusName}-status`;
   const progressName = `data-${statusName}-progress`;
   const lastTestName = `data-${statusName}-last-test`;
@@ -217,7 +217,7 @@ async function readTestState(cdp) {
   const evaluated = await cdp.call("Runtime.evaluate", {
     expression,
     returnByValue: true
-  });
+  }, timeoutMs);
   if (evaluated?.exceptionDetails) {
     throw new Error(evaluated.exceptionDetails.exception?.description || evaluated.exceptionDetails.text || "Could not read browser test state.");
   }
@@ -290,7 +290,7 @@ async function main() {
 
     while (Date.now() < deadline) {
       if (child.exitCode != null) break;
-      state = await readTestState(cdp);
+      state = await readTestState(cdp, Math.max(1000, deadline - Date.now()));
       if (state.status === "pass" || state.status === "fail") break;
       await delay(200);
     }
