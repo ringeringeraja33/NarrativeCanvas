@@ -6613,6 +6613,7 @@ function renderVisionBoard(kind, id, images, options = {}) {
   const focused = Boolean(options.focused);
   return `
     <div${focused ? " id=\"visionBoardCanvas\"" : ""} class="vision-board-canvas${focused ? " is-focused" : " is-embedded"}" data-vision-board-kind="${escapeAttr(kind)}" data-vision-board-id="${escapeAttr(id)}">
+      ${focused ? "" : `<button class="vision-board-expand-button" type="button" data-action="open-vision-board" data-vision-board-kind="${escapeAttr(kind)}" data-vision-board-id="${escapeAttr(id)}" title="${escapeAttr(t("Focus vision board"))}" aria-label="${escapeAttr(t("Focus vision board"))}"><span aria-hidden="true">⛶</span></button>`}
       ${images.map((image, index) => {
         const imageUrl = host.getVaultResourceUrl(image.path);
         return `
@@ -6676,12 +6677,9 @@ function renderCodexPluginFileFields(character) {
       ` : ""}
       ${renderCodexVaultFileLinks(character)}
       <div class="codex-image-editor${images.length ? " has-image" : ""}${pickerOpen ? " picker-open" : ""}" data-codex-image-drop data-character-id="${escapeAttr(character.id)}">
-        <div class="vision-board-toolbar">
-          ${images.length ? `<strong>${t("Preview images")} <small>${images.length}</small></strong>` : `<span></span>`}
-          <div>
-            <button class="small-button" type="button" data-action="choose-codex-image-file" data-character-id="${escapeAttr(character.id)}">+ ${t("Add images")}</button>
-            ${images.length ? `<button class="small-button" type="button" data-action="open-vision-board" data-vision-board-kind="character" data-vision-board-id="${escapeAttr(character.id)}">${t("Focus")}</button>` : ""}
-          </div>
+        <div class="codex-asset-toolbar vision-board-toolbar">
+          <strong>${t("Preview images")}${images.length ? ` <small>${images.length}</small>` : ""}</strong>
+          <button class="small-button codex-asset-add-button" type="button" data-action="choose-codex-image-file" data-character-id="${escapeAttr(character.id)}">+ ${t("Add images")}</button>
         </div>
         <input data-codex-local-image-input data-character-id="${escapeAttr(character.id)}" type="file" accept="image/*" multiple hidden>
         ${renderVisionBoard("character", character.id, images)}
@@ -6709,7 +6707,13 @@ function renderCodexVaultFileLinks(character) {
   const files = normalizeCodexVaultFiles(character.vaultFiles);
   return `
     <div class="codex-vault-files">
-      <div class="codex-vault-files-header"><span>${t("Vault file")}</span>${files.length ? `<small>${files.length}</small>` : ""}</div>
+      <div class="codex-asset-toolbar">
+        <strong>${t("Vault file")}${files.length ? ` <small>${files.length}</small>` : ""}</strong>
+        <div class="codex-vault-file-input-wrap">
+          <input data-character-vault-file-input data-character-id="${escapeAttr(character.id)}" value="" placeholder="+ ${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Add vault file"))}" aria-autocomplete="list" aria-expanded="false">
+          <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
+        </div>
+      </div>
       ${files.map((path, index) => {
         const parts = path.split("/");
         const name = parts.pop() || path;
@@ -6725,10 +6729,6 @@ function renderCodexVaultFileLinks(character) {
           </div>
         `;
       }).join("")}
-      <div class="codex-vault-file-input-wrap">
-        <input data-character-vault-file-input data-character-id="${escapeAttr(character.id)}" value="" placeholder="${escapeAttr(t("Search or choose a vault file"))}" spellcheck="false" autocomplete="off" role="combobox" aria-label="${escapeAttr(t("Add vault file"))}" aria-autocomplete="list" aria-expanded="false">
-        <div class="vault-file-suggestions" data-vault-file-suggestions hidden role="listbox" aria-label="${escapeAttr(t("Vault file suggestions"))}"></div>
-      </div>
     </div>
   `;
 }
